@@ -25,9 +25,7 @@ space.
     │     fetch → parse → style → layout → paint, page JS, timers
     ├─ curl multi thread + fetch tasks                      (net.c)
     ├─ background compile of large scripts (≤ 2)           (bytecode_cache.c)
-    ├─ image decode tasks (MPEG-1 opened here)              (image.c, video.c)
-    ├─ one video decode thread per MSE stream               (videoworker.c)
-    │     └─ dav1d / libvpx / OpenH264 worker threads      (av1.c, vp9.c, h264.c)
+    ├─ image decode tasks                                   (image.c)
     ├─ JS worker threads: Web Workers, service workers      (js.c)
     ├─ WebSocket and EventSource threads                    (ws.c, eventsource.c)
     ├─ audio mixer thread → SDL3                            (src/audio/audio.c)
@@ -79,13 +77,13 @@ space.
   loaded image, a canvas draw, a scroll or a navigation.
   The view then renders at the next GTK frame-clock tick, and it keeps a
   per-tick callback only while the page animates continuously (CSS
-  animations, animated images or video, `requestAnimationFrame` loops,
+  animations, animated images, `requestAnimationFrame` loops,
   layout the dampener deferred) or a caret blinks. `requestAnimationFrame`
   and CSS animations are sampled at the frame clock's time. Canvas
   drawing repaints without a relayout, and wheel scrolls and resizes that
   arrive while one is in flight are merged into the next request.
 - **Damage tracking** (`damage.c`, `page_session.c`). A canvas draw, an
-  element scroll, an animated image or video frame and a caret blink
+  element scroll, an animated image frame and a caret blink
   report the element they changed, and the frame repaints only those
   boxes' rectangles; a scroll of the page shifts the previous frame and
   paints the rows that came into view plus the `position: fixed`
@@ -107,10 +105,11 @@ space.
   machine: resource selection, `networkState`/`readyState`, `paused`,
   `ended`, `seeking`, `error`, the event sequence from `loadstart` to
   `ended`, the promise `play()` returns, `loop`, `muted`, `volume` and
-  `autoplay` (muted, video, or after a user gesture). Each element gets a
-  player whose backend is the audio mixer for `<audio>` and the decoded
-  frame timeline for `<video>` (plus the mixer for a video's sound
-  track). Commands go straight to the backend; the
+  `autoplay` (muted, or after a user gesture). Each `<audio>` element gets
+  a player whose backend is the audio mixer. Weststar decodes no video: a
+  `<video>` with a source fails with `MEDIA_ERR_SRC_NOT_SUPPORTED` and
+  paints as a dark box (or its CSS background) with its controls, and there
+  is no `MediaSource`. Commands go straight to the backend; the
   controller polls it every 50 ms while something loads or plays and
   turns what it reports into events, `timeupdate` every 250 ms. An
   element removed from the document pauses, a new `src` starts over,
@@ -120,14 +119,10 @@ space.
   `libnorthstar.c` call, so the two cannot disagree.
 - **Audio mixer** (`src/audio/audio.c`) — one worker thread per process
   fetches `<audio>` through `net.c` (or takes bytes already in hand: a
-  `blob:` URL, a `<video>`'s MP2 track), decodes it into memory and mixes
-  every player into the SDL3 device. Media Source Extensions players are
-  streams instead: the media controller decodes AAC or Opus a couple of
-  seconds ahead and pushes PCM into a persistent SDL audio stream, whose
-  playback cursor sets the stream's clock (a straight line in wall time
-  anchored where the device asks for more data, so it advances evenly
-  however the device schedules its callbacks, and never steps back
-  between seeks); headless runs use a silent
+  `blob:` URL), decodes it into memory and mixes every player into the
+  SDL3 device; an MPEG-1 system stream plays its MP2 track. Web Audio
+  pushes rendered PCM into a persistent SDL audio stream instead, whose
+  playback cursor sets the stream's clock; headless runs use a silent
   clock-driven output instead. Each page owns an `NsAudioContext`, and
   `ns_audio_context_status` reports a player's load state, error,
   duration, position and end synchronously. Without SDL3 the build uses
@@ -198,7 +193,7 @@ run of table-internal siblings.
 | WebAssembly JS API (over WAMR's fast interpreter, `subprojects/wamr.wrap`; `-Dwasm`) | `wasm.c`, `subprojects/packagefiles/wamr/` |
 | `WebSocket`, `EventSource` | `ws.c`, `eventsource.c` |
 | IndexedDB | `idb.c` |
-| `getUserMedia` video: V4L2 capture (Linux) and per-site permission | `camera.c` |
+| `getUserMedia` per-site permission (microphone only; a video request finds no device) | `camera.c` |
 | Dedicated workers and service workers, each with its own runtime on its own thread | `js.c` |
 | WebExtension manifests, content scripts, resources, storage and messaging | `ext.c`, `js.c` |
 | Forms: validation, serialization, submission | `forms.c` |
@@ -216,7 +211,7 @@ JS-held handle. `data/js/polyfills.js` is embedded by `src/meson.build`
 (and, on quickjs-ng builds, syntax-checked at build time);
 some page-facing surfaces are assembled there over native hooks rather
 than bound in C, which is why `navigator.mediaDevices.getUserMedia` is
-the polyfill's, not the native stub's. Video capture works on Linux only.
+the polyfill's, not the native stub's. There is no video capture.
 Audio capture does not exist: `mic.c` is a stub, and a granted
 microphone request resolves with a silent track.
 
@@ -244,9 +239,8 @@ partitioning and permission model.
 both for images the page fetches (`engine.c` hands the bytes to
 `ns_image_decode_encoded` and inserts the result on the engine thread) and
 for images looked up on demand; `data:` images layout needs at once, and
-headless runs, decode in place. Moving sources come first: an MPEG-1
-stream becomes a streaming decoder (`video.c`, see [Video](#video)), and
-an animated GIF or an APNG becomes a frame list. Everything else goes
+headless runs, decode in place. An animated GIF or an APNG becomes a
+frame list first. Everything else goes
 down a fixed chain:
 
 1. **`image_ico.c`** — ICO and CUR, unwrapped and handed to Wuffs.
@@ -260,66 +254,15 @@ down a fixed chain:
 Nothing follows. A format none of these cover fails to decode rather
 than falling through to a plugin-loaded decoder.
 
-## Video
-
-`<video>` plays two kinds of source.
-
-**MPEG-1 files.** `video.c` recognises an MPEG-1 Program Stream or
-elementary video stream by its start code and opens one pl_mpeg decoder
-(`ns_video_stream`) over the downloaded bytes. pl_mpeg is vendored and
-already supplies the MP2 audio decoder, and MPEG-1's patents have expired.
-
-The decoder is held by an image-cache entry like an animated GIF's frame
-list, so the image cache's fetch, frame timing, repaint scheduling and
-eviction serve video unchanged. Frames are decoded as the clip plays: on
-each tick `ns_video_stream_show` decodes forward to the frame for the
-current time, or seeks when time jumps back or more than two seconds
-ahead (`plm_seek_frame` for a program stream, rewind and decode for an
-elementary one), and keeps a single texture. Memory is one frame plus the
-clip's bytes whatever its length; a clip larger than
-`NS_VIDEO_MAX_DIMENSION` (4096) on either side is rejected. `paint_video`
-draws the current frame (or a dark placeholder for a source it cannot
-decode) and, for `controls`, the bar on top.
-
-**Media Source Extensions streams**, as streaming sites send them:
-
-| Layer | File(s) | Job |
-|-------|---------|-----|
-| API | `data/js/polyfills.js`, `js_mse.c` | `MediaSource`, `SourceBuffer` (appendBuffer, remove, abort, timestampOffset, sequence mode, append windows, live seekable ranges) and `isTypeSupported`, forwarded to native buffers; `blob:` URLs from `createObjectURL` bind a media element to its source. |
-| Buffers | `mse.c` | One buffer per track: appended bytes are demuxed, frames kept in decode order with presentation times, buffered ranges with small gaps merged, `remove()` dropping dependent frames up to the next keyframe, quotas (300 MB video, 48 MB audio) and muxed audio+video buffers. |
-| Demux | `mp4.c`, `webm.c` | Incremental fragmented MP4 (moov/moof/mdat; av1C, vpcC, avcC, esds, dOps) and WebM/Matroska (SimpleBlock, BlockGroup, unknown sizes). |
-| Video decode | `videodec.c`, `av1.c`, `vp9.c`, `h264.c`, `yuv.c` | AV1 through libdav1d, VP9 through libvpx, H.264 through OpenH264 (each optional); `yuv.c` converts 8–16 bit 4:2:0/4:2:2/4:4:4 BT.601/709 pictures to BGRA. |
-| Decode thread | `videoworker.c`, `video.c` | One worker thread per stream decodes from the nearest keyframe. The engine thread queues about three seconds of coded frames, and the worker converts pictures ahead of the clock while fewer than 48 MB of them (4 to 12) wait to be shown; seeks restart it from a keyframe. dav1d and libvpx use up to four threads of their own. |
-| Presentation | `videolayer.c`, `paint.c`, `page_session.c`, `gtk/procview.c` | A stream's layer holds its current picture and a copy of the frame timeline. Where the video lands on the page unchanged (no transform, opacity group or filter), `paint_video` clears a transparent hole for it and records its rectangle; the view takes the picture for the timeline at each tick of its own frame clock and draws it under the page frame, so overlays such as player controls stay on top. Script, relayouts and paints on the engine thread then hold up neither the picture nor its pace, and a new picture repaints nothing on the engine thread. Elsewhere (in a group, headless, printing) the engine takes the picture on its animation tick and paints it. The picture never moves back except after a seek. |
-| Audio decode | `audiodec.c`, `src/audio/aac.c` | AAC-LC (in-tree, written from ISO/IEC 14496-3) and Opus (libopus, OpusHead pre-skip) to float PCM for the mixer's streaming player. |
-| Controller | `js_media.c` | `readyState` follows the data buffered ahead of the playhead (`waiting`, `canplay`, `playing`), playback stalls and resumes with the buffer, the audio track is decoded about two seconds ahead, and the picture follows the audio clock: a drift is slewed out by moving the frame timeline a quarter of it per poll, at most 2.5 ms (a 5% rate change); a picture more than 0.1 s ahead holds until the sound catches up, and only one more than half a second behind jumps forward. Playback holds until the document has loaded. |
-
-Both kinds become an image whose frame timeline the media controller
-drives: `ns_image_anim_duration`, `ns_image_anim_position`,
-`ns_image_anim_set_paused`, `ns_image_anim_seek`,
-`ns_image_anim_set_loop` and `ns_image_anim_ended` are the whole of the
-picture's playback surface, found by looking the element's source up in
-the image cache. Because that cache is keyed by URL, two `<video>`
-elements with the same source share one timeline. A decoded clip waits
-paused on its first frame; the controller starts it when the page calls
-`play()` or `autoplay` is set and allowed, and it plays once unless
-`loop` is set, then fires `ended`.
-
-A program stream with an MP2 track also opens that track in the page's
-audio context from the same bytes, so nothing downloads twice. `play()`,
-`pause()`, seeking, `volume`, `muted` and `loop` drive both; the picture
-waits until the sound is decoded, then is re-seeked to the mixer's
-position whenever the two drift more than 0.1 s apart.
+## Media types
 
 Unless the `autoplay_enabled` setting is on, media starts only once the
 user has interacted with the page (a click, tap or key press, as in Chrome
 and Firefox): before that, `autoplay` is ignored and `play()` is rejected
-with `NotAllowedError`, muted or not. A `<source>`
-whose `type` the build cannot play is skipped, in layout and in the
-controller alike, and `canPlayType` (`media_types.c`) and
-`MediaSource.isTypeSupported` (`ns_mse_type_supported` in `mse.c`, then
-`media_types.c`) answer from the decoders actually built in. All decoding
-is software decoding on the CPU; there is no hardware video decoding.
+with `NotAllowedError`, muted or not. A `<source>` whose `type` the build
+cannot play is skipped, in layout and in the controller alike, and
+`canPlayType` (`media_types.c`) answers from the audio decoders actually
+built in; a `<video>` can play no type.
 
 ## Printing
 
@@ -372,8 +315,8 @@ Fetched by `meson setup` as pinned subprojects: **lexbor** (HTML parsing
 and the WHATWG URL parser — CSS is the engine's own), **quickjs-ng** (JS;
 `-Djs_engine=quickjs` takes the original **QuickJS** instead). Vendored
 in-tree: **web-text-lib** (text itemization, shaping and line breaking,
-`src/web-text-lib/`), **Wuffs** (images), **pl_mpeg** (MPEG-1 video and
-MP2 audio), **WAMR** (WebAssembly, `subprojects/wamr.wrap`) and **minimp3** (MP3,
+`src/web-text-lib/`), **Wuffs** (images), **pl_mpeg** (the MP2 audio of
+MPEG-1 streams), **WAMR** (WebAssembly, `subprojects/wamr.wrap`) and **minimp3** (MP3,
 `src/audio/minimp3.h`). See
 [`../THIRD-PARTY-LICENSES.md`](../THIRD-PARTY-LICENSES.md).
 
@@ -439,7 +382,7 @@ again and compares the two, warning on any difference;
 | File | Role |
 |------|------|
 | `i18n.c` | UI translation: English-source strings looked up in `data/i18n/*.lang`, one catalogue per language in the OS list with fallback down that list, English last. Built-in about: pages mark strings as `{{Text}}` and expand them with `ns_i18n_expand`. No gettext. |
-| `media_types.c` | The one table of media types the compiled decoders play, which `canPlayType`, `navigator.mediaCapabilities` and `MediaSource.isTypeSupported` all answer from. |
+| `media_types.c` | The one table of media types the compiled decoders play, which `canPlayType` and `navigator.mediaCapabilities` answer from. |
 | `trace.c` | The `--trace=FILE` writer. |
 | `proc_limits.h` | Shell and engine limits: maximum frame size, settle time, zoom range, script-driven redirect cap. |
 | `mat4.h` | 4×4 matrices for CSS 3D transforms. |

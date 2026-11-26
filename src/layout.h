@@ -124,7 +124,6 @@ typedef struct ns_box_media {
     GPtrArray *bg_layer_srcs;
     GPtrArray *bg_layer_images;
     char  *video_src;
-    void  *video;
     char  *video_poster;
     char  *video_audio_src;
     gboolean declared_image_size;

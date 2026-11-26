@@ -64,8 +64,6 @@ gboolean ns_audio_context_open_stream(NsAudioContext *context,
 gboolean ns_audio_context_stream_push(NsAudioContext *context,
                                       const char *token, const float *samples,
                                       int frames, int channels);
-void ns_audio_context_stream_restart(NsAudioContext *context,
-                                     const char *token, double seconds);
 void ns_audio_context_stream_end(NsAudioContext *context, const char *token,
                                  gboolean ended);
 gboolean ns_audio_context_status(NsAudioContext *context, const char *token,

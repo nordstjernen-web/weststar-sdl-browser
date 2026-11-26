@@ -1,4 +1,4 @@
-/* Weststar SDL Browser — webcam enumeration and per-origin camera permission API.
+/* Weststar SDL Browser — per-origin media-capture permission API (getUserMedia).
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -9,14 +9,6 @@
 #include <glib.h>
 
 G_BEGIN_DECLS
-
-typedef struct ns_camera_info {
-    char *device;
-    char *label;
-} ns_camera_info;
-
-GPtrArray  *ns_camera_enumerate(void);
-void        ns_camera_info_free(ns_camera_info *info);
 
 typedef struct ns_js ns_js;
 

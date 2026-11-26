@@ -17,7 +17,7 @@ This is the start of the port. The work is done in stages, each merged to
 | Stage | What | State |
 |-------|------|-------|
 | 1 | Import Northstar without history, rebrand | done |
-| 2 | Remove WebGL, WebGPU and `<video>` | WebGL removed; video in progress |
+| 2 | Remove WebGL, WebGPU and `<video>` | done |
 | 3 | Replace the GTK shell with an SDL3 shell | in progress |
 | 4 | Replace Cairo with an in-tree rasterizer drawing into SDL surfaces | planned |
 
@@ -27,8 +27,9 @@ has been removed and why, and what is left.
 What is deliberately **not** in Weststar for now:
 
 - **WebGL 1/2 and WebGPU.** `canvas.getContext("webgl")` returns `null`.
-- **`<video>`** and Media Source Extensions. `<audio>` still plays through
-  SDL3's audio device.
+- **`<video>`**, Media Source Extensions and camera capture. A `<video>`
+  shows a dark box with its controls; `<audio>` still plays through SDL3's
+  audio device.
 - The GTK-only chrome: developer-tools window, print dialog, file dialogs.
 
 ## Building

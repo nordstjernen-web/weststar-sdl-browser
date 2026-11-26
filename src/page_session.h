@@ -1,5 +1,5 @@
 /* Weststar SDL Browser — one page host session: open page, back/forward cache, last frame.
- * API used by the GTK engine-thread view and headless driver for rendering, input and navigation.
+ * API used by the shell's engine-thread view and headless driver for rendering, input and navigation.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -50,7 +50,6 @@ typedef struct {
     char                *camera;
     char                *download;
     int                  clipboard;
-    GArray              *video_layers;
 } ns_page_frame;
 
 ns_page_session *ns_page_session_new(int max_width, int max_height);
@@ -58,7 +57,6 @@ void ns_page_session_free(ns_page_session *s);
 void ns_page_session_set_wake(ns_page_session *s, ns_page_session_wake_cb cb,
                               gpointer user_data);
 void ns_page_session_set_frame_time(ns_page_session *s, gint64 frame_time_us);
-void ns_page_session_set_video_layers(ns_page_session *s, gboolean enabled);
 
 int  ns_page_session_open(ns_page_session *s, const char *url, int width,
                           int height, int settle_ms, int history,

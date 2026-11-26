@@ -10,7 +10,6 @@
 #include "mainctx.h"
 #include "net.h"
 #include "paint.h"
-#include "videolayer.h"
 #include "trace.h"
 
 #include <cairo.h>
@@ -53,8 +52,6 @@ struct ns_page_session {
     gpointer       wake_data;
     gboolean       rendering;
     gboolean       wake_posted;
-    gboolean       video_layers_enabled;
-    GArray        *video_layers;
 };
 
 typedef struct {
@@ -290,8 +287,6 @@ ns_page_session_free(ns_page_session *s)
         s->cur = NULL;
         ns_browser_close(cur);
     }
-    if (s->video_layers)
-        g_array_free(s->video_layers, TRUE);
     free(s->fb);
     free(s->scratch_fb);
     free(s->verify_fb);
@@ -428,66 +423,7 @@ ns_page_frame_clear(ns_page_frame *frame)
     free(frame->camera);
     free(frame->download);
     free(frame->damage);
-    if (frame->video_layers)
-        g_array_free(frame->video_layers, TRUE);
     memset(frame, 0, sizeof *frame);
-}
-
-static GArray *
-video_layers_new(void)
-{
-    GArray *a = g_array_new(FALSE, TRUE, sizeof(ns_video_layer_rect));
-    g_array_set_clear_func(a, ns_video_layer_rect_clear);
-    return a;
-}
-
-void
-ns_page_session_set_video_layers(ns_page_session *s, gboolean enabled)
-{
-    if (s) s->video_layers_enabled = enabled;
-}
-
-/* Merges painted video layers into the session's set and copies live ones to the frame. */
-static void
-session_merge_video_layers(ns_page_session *s, GArray *painted, gboolean full,
-                           double ox, double oy, ns_page_frame *out)
-{
-    if (!s->video_layers)
-        s->video_layers = video_layers_new();
-    if (full)
-        g_array_set_size(s->video_layers, 0);
-    for (guint i = 0; painted && i < painted->len; i++) {
-        ns_video_layer_rect r = g_array_index(painted, ns_video_layer_rect, i);
-        r.layer = ns_video_layer_ref(r.layer);
-        r.x += ox;
-        r.y += oy;
-        guint j = 0;
-        while (j < s->video_layers->len &&
-               g_array_index(s->video_layers, ns_video_layer_rect, j).layer !=
-                   r.layer)
-            j++;
-        if (j < s->video_layers->len)
-            g_array_remove_index(s->video_layers, j);
-        g_array_append_val(s->video_layers, r);
-    }
-    for (guint i = 0; i < s->video_layers->len;) {
-        if (ns_video_layer_detached(
-                g_array_index(s->video_layers, ns_video_layer_rect, i).layer))
-            g_array_remove_index(s->video_layers, i);
-        else
-            i++;
-    }
-    if (s->video_layers->len == 0)
-        return;
-    out->video_layers = video_layers_new();
-    for (guint i = 0; i < s->video_layers->len; i++) {
-        ns_video_layer_rect r =
-            g_array_index(s->video_layers, ns_video_layer_rect, i);
-        r.layer = ns_video_layer_ref(r.layer);
-        r.x -= ox;
-        r.y -= oy;
-        g_array_append_val(out->video_layers, r);
-    }
 }
 
 /* Reads NS_DAMAGE once: 0 disables partial repaint, "verify" checks it, default enables it. */
@@ -846,11 +782,6 @@ ns_page_session_render(ns_page_session *s, int width, int height,
         region = NULL;
         unchanged = 1;
     }
-    GArray *video_painted = s->video_layers_enabled && !unchanged
-        ? video_layers_new() : NULL;
-    if (video_painted)
-        ns_paint_set_video_layers(video_painted);
-    gboolean video_full = !region;
     if (!unchanged) {
         phase_start = ns_trace_now();
         int painted;
@@ -882,14 +813,6 @@ ns_page_session_render(ns_page_session *s, int width, int height,
             g_clear_pointer(&out->damage, free);
         }
     }
-    if (video_painted)
-        ns_paint_set_video_layers(NULL);
-    if (s->video_layers_enabled)
-        session_merge_video_layers(s, video_painted, !unchanged && video_full,
-                                   (double)sx * scale, (double)sy * scale,
-                                   out);
-    if (video_painted)
-        g_array_free(video_painted, TRUE);
     out->gen = s->frame_gen;
     out->ok = 1;
     out->width = vw;

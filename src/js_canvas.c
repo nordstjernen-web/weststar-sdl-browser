@@ -2367,10 +2367,6 @@ ns_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h
             }
         }
     }
-    if (!tex && ns_node_is_tag(n, NS_TAG_VIDEO)) {
-        const ns_image *im = ns_media_video_image(js, n);
-        if (im && im->texture) { tex = im->texture; source = im; }
-    }
     ns_image *im_cache = NULL;
     if (!tex && ns_node_is_tag(n, NS_TAG_IMG)) {
         const ns_image *im = ns_js_image_for_node(js, n);

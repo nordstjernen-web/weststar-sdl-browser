@@ -108,7 +108,7 @@ image_changed(damage_walk *w, gconstpointer img)
     return TRUE;
 }
 
-/* Returns TRUE if any image, background, marker or video the box paints has changed. */
+/* Returns TRUE if any image, background or marker the box paints has changed. */
 static gboolean
 box_uses_changed_image(damage_walk *w, const ns_box *b)
 {
@@ -119,7 +119,6 @@ box_uses_changed_image(damage_walk *w, const ns_box *b)
         used |= image_changed(w, m->bg_image);
         used |= image_changed(w, m->marker_image);
         used |= image_changed(w, m->border_image);
-        used |= image_changed(w, m->video);
         if (m->bg_layer_images)
             for (guint i = 0; i < m->bg_layer_images->len; i++)
                 used |= image_changed(w,

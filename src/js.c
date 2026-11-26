@@ -44,8 +44,6 @@
 #include "image.h"
 #include "media_types.h"
 #include "trace.h"
-#include "video.h"
-#include "videoworker.h"
 #include "js_date.h"
 #include "js_intl.h"
 #include "js_realm.h"
@@ -10846,12 +10844,15 @@ ns_cam_caller_may_use(ns_js *js, JSContext *ctx)
     return TRUE;
 }
 
-/* Camera permission request: "granted", "denied" or "pending". */
+/* Media-capture permission request (wantVideo, wantAudio): "granted",
+ * "denied" or "pending". Weststar has no camera, so video is denied. */
 static JSValue
 ns_cam_request(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
-    (void)this_val; (void)argc; (void)argv;
+    (void)this_val;
     ns_js *js = js_from_ctx(ctx);
+    if (argc >= 1 && JS_ToBool(ctx, argv[0]) > 0)
+        return JS_NewString(ctx, "denied");
     if (!ns_cam_caller_may_use(js, ctx))
         return JS_NewString(ctx, "denied");
     int d = ns_camera_permission(js);
@@ -10900,64 +10901,6 @@ ns_audio_get_byte_frequency(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
-/* Label of the first camera, only for callers granted camera access. */
-static JSValue
-ns_cam_label(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
-    (void)this_val; (void)argc; (void)argv;
-    /* Device names are only for a caller that has been granted the camera. */
-    ns_js *js = js_from_ctx(ctx);
-    if (!ns_cam_caller_may_use(js, ctx) || !ns_camera_permission_granted(js))
-        return JS_NewString(ctx, "");
-    GPtrArray *list = ns_camera_enumerate();
-    const char *label = NULL;
-    if (list->len > 0)
-        label = ((ns_camera_info *)g_ptr_array_index(list, 0))->label;
-    JSValue r = JS_NewString(ctx, label ? label : "Camera");
-    for (guint i = 0; i < list->len; i++)
-        ns_camera_info_free(g_ptr_array_index(list, i));
-    g_ptr_array_free(list, TRUE);
-    return r;
-}
-
-/* enumerateDevices() for cameras; one anonymous entry until permission is granted. */
-static JSValue
-ns_cam_enumerate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
-    (void)this_val; (void)argc; (void)argv;
-    /* Before the camera is granted a page learns only that one exists:
-     * a single entry with no id and no label, as other browsers do. */
-    ns_js *js = js_from_ctx(ctx);
-    gboolean granted = ns_cam_caller_may_use(js, ctx) &&
-                       ns_camera_permission_granted(js);
-    GPtrArray *list = ns_camera_enumerate();
-    JSValue arr = JS_NewArray(ctx);
-    uint32_t n = 0;
-    if (!granted && list->len > 0) {
-        JSValue dev = JS_NewObject(ctx);
-        JS_SetPropertyStr(ctx, dev, "deviceId", JS_NewString(ctx, ""));
-        JS_SetPropertyStr(ctx, dev, "groupId", JS_NewString(ctx, ""));
-        JS_SetPropertyStr(ctx, dev, "kind", JS_NewString(ctx, "videoinput"));
-        JS_SetPropertyStr(ctx, dev, "label", JS_NewString(ctx, ""));
-        JS_SetPropertyUint32(ctx, arr, n++, dev);
-    }
-    for (guint i = 0; i < list->len; i++) {
-        ns_camera_info *info = g_ptr_array_index(list, i);
-        if (!granted) {
-            ns_camera_info_free(info);
-            continue;
-        }
-        JSValue dev = JS_NewObject(ctx);
-        JS_SetPropertyStr(ctx, dev, "deviceId", JS_NewString(ctx, info->device));
-        JS_SetPropertyStr(ctx, dev, "groupId", JS_NewString(ctx, info->device));
-        JS_SetPropertyStr(ctx, dev, "kind", JS_NewString(ctx, "videoinput"));
-        JS_SetPropertyStr(ctx, dev, "label", JS_NewString(ctx, info->label));
-        JS_SetPropertyUint32(ctx, arr, n++, dev);
-        ns_camera_info_free(info);
-    }
-    g_ptr_array_free(list, TRUE);
-    return arr;
-}
 
 /* StorageManager.estimate() stub: zero usage, 2 GiB quota. */
 static JSValue
@@ -11597,7 +11540,9 @@ ns_eme_request_access(JSContext *ctx, JSValueConst this_val,
     return promise;
 }
 
-/* MediaCapabilities check: file/MSE config with exactly one supported track. */
+/* MediaCapabilities check: a file config with exactly one supported track.
+ * There is no Media Source Extensions and no video decoding, so a
+ * "media-source" config or a video track is never supported. */
 static gboolean
 ns_media_config_supported(JSContext *ctx, JSValueConst config)
 {
@@ -11605,11 +11550,9 @@ ns_media_config_supported(JSContext *ctx, JSValueConst config)
     JSValue type_v = JS_GetPropertyStr(ctx, config, "type");
     const char *type_s = JS_IsString(type_v) ? JS_ToCString(ctx, type_v) : NULL;
     gboolean file = type_s && strcmp(type_s, "file") == 0;
-    gboolean mse = type_s && strcmp(type_s, "media-source") == 0;
     if (type_s) JS_FreeCString(ctx, type_s);
     JS_FreeValue(ctx, type_v);
-    if (!file && !mse) return FALSE;
-    ns_media_source source = mse ? NS_MEDIA_SOURCE_MSE : NS_MEDIA_SOURCE_FILE;
+    if (!file) return FALSE;
 
     JSValue video_v = JS_GetPropertyStr(ctx, config, "video");
     JSValue audio_v = JS_GetPropertyStr(ctx, config, "audio");
@@ -11622,8 +11565,8 @@ ns_media_config_supported(JSContext *ctx, JSValueConst config)
         const char *cs = JS_IsString(ct) ? JS_ToCString(ctx, ct) : NULL;
         if (cs) {
             supported = ns_media_type_support(
-                cs, has_video ? NS_MEDIA_ELEMENT_VIDEO : NS_MEDIA_ELEMENT_AUDIO,
-                source) != NS_MEDIA_CANNOT;
+                cs, has_video ? NS_MEDIA_ELEMENT_VIDEO : NS_MEDIA_ELEMENT_AUDIO)
+                != NS_MEDIA_CANNOT;
             JS_FreeCString(ctx, cs);
         }
         JS_FreeValue(ctx, ct);
@@ -11631,45 +11574,6 @@ ns_media_config_supported(JSContext *ctx, JSValueConst config)
     JS_FreeValue(ctx, video_v);
     JS_FreeValue(ctx, audio_v);
     return supported;
-}
-
-/* Estimates smooth playback by comparing pixel rate with measured decode capacity. */
-static gboolean
-ns_media_config_smooth(JSContext *ctx, JSValueConst config)
-{
-    if (!JS_IsObject(config)) return TRUE;
-    JSValue video = JS_GetPropertyStr(ctx, config, "video");
-    if (!JS_IsObject(video)) {
-        JS_FreeValue(ctx, video);
-        return TRUE;
-    }
-    double w = 0, h = 0, fps = 0;
-    JSValue v = JS_GetPropertyStr(ctx, video, "width");
-    JS_ToFloat64(ctx, &w, v);
-    JS_FreeValue(ctx, v);
-    v = JS_GetPropertyStr(ctx, video, "height");
-    JS_ToFloat64(ctx, &h, v);
-    JS_FreeValue(ctx, v);
-    v = JS_GetPropertyStr(ctx, video, "framerate");
-    if (JS_IsString(v)) {
-        const char *str = JS_ToCString(ctx, v);
-        if (str) {
-            char *end = NULL;
-            double num = g_ascii_strtod(str, &end);
-            double den = end && *end == '/' ? g_ascii_strtod(end + 1, NULL) : 1;
-            fps = den > 0 ? num / den : num;
-            JS_FreeCString(ctx, str);
-        }
-    } else {
-        JS_ToFloat64(ctx, &fps, v);
-    }
-    JS_FreeValue(ctx, v);
-    JS_FreeValue(ctx, video);
-    if (!(w > 0) || !(h > 0)) return TRUE;
-    if (!(fps > 0)) fps = 30;
-    double measured = ns_video_decode_pixel_rate();
-    double capacity = measured > 0 ? measured * 0.7 : 1920.0 * 1080.0 * 30.0;
-    return w * h * fps <= capacity;
 }
 
 /* Resolves a MediaCapabilitiesInfo with supported/smooth flags. */
@@ -11682,9 +11586,7 @@ ns_media_capabilities_result(JSContext *ctx, int argc, JSValueConst *argv,
     if (JS_IsException(promise)) return promise;
     JSValue info = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, info, "supported",      JS_NewBool(ctx, supported));
-    JS_SetPropertyStr(ctx, info, "smooth",
-                      JS_NewBool(ctx, supported && argc >= 1 &&
-                                      ns_media_config_smooth(ctx, argv[0])));
+    JS_SetPropertyStr(ctx, info, "smooth",      JS_NewBool(ctx, supported));
     JS_SetPropertyStr(ctx, info, "powerEfficient", JS_FALSE);
     JS_SetPropertyStr(ctx, info, "supportedConfiguration",
                       argc >= 1 && JS_IsObject(argv[0])
@@ -11713,21 +11615,6 @@ ns_media_capabilities_encoding_info(JSContext *ctx, JSValueConst this_val,
 {
     (void)this_val;
     return ns_media_capabilities_result(ctx, argc, argv, FALSE);
-}
-
-/* MediaSource.isTypeSupported() via the MSE media type table. */
-static JSValue
-ns_media_source_type_supported(JSContext *ctx, JSValueConst this_val,
-                               int argc, JSValueConst *argv)
-{
-    (void)this_val;
-    if (argc < 1 || !JS_IsString(argv[0])) return JS_FALSE;
-    const char *type = JS_ToCString(ctx, argv[0]);
-    if (!type) return JS_FALSE;
-    gboolean ok = ns_media_type_support(type, NS_MEDIA_ELEMENT_AUDIO,
-                                        NS_MEDIA_SOURCE_MSE) != NS_MEDIA_CANNOT;
-    JS_FreeCString(ctx, type);
-    return JS_NewBool(ctx, ok);
 }
 
 /* setMediaKeys(): resolves for null, otherwise rejects since EME is unsupported. */
@@ -45245,8 +45132,6 @@ ns_js_image_for_node(ns_js *js, const ns_node *el)
         const ns_box *b = ns_box_find_by_dom(js->layout_root, el);
         if (b && b->media && b->media->image)
             return (const ns_image *)b->media->image;
-        if (b && b->media && b->media->video)
-            return (const ns_image *)b->media->video;
     }
     return NULL;
 }
@@ -46333,7 +46218,7 @@ ns_media_canPlayType(JSContext *ctx, JSValueConst this_val,
     const char *type = JS_ToCString(ctx, argv[0]);
     if (!type) return JS_NewString(ctx, "");
     ns_media_answer answer = ns_media_type_support(
-        type, ns_media_element_kind(this_val), NS_MEDIA_SOURCE_FILE);
+        type, ns_media_element_kind(this_val));
     JS_FreeCString(ctx, type);
     return JS_NewString(ctx, ns_media_answer_string(answer));
 }
@@ -46375,41 +46260,6 @@ ns_time_ranges_edge(JSContext *ctx, JSValueConst this_val,
     if (!ns_time_ranges_index(ctx, argc, argv, magic, len, &idx))
         return JS_EXCEPTION;
     return JS_NewFloat64(ctx, magic == 0 ? 0.0 : dur);
-}
-
-/* TimeRanges start/end over a flat edge array; magic 0 selects start, 1 end. */
-static JSValue
-ns_time_ranges_list_edge(JSContext *ctx, JSValueConst this_val,
-                         int argc, JSValueConst *argv, int magic,
-                         JSValue *func_data)
-{
-    (void)this_val;
-    int32_t len = 0;
-    JS_ToInt32(ctx, &len, func_data[1]);
-    uint32_t idx = 0;
-    if (!ns_time_ranges_index(ctx, argc, argv, magic, len, &idx))
-        return JS_EXCEPTION;
-    return JS_GetPropertyUint32(ctx, func_data[0], idx * 2 + (uint32_t)magic);
-}
-
-/* Builds a TimeRanges object from n_ranges start/end pairs in edges. */
-JSValue
-ns_media_time_ranges_from(JSContext *ctx, const double *edges, guint n_ranges)
-{
-    JSValue obj = JS_NewObject(ctx);
-    ns_obj_adopt_global_proto(ctx, obj, "TimeRanges");
-    JS_SetPropertyStr(ctx, obj, "length", JS_NewInt32(ctx, (int)n_ranges));
-    JSValue list = JS_NewArray(ctx);
-    for (guint i = 0; i < n_ranges * 2; i++)
-        JS_SetPropertyUint32(ctx, list, i, JS_NewFloat64(ctx, edges[i]));
-    JSValue data[2] = { list, JS_NewInt32(ctx, (int)n_ranges) };
-    JS_SetPropertyStr(ctx, obj, "start",
-        JS_NewCFunctionData(ctx, ns_time_ranges_list_edge, 1, 0, 2, data));
-    JS_SetPropertyStr(ctx, obj, "end",
-        JS_NewCFunctionData(ctx, ns_time_ranges_list_edge, 1, 1, 2, data));
-    JS_FreeValue(ctx, data[0]);
-    JS_FreeValue(ctx, data[1]);
-    return obj;
 }
 
 /* Sets obj's prototype to the global interface iface's prototype, if it exists. */
@@ -46514,25 +46364,19 @@ ns_media_set_defaultPlaybackRate(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
-/* getVideoPlaybackQuality(): real frame counts if known, else estimates 30 fps. */
+/* getVideoPlaybackQuality(): no frames, since no video is decoded. */
 static JSValue
 ns_media_get_video_playback_quality(JSContext *ctx, JSValueConst this_val,
                                     int argc, JSValueConst *argv)
 {
+    (void)this_val;
     (void)argc;
     (void)argv;
-    guint presented = 0, dropped = 0;
-    gboolean counted = ns_media_frame_counts(ctx, this_val, &presented,
-                                             &dropped);
-    double pos = ns_media_position(ctx, this_val);
     JSValue q = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, q, "creationTime",
                       JS_NewFloat64(ctx, ns_perf_now_ms(js_from_ctx(ctx))));
-    JS_SetPropertyStr(ctx, q, "totalVideoFrames",
-                      JS_NewInt32(ctx, counted ? (int)(presented + dropped)
-                                               : (int)(pos * 30.0)));
-    JS_SetPropertyStr(ctx, q, "droppedVideoFrames",
-                      JS_NewInt32(ctx, counted ? (int)dropped : 0));
+    JS_SetPropertyStr(ctx, q, "totalVideoFrames", JS_NewInt32(ctx, 0));
+    JS_SetPropertyStr(ctx, q, "droppedVideoFrames", JS_NewInt32(ctx, 0));
     JS_SetPropertyStr(ctx, q, "corruptedVideoFrames", JS_NewInt32(ctx, 0));
     return q;
 }
@@ -53627,8 +53471,6 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JS_SetPropertyStr(ctx, navigator, "mediaDevices", media_devices);
 
     ns_bind_fn(ctx, global, "__nd_camera_request",   ns_cam_request,   2);
-    ns_bind_fn(ctx, global, "__nd_camera_label",     ns_cam_label,     0);
-    ns_bind_fn(ctx, global, "__nd_camera_enumerate", ns_cam_enumerate, 0);
 
     ns_bind_fn(ctx, navigator, "share",                     ns_returns_rejected, 1);
     ns_bind_fn(ctx, navigator, "canShare",                  ns_returns_undefined,       1);
@@ -53898,10 +53740,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, global, "__nsWptActivate",       ns_wpt_activate,                  0);
     ns_bind_fn(ctx, global, "__ndUrlParts",          ns_window_url_parts_internal,     1);
     ns_bind_fn(ctx, global, "__ndUrlSet",            ns_window_url_set_internal,       3);
-    ns_bind_fn(ctx, global, "__ndMediaSourceTypeSupported",
-               ns_media_source_type_supported, 1);
     ns_bind_fn(ctx, global, "__ndUpdateBlobURL",     ns_window_url_update_object,      2);
-    ns_js_mse_install(ctx, global);
     ns_bind_fn(ctx, global, "__ndChildFrame",        ns_window_child_frame,            1);
 
     ns_bind_ctor(ctx, global, "Event",        ns_event_ctor,        2);
@@ -64056,13 +63895,3 @@ ns_js_eval_source(ns_js *js, const char *src, const char *origin)
     return out;
 }
 
-/* A media element's natural video size changed: relayout around it. */
-void
-ns_js_note_media_size_change(ns_js *js, const ns_node *el)
-{
-    if (!js || !el || !ns_js_node_in_page(js, el)) return;
-    js->mutated = TRUE;
-    ns_css_mark_restyle_dirty((ns_node *)el);
-    if (el->parent) ns_js_note_layout_target(js, el->parent);
-    else ns_js_note_layout_unscoped(js, "video natural size");
-}

@@ -62,7 +62,10 @@ thread also pushes an SDL user event, so the wait ends at once.
 | GTK file dialogs (Save Page, Save as PNG) | `SDL_ShowSaveFileDialog` |
 | Developer tools window | not yet |
 | WebGL (`webgl.c`, `glctx.c`, `glsl_validate.c`) | removed |
-| Video (`video.c`, `av1.c`, `vp9.c`, `h264.c`, `gstvideo.c`, `mfvideo.c`, `mse.c`, `mp4.c`, `webm.c`, `videoworker.c`, `videolayer.c`, …) | removed |
+| Video (`video.c`, `av1.c`, `vp9.c`, `h264.c`, `avc.c`, `yuv.c`, `gstvideo.c`, `mfvideo.c`, `videodec.c`, `videoworker.c`, `videolayer.c`) | removed: a `<video>` fails with `MEDIA_ERR_SRC_NOT_SUPPORTED` and paints as a dark box with its controls; `canPlayType` answers `""` for every video type |
+| Media Source Extensions (`mse.c`, `mp4.c`, `webm.c`, `progressive.c`, `js_mse.c`) and its AAC/Opus decoders (`audiodec.c`, `src/audio/aac.c`) | removed: `MediaSource` and `SourceBuffer` are undefined |
+| Camera capture (V4L2 enumeration in `camera.c`) | removed: `getUserMedia({video})` rejects with `NotFoundError` and `enumerateDevices()` lists nothing; the per-site permission in `camera.c` stays for the (silent) microphone track |
+| The `video_layers` of `ns_page_frame`, `ns_page_session_set_video_layers` and the video compositing in the view | removed |
 | Packaging (Debian, RPM, Arch, MSIX, npm, AppImage) and release CI | removed; to be redone for Weststar |
 
 ## Names

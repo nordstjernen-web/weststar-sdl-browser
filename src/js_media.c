@@ -1,5 +1,6 @@
-/* Weststar SDL Browser — HTMLMediaElement: load, play and pause state machine for audio/video.
- * Drives the audio mixer and decoded or MSE video, A/V sync, media events and play promises.
+/* Weststar SDL Browser — HTMLMediaElement: load, play and pause state machine for audio.
+ * Drives the audio mixer, media events and play promises. A <video> never finds a supported
+ * source: Weststar decodes no video.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -10,28 +11,13 @@
 #include <string.h>
 
 #include "audio/audio.h"
-#include "audiodec.h"
 #include "config.h"
-#include "image.h"
 #include "mainctx.h"
 #include "media_types.h"
-#include "mse.h"
 #include "net.h"
-#include "progressive.h"
-#include "video.h"
-#include "trace.h"
 
 #define NS_MEDIA_POLL_MS 50
 #define NS_MEDIA_TIMEUPDATE_US (250 * 1000)
-#define NS_MEDIA_AV_RESYNC_S 0.5
-#define NS_MEDIA_AV_HOLD_S 0.1
-#define NS_MEDIA_AV_SLEW_US 2500
-#define NS_MEDIA_AV_SLEW_GAIN 0.25
-#define NS_MEDIA_AV_DEADBAND_S 0.004
-#define NS_MEDIA_MSE_AUDIO_AHEAD_S 2.0
-#define NS_MEDIA_MSE_ENOUGH_S 1.0
-#define NS_MEDIA_MSE_FUTURE_S 0.25
-#define NS_MEDIA_MSE_GAP_S 0.15
 #define NS_MEDIA_CONTROLS_BAR_H 32.0
 #define NS_MEDIA_CONTROLS_TIME_W 86.0
 
@@ -79,13 +65,6 @@ typedef struct {
     GPtrArray *play_promises;
     JSValue    pin;
     gint64     last_timeupdate_us;
-    ns_mse_source    *mse;
-    ns_progressive   *progressive;
-    ns_audio_decoder *decoder;
-    double     mse_audio_next;
-    gboolean   mse_waiting;
-    int        reported_width;
-    int        reported_height;
 } ns_media_player;
 
 typedef struct {
@@ -98,9 +77,7 @@ typedef struct {
 
 static void media_poll_ensure(ns_js *js);
 static void media_controls_dirty(ns_media_player *p);
-static void media_mse_restart_audio(ns_media_player *p, double t);
 static void media_internal_pause(ns_media_player *p, gboolean fire_events);
-static void media_check_resize(ns_media_player *p);
 static gboolean media_connected(ns_js *js, const ns_node *node);
 
 gboolean
@@ -391,71 +368,13 @@ ns_media_resolve_src(JSContext *ctx, ns_node *node)
     return abs;
 }
 
-/* The video's decoded animation image from the image cache, if loaded. */
-static ns_image *
-media_video_frames(ns_media_player *p)
-{
-    ns_js *js = p->js;
-    if (!p->video || !p->src || !js->image_cache) return NULL;
-    ns_image *img = ns_image_cache_peek(js->image_cache, p->src);
-    return ns_image_is_animation(img) ? img : NULL;
-}
-
-/* True if the video source failed or loaded as a non-animated image. */
-static gboolean
-media_video_failed(ns_media_player *p)
-{
-    ns_js *js = p->js;
-    if (!p->video || !p->src || !js->image_cache) return FALSE;
-    ns_image *img = ns_image_cache_peek(js->image_cache, p->src);
-    return img && (img->failed ||
-                   (img->loaded && !ns_image_is_animation(img)));
-}
-
-/* Tears down audio, video, MSE, progressive and decoder state for a player. */
+/* Tears down the audio stream for a player. */
 static void
 media_close_backend(ns_media_player *p)
 {
     if (p->fetching && p->js->audio_context)
         ns_audio_context_close(p->js->audio_context, p->token);
     p->fetching = FALSE;
-    ns_image *frames = media_video_frames(p);
-    if (frames) ns_image_anim_set_paused(frames, TRUE, g_get_monotonic_time());
-    if (p->mse) {
-        ns_mse_source_unref(p->mse);
-        p->mse = NULL;
-    }
-    g_clear_pointer(&p->progressive, ns_progressive_free);
-    ns_audio_decoder_free(p->decoder);
-    p->decoder = NULL;
-    p->mse_waiting = FALSE;
-}
-
-/* Attaches an MSE source and registers a video stream for it in the image cache. */
-static void
-media_mse_attach(ns_media_player *p, ns_mse_source *source)
-{
-    p->mse = ns_mse_source_ref(source);
-    p->mse_audio_next = 0.0;
-    p->mse_waiting = FALSE;
-    if (p->video && p->js->image_cache)
-        ns_image_cache_insert_stream(p->js->image_cache, p->src,
-                                     ns_video_stream_new_mse(source));
-}
-
-/* Starts progressive (MSE-backed) video download unless a non-MSE stream exists. */
-static gboolean
-media_start_progressive(ns_media_player *p)
-{
-    ns_js *js = p->js;
-    if (!p->video || !js->image_cache) return FALSE;
-    ns_image *known = ns_image_cache_peek(js->image_cache, p->src);
-    if (known && known->video && !ns_video_stream_is_mse(known->video))
-        return FALSE;
-    p->progressive = ns_progressive_new(p->src, js->current_url,
-                                        ns_js_fetch_policy(js, p->el));
-    media_mse_attach(p, ns_progressive_source(p->progressive));
-    return TRUE;
 }
 
 /* Enters NETWORK_NO_SOURCE with an error, fires error and rejects play promises. */
@@ -513,52 +432,12 @@ media_autoplay_blocked(const ns_media_player *p)
            !ns_js_has_transient_activation(p->js);
 }
 
-/* Autoplay policy: muted, video-only, or after user activation, unless blocked. */
+/* Autoplay policy: muted, or after user activation, unless blocked. */
 static gboolean
 media_autoplay_allowed(const ns_media_player *p)
 {
     if (media_autoplay_blocked(p)) return FALSE;
-    return (p->video && !p->fetching) || media_muted(p) ||
-           p->js->user_ever_activated;
-}
-
-/* Opens the video's embedded audio track in the mixer, if it has one. */
-static void
-media_open_video_audio(ns_media_player *p, ns_image *frames)
-{
-    if (p->fetching || !ns_image_video_has_audio(frames)) return;
-    GBytes *bytes = ns_image_video_bytes(frames);
-    if (!bytes) return;
-    NsAudioContext *audio = media_audio_context(p->js);
-    ns_audio_context_open_bytes(audio, p->token, bytes, FALSE);
-    g_bytes_unref(bytes);
-    ns_audio_context_set_volume(audio, p->token, media_output_volume(p));
-    ns_audio_context_set_loop(audio, p->token, media_looping(p));
-    p->fetching = TRUE;
-}
-
-/* Closes the video's audio stream in the mixer. */
-static void
-media_close_video_audio(ns_media_player *p)
-{
-    if (!p->fetching) return;
-    if (p->js->audio_context)
-        ns_audio_context_close(p->js->audio_context, p->token);
-    p->fetching = FALSE;
-}
-
-/* True when the video's audio stream is ready; closes it if it failed. */
-static gboolean
-media_video_audio_ready(ns_media_player *p, NsAudioStatus *status)
-{
-    if (!p->fetching || !p->js->audio_context) return FALSE;
-    if (!ns_audio_context_status(p->js->audio_context, p->token, status))
-        return FALSE;
-    if (status->state == NS_AUDIO_PLAYER_FAILED) {
-        media_close_video_audio(p);
-        return FALSE;
-    }
-    return status->state == NS_AUDIO_PLAYER_READY;
+    return media_muted(p) || p->js->user_ever_activated;
 }
 
 /* Media element load algorithm: aborts play, resets state and selects a source. */
@@ -585,12 +464,6 @@ media_load(ns_media_player *p)
     p->start_position = 0.0;
     p->duration = NAN;
     p->error = 0;
-    p->reported_width = 0;
-    p->reported_height = 0;
-    if (ns_element_get_attr(p->el, NS_MEDIA_SIZE_ATTR)) {
-        ns_element_remove_attr(p->el, NS_MEDIA_SIZE_ATTR);
-        ns_js_note_media_size_change(p->js, p->el);
-    }
     g_clear_pointer(&p->error_message, g_free);
     g_clear_pointer(&p->src, g_free);
     media_pin(p, FALSE);
@@ -605,18 +478,12 @@ media_load(ns_media_player *p)
     media_queue_task(p, "loadstart");
     JSContext *ctx = p->js->ctx;
     p->src = ctx ? ns_media_resolve_src(ctx, p->el) : NULL;
-    if (!p->src) {
+    if (!p->src || p->video) {
         media_fail_source(p, MEDIA_ERR_SRC_NOT_SUPPORTED,
                           "MEDIA_ELEMENT_ERROR: Format error");
         return;
     }
-    ns_mse_source *source = ns_js_mse_source_for_url(p->js, p->src);
-    if (source || media_start_progressive(p)) {
-        if (source) media_mse_attach(p, source);
-        media_poll_ensure(p->js);
-        return;
-    }
-    gboolean eager = p->video ||
+    gboolean eager =
         ns_element_get_attr(p->el, "autoplay") != NULL ||
         g_strcmp0(ns_element_get_attr(p->el, "preload"), "auto") == 0;
     if (eager) {
@@ -635,7 +502,7 @@ media_page_loaded(const ns_media_player *p)
     return p->js->ready_state >= 2;
 }
 
-/* Starts audio/video output, syncing audio to the video position. */
+/* Starts audio output. */
 static void
 media_backend_play(ns_media_player *p)
 {
@@ -644,79 +511,33 @@ media_backend_play(ns_media_player *p)
         media_poll_ensure(p->js);
         return;
     }
-    if (p->mse && p->ready_state < HAVE_FUTURE_DATA) return;
-    if (p->video) {
-        ns_image *frames = media_video_frames(p);
-        if (!frames) return;
-        gint64 now = g_get_monotonic_time();
-        if (ns_image_anim_ended(frames, now)) ns_image_anim_seek(frames, 0, now);
-        if (p->fetching && p->js->audio_context) {
-            ns_audio_context_seek(p->js->audio_context, p->token,
-                                  ns_image_anim_position(frames, now));
-            ns_audio_context_play(p->js->audio_context, p->token);
-            NsAudioStatus status;
-            if (!media_video_audio_ready(p, &status) && p->fetching) {
-                media_poll_ensure(p->js);
-                return;
-            }
-        }
-        ns_image_anim_set_paused(frames, FALSE, now);
-        ns_js_request_repaint(p->js);
-        return;
-    }
     if (p->js->audio_context)
         ns_audio_context_play(p->js->audio_context, p->token);
 }
 
-/* Pauses video frames and the audio stream. */
+
+/* Pauses the audio stream. */
 static void
 media_backend_pause(ns_media_player *p)
 {
-    if (p->video) {
-        ns_image *frames = media_video_frames(p);
-        if (frames)
-            ns_image_anim_set_paused(frames, TRUE, g_get_monotonic_time());
-        if (p->fetching && p->js->audio_context)
-            ns_audio_context_pause(p->js->audio_context, p->token);
-        return;
-    }
     if (p->fetching && p->js->audio_context)
         ns_audio_context_pause(p->js->audio_context, p->token);
 }
 
-/* Seeks video frames and audio (restarting MSE audio feed) to t seconds. */
+/* Seeks the audio stream to t seconds. */
 static void
 media_backend_seek(ns_media_player *p, double t)
 {
-    if (p->video) {
-        ns_image *frames = media_video_frames(p);
-        if (frames) {
-            ns_image_anim_seek(frames, t, g_get_monotonic_time());
-            ns_js_request_repaint(p->js);
-        }
-        if (p->mse) media_mse_restart_audio(p, t);
-        else if (p->fetching && p->js->audio_context)
-            ns_audio_context_seek(p->js->audio_context, p->token, t);
-        return;
-    }
-    if (p->mse) {
-        media_mse_restart_audio(p, t);
-        return;
-    }
     if (p->fetching && p->js->audio_context)
         ns_audio_context_seek(p->js->audio_context, p->token, t);
 }
 
-/* Current playback position from the video clock or audio status. */
+/* Current playback position from the audio status. */
 static double
 media_current_time(ns_media_player *p)
 {
     if (p->ready_state < HAVE_METADATA) return p->start_position;
-    if (p->video) {
-        ns_image *frames = media_video_frames(p);
-        if (frames) p->position = ns_image_anim_position(frames,
-                                                         g_get_monotonic_time());
-    } else if (p->fetching && p->js->audio_context) {
+    if (p->fetching && p->js->audio_context) {
         NsAudioStatus status;
         if (ns_audio_context_status(p->js->audio_context, p->token, &status) &&
             status.state == NS_AUDIO_PLAYER_READY)
@@ -784,16 +605,7 @@ media_became_ready(ns_media_player *p, double duration)
     media_queue_task(p, "loadeddata");
     media_queue_task(p, "canplay");
     media_queue_task(p, "canplaythrough");
-    if (p->video) {
-        ns_image *frames = media_video_frames(p);
-        if (frames) {
-            gint64 now = g_get_monotonic_time();
-            ns_image_anim_set_loop(frames, media_looping(p), now);
-            ns_image_anim_set_paused(frames, TRUE, now);
-            ns_image_anim_seek(frames, p->start_position, now);
-            media_open_video_audio(p, frames);
-        }
-    } else if (p->start_position > 0 && p->js->audio_context) {
+    if (p->start_position > 0 && p->js->audio_context) {
         ns_audio_context_seek(p->js->audio_context, p->token,
                               p->start_position);
     }
@@ -813,8 +625,6 @@ media_became_ready(ns_media_player *p, double duration)
 static void
 media_reached_end(ns_media_player *p)
 {
-    if (p->video && p->fetching && p->js->audio_context)
-        ns_audio_context_pause(p->js->audio_context, p->token);
     p->position = isnan(p->duration) ? p->position : p->duration;
     p->ended = TRUE;
     media_controls_dirty(p);
@@ -825,261 +635,6 @@ media_reached_end(ns_media_player *p)
         media_queue_task(p, "pause");
     }
     media_queue_task(p, "ended");
-}
-
-/* Resets the MSE audio decoder and stream to start feeding at the frame near t. */
-static void
-media_mse_restart_audio(ns_media_player *p, double t)
-{
-    if (!p->mse || !p->fetching || !p->decoder || !p->js->audio_context) return;
-    ns_mse_buffer *audio = ns_mse_source_track_buffer(p->mse, NS_MSE_TRACK_AUDIO);
-    gssize index = ns_mse_buffer_frame_at(audio, t);
-    if (index < 0) index = ns_mse_buffer_frame_from(audio, t);
-    const ns_mse_frame *frame = index >= 0
-        ? ns_mse_buffer_frame(audio, (guint)index) : NULL;
-    if (frame && frame->pts > t + NS_MEDIA_MSE_GAP_S) {
-        index = -1;
-        frame = NULL;
-    }
-    double start = frame ? frame->pts : t;
-    ns_audio_decoder_reset(p->decoder, index == 0);
-    ns_audio_context_stream_restart(p->js->audio_context, p->token, start);
-    p->mse_audio_next = start;
-}
-
-/* Creates a decoder and mixer stream for the MSE audio track. */
-static void
-media_mse_open_audio(ns_media_player *p)
-{
-    if (p->fetching) return;
-    ns_mse_buffer *audio = ns_mse_source_track_buffer(p->mse, NS_MSE_TRACK_AUDIO);
-    const ns_mp4_track *track = ns_mse_buffer_track(audio);
-    if (!track) return;
-    ns_audio_decoder *decoder = ns_audio_decoder_new(track->codec,
-                                                     track->codec_config,
-                                                     track->channels,
-                                                     track->sample_rate);
-    if (!decoder) return;
-    NsAudioContext *context = media_audio_context(p->js);
-    if (!ns_audio_context_open_stream(context, p->token,
-                                      ns_audio_decoder_sample_rate(decoder),
-                                      ns_audio_decoder_channels(decoder))) {
-        ns_audio_decoder_free(decoder);
-        return;
-    }
-    p->decoder = decoder;
-    p->fetching = TRUE;
-    ns_audio_context_set_volume(context, p->token, media_output_volume(p));
-    media_mse_restart_audio(p, media_current_time(p));
-    if (!p->paused && !p->mse_waiting && media_page_loaded(p))
-        ns_audio_context_play(context, p->token);
-}
-
-/* Decodes MSE audio frames up to a lookahead past position and pushes PCM. */
-static void
-media_mse_feed_audio(ns_media_player *p, double position)
-{
-    if (!p->fetching || !p->decoder) return;
-    gint64 trace_start = ns_trace_now();
-    double trace_from = p->mse_audio_next;
-    ns_mse_buffer *audio = ns_mse_source_track_buffer(p->mse, NS_MSE_TRACK_AUDIO);
-    int channels = ns_audio_decoder_channels(p->decoder);
-    float pcm[NS_AUDIO_DECODER_MAX_FRAMES * 2];
-    while (p->mse_audio_next < position + NS_MEDIA_MSE_AUDIO_AHEAD_S) {
-        gssize index = ns_mse_buffer_frame_at(audio, p->mse_audio_next + 1e-4);
-        if (index < 0) break;
-        const ns_mse_frame *frame = ns_mse_buffer_frame(audio, (guint)index);
-        if (frame->pts + frame->duration <= p->mse_audio_next + 1e-6) {
-            frame = ns_mse_buffer_frame(audio, (guint)index + 1);
-            if (!frame || frame->pts > p->mse_audio_next + NS_MEDIA_MSE_GAP_S) break;
-        }
-        gsize len = 0;
-        const guint8 *data = g_bytes_get_data(frame->data, &len);
-        int frames = ns_audio_decoder_decode(p->decoder, data, len, pcm,
-                                             NS_AUDIO_DECODER_MAX_FRAMES);
-        if (frames > 0)
-            ns_audio_context_stream_push(p->js->audio_context, p->token, pcm,
-                                         frames, channels);
-        p->mse_audio_next = frame->pts + frame->duration;
-    }
-    if (trace_start && p->mse_audio_next > trace_from)
-        ns_trace_completef("media", "audio feed", trace_start,
-                           "%.3f-%.3f s decoded", trace_from,
-                           p->mse_audio_next);
-    guint n = ns_mse_buffer_n_frames(audio);
-    const ns_mse_frame *last = n ? ns_mse_buffer_frame(audio, n - 1) : NULL;
-    ns_audio_context_stream_end(p->js->audio_context, p->token,
-        ns_mse_source_ended(p->mse) && last &&
-        p->mse_audio_next >= last->pts + last->duration - 1e-6);
-}
-
-/* Pauses or resumes video and audio while MSE data is insufficient. */
-static void
-media_mse_stall(ns_media_player *p, gboolean stall)
-{
-    ns_image *frames = media_video_frames(p);
-    gint64 now = g_get_monotonic_time();
-    p->mse_waiting = stall;
-    if (frames) ns_image_anim_set_paused(frames, stall, now);
-    if (p->fetching && p->js->audio_context) {
-        if (stall) ns_audio_context_pause(p->js->audio_context, p->token);
-        else ns_audio_context_play(p->js->audio_context, p->token);
-    }
-    ns_js_request_repaint(p->js);
-}
-
-/* Updates readyState for MSE playback, firing transition events and autoplay. */
-static void
-media_mse_set_ready_state(ns_media_player *p, int state)
-{
-    int old = p->ready_state;
-    if (state == old) return;
-    p->ready_state = state;
-    if (old < HAVE_CURRENT_DATA && state >= HAVE_CURRENT_DATA)
-        media_queue_task(p, "loadeddata");
-    if (old < HAVE_FUTURE_DATA && state >= HAVE_FUTURE_DATA) {
-        media_queue_task(p, "canplay");
-        if (!p->paused) {
-            if (p->mse_waiting) media_mse_stall(p, FALSE);
-            media_notify_playing(p);
-        }
-    }
-    if (old < HAVE_ENOUGH_DATA && state >= HAVE_ENOUGH_DATA) {
-        media_queue_task(p, "canplaythrough");
-        if (p->paused && p->can_autoplay &&
-            ns_element_get_attr(p->el, "autoplay") &&
-            media_autoplay_allowed(p)) {
-            p->autoplaying = TRUE;
-            media_internal_play(p);
-        }
-    }
-}
-
-/* Polls an MSE-backed player: duration, metadata, audio feed, readyState and stalls. */
-static void
-media_mse_poll(ns_media_player *p)
-{
-    ns_mse_source *source = p->mse;
-    double duration = ns_mse_source_duration(source);
-    if (!(isnan(duration) && isnan(p->duration)) && duration != p->duration) {
-        p->duration = duration;
-        media_queue_task(p, "durationchange");
-    }
-    ns_mse_buffer *video = ns_mse_source_track_buffer(source, NS_MSE_TRACK_VIDEO);
-    ns_mse_buffer *audio = ns_mse_source_track_buffer(source, NS_MSE_TRACK_AUDIO);
-    if (p->ready_state < HAVE_METADATA) {
-        if (!ns_mse_buffer_track(video) && !ns_mse_buffer_track(audio)) return;
-        p->ready_state = HAVE_METADATA;
-        p->network_state = NETWORK_IDLE;
-        media_queue_task(p, "loadedmetadata");
-        ns_image *frames = media_video_frames(p);
-        if (frames) {
-            gint64 now = g_get_monotonic_time();
-            ns_image_anim_set_paused(frames, TRUE, now);
-            ns_image_anim_seek(frames, p->start_position, now);
-        }
-        p->position = p->start_position;
-    }
-    media_mse_open_audio(p);
-    double t = media_current_time(p);
-    media_mse_feed_audio(p, t);
-    GArray *ranges = ns_mse_source_buffered(source);
-    double end = -1.0;
-    for (guint i = 0; i + 1 < ranges->len; i += 2) {
-        double start = g_array_index(ranges, double, i);
-        double stop = g_array_index(ranges, double, i + 1);
-        if (t >= start - NS_MEDIA_MSE_GAP_S && t < stop) {
-            end = stop;
-            break;
-        }
-    }
-    g_array_free(ranges, TRUE);
-    gboolean ended = ns_mse_source_ended(source);
-    double ahead = end >= 0 ? end - t : -1.0;
-    int state = ahead >= NS_MEDIA_MSE_ENOUGH_S || (ended && end >= 0)
-        ? HAVE_ENOUGH_DATA
-        : ahead >= NS_MEDIA_MSE_FUTURE_S ? HAVE_FUTURE_DATA
-        : ahead >= 0 ? HAVE_CURRENT_DATA : HAVE_METADATA;
-    if (!media_page_loaded(p) && state > HAVE_CURRENT_DATA)
-        state = HAVE_CURRENT_DATA;
-    media_mse_set_ready_state(p, state);
-    if (p->paused) return;
-    if (ended && !isnan(p->duration) && t >= p->duration - 0.08) {
-        media_reached_end(p);
-        return;
-    }
-    if (state < HAVE_FUTURE_DATA && !ended) {
-        if (!p->mse_waiting) {
-            media_mse_stall(p, TRUE);
-            media_queue_task(p, "waiting");
-        }
-    } else if (p->mse_waiting) {
-        media_mse_stall(p, FALSE);
-        media_notify_playing(p);
-    }
-}
-
-/* Advances a progressive download; on completion swaps in a full video stream. */
-static gboolean
-media_progressive_poll(ns_media_player *p)
-{
-    ns_progressive_state state = ns_progressive_get_state(p->progressive);
-    if (state == NS_PROGRESSIVE_PROBING || state == NS_PROGRESSIVE_READY) {
-        ns_progressive_update(p->progressive, media_current_time(p), !p->paused);
-        return TRUE;
-    }
-    GBytes *body = ns_progressive_take_body(p->progressive);
-    media_close_backend(p);
-    gsize len = 0;
-    const guchar *data = body ? g_bytes_get_data(body, &len) : NULL;
-    ns_video_stream *stream = data ? ns_video_stream_new(data, len) : NULL;
-    if (body) g_bytes_unref(body);
-    if (stream)
-        ns_image_cache_insert_stream(p->js->image_cache, p->src, stream);
-    else
-        media_fail_source(p, MEDIA_ERR_SRC_NOT_SUPPORTED,
-                          "MEDIA_ELEMENT_ERROR: Format error");
-    return FALSE;
-}
-
-/* Keeps video frames in sync with the audio clock by seeking, holding or slewing. */
-static void
-media_video_follow_audio(ns_media_player *p, ns_image *frames, gint64 now)
-{
-    NsAudioStatus status;
-    gboolean ready = media_video_audio_ready(p, &status);
-    if (!ready) {
-        if (!p->fetching && frames->anim_paused) {
-            ns_image_anim_set_paused(frames, FALSE, now);
-            ns_js_request_repaint(p->js);
-        }
-        return;
-    }
-    if (frames->anim_paused) {
-        ns_image_anim_set_paused(frames, FALSE, now);
-        double ahead = ns_image_anim_position(frames, now) - status.position;
-        if (ahead < -NS_MEDIA_AV_RESYNC_S)
-            ns_image_anim_seek(frames, status.position, now);
-        else
-            ns_image_anim_shift(frames, (gint64)(ahead * 1e6));
-        ns_js_request_repaint(p->js);
-        return;
-    }
-    double drift = ns_image_anim_position(frames, now) - status.position;
-    if (!status.playing) {
-        if (drift > NS_MEDIA_AV_HOLD_S)
-            ns_image_anim_shift(frames, (gint64)(drift * 1e6));
-        return;
-    }
-    if (drift < -NS_MEDIA_AV_RESYNC_S) {
-        ns_image_anim_seek(frames, status.position, now);
-    } else if (drift > NS_MEDIA_AV_HOLD_S) {
-        ns_image_anim_shift(frames, (gint64)(drift * 1e6));
-    } else if (fabs(drift) > NS_MEDIA_AV_DEADBAND_S) {
-        double step = CLAMP(drift * NS_MEDIA_AV_SLEW_GAIN * 1e6,
-                            -NS_MEDIA_AV_SLEW_US, NS_MEDIA_AV_SLEW_US);
-        ns_image_anim_shift(frames, (gint64)step);
-    }
 }
 
 /* Polls one player for readiness, end and timeupdate; returns TRUE while still active. */
@@ -1094,74 +649,33 @@ media_poll_player(ns_media_player *p, gint64 now)
         p->held_for_load = FALSE;
         if (!p->paused) media_backend_play(p);
     }
-    if (p->progressive && !media_progressive_poll(p))
-        return p->network_state != NETWORK_NO_SOURCE;
-    if (p->mse) {
-        media_mse_poll(p);
-        if (!p->mse) return FALSE;
-        media_check_resize(p);
-        ns_image *frames = media_video_frames(p);
-        if (!p->paused && frames && !p->mse_waiting)
-            media_video_follow_audio(p, frames, now);
-        p->position = media_current_time(p);
-        if (!p->paused && now - p->last_timeupdate_us >= NS_MEDIA_TIMEUPDATE_US) {
-            p->last_timeupdate_us = now;
-            media_queue_task(p, "timeupdate");
-            media_controls_dirty(p);
-        }
+    if (!p->fetching || !p->js->audio_context)
+        return p->network_state == NETWORK_LOADING;
+    NsAudioStatus status;
+    gboolean known = ns_audio_context_status(p->js->audio_context,
+                                             p->token, &status);
+    if (known && status.state == NS_AUDIO_PLAYER_FAILED) {
+        media_fail_source(p, MEDIA_ERR_SRC_NOT_SUPPORTED,
+            status.error == NS_AUDIO_ERROR_DECODE
+                ? "MEDIA_ELEMENT_ERROR: Format error"
+                : "MEDIA_ELEMENT_ERROR: Network error");
+        return FALSE;
+    }
+    if (p->ready_state < HAVE_METADATA) {
+        if (known && status.state == NS_AUDIO_PLAYER_READY)
+            media_became_ready(p, status.duration);
         return TRUE;
     }
-    if (p->video) {
-        if (p->ready_state < HAVE_METADATA) {
-            ns_image *frames = media_video_frames(p);
-            if (frames) {
-                media_became_ready(p, ns_image_anim_duration(frames));
-            } else if (media_video_failed(p)) {
-                media_fail_source(p, MEDIA_ERR_SRC_NOT_SUPPORTED,
-                                  "MEDIA_ELEMENT_ERROR: Format error");
-                return FALSE;
-            }
-            return p->ready_state < HAVE_METADATA || !p->paused;
-        }
-        media_check_resize(p);
-        ns_image *frames = media_video_frames(p);
-        if (!p->paused && frames) {
-            media_video_follow_audio(p, frames, now);
-            p->position = ns_image_anim_position(frames, now);
-            if (ns_image_anim_ended(frames, now)) {
-                media_reached_end(p);
-                return FALSE;
-            }
-        }
-    } else {
-        if (!p->fetching || !p->js->audio_context)
-            return p->network_state == NETWORK_LOADING;
-        NsAudioStatus status;
-        gboolean known = ns_audio_context_status(p->js->audio_context,
-                                                 p->token, &status);
-        if (known && status.state == NS_AUDIO_PLAYER_FAILED) {
-            media_fail_source(p, MEDIA_ERR_SRC_NOT_SUPPORTED,
-                status.error == NS_AUDIO_ERROR_DECODE
-                    ? "MEDIA_ELEMENT_ERROR: Format error"
-                    : "MEDIA_ELEMENT_ERROR: Network error");
+    if (known && status.state == NS_AUDIO_PLAYER_READY &&
+        status.duration > 0 && status.duration != p->duration) {
+        p->duration = status.duration;
+        media_queue_task(p, "durationchange");
+    }
+    if (!p->paused && known && status.state == NS_AUDIO_PLAYER_READY) {
+        p->position = status.position;
+        if (status.ended && !media_looping(p)) {
+            media_reached_end(p);
             return FALSE;
-        }
-        if (p->ready_state < HAVE_METADATA) {
-            if (known && status.state == NS_AUDIO_PLAYER_READY)
-                media_became_ready(p, status.duration);
-            return TRUE;
-        }
-        if (known && status.state == NS_AUDIO_PLAYER_READY &&
-            status.duration > 0 && status.duration != p->duration) {
-            p->duration = status.duration;
-            media_queue_task(p, "durationchange");
-        }
-        if (!p->paused && known && status.state == NS_AUDIO_PLAYER_READY) {
-            p->position = status.position;
-            if (status.ended && !media_looping(p)) {
-                media_reached_end(p);
-                return FALSE;
-            }
         }
     }
     if (p->paused) return FALSE;
@@ -1247,7 +761,6 @@ ns_media_teardown(ns_js *js)
 {
     if (!js) return;
     ns_webaudio_teardown(js);
-    ns_js_mse_teardown(js);
     if (js->media_poll_source) {
         ns_engine_source_remove(js->media_poll_source);
         js->media_poll_source = 0;
@@ -1381,10 +894,6 @@ ns_media_attr_changed(ns_js *js, ns_node *el, const char *name)
         if (p->fetching && js->audio_context)
             ns_audio_context_set_loop(js->audio_context, p->token,
                                       media_looping(p));
-        ns_image *frames = media_video_frames(p);
-        if (frames)
-            ns_image_anim_set_loop(frames, media_looping(p),
-                                   g_get_monotonic_time());
     } else if (g_ascii_strcasecmp(name, "muted") == 0 && p->muted < 0) {
         if (p->fetching && js->audio_context)
             ns_audio_context_set_volume(js->audio_context, p->token,
@@ -1403,7 +912,6 @@ ns_media_blob_updated(ns_js *js, const char *url)
     while (g_hash_table_iter_next(&it, NULL, &value)) {
         ns_media_player *p = value;
         if (!p->fetching || !p->src || strcmp(p->src, url) != 0) continue;
-        if (p->mse || p->progressive) continue;
         GBytes *bytes = ns_net_resolve_blob_for(url,
                                                 ns_js_current_url(js), NULL);
         if (!bytes) continue;
@@ -1634,34 +1142,20 @@ ns_media_set_muted(JSContext *ctx, JSValueConst this_val, JSValueConst val)
     return JS_UNDEFINED;
 }
 
-/* seekable TimeRanges from MSE, else 0 to duration. */
+/* seekable TimeRanges: 0 to duration. */
 JSValue
 ns_media_get_seekable_ranges(JSContext *ctx, JSValueConst this_val)
 {
     ns_media_player *p = media_player_this(ctx, this_val);
-    if (p && p->mse) {
-        GArray *ranges = ns_mse_source_seekable(p->mse);
-        JSValue result = ns_media_time_ranges_from(ctx, (const double *)(void *)ranges->data,
-                                                   ranges->len / 2);
-        g_array_free(ranges, TRUE);
-        return result;
-    }
     double end = p && !isnan(p->duration) ? p->duration : 0.0;
     return ns_media_time_ranges_for(ctx, end);
 }
 
-/* buffered TimeRanges from MSE, else 0 to duration once metadata is known. */
+/* buffered TimeRanges: 0 to duration once metadata is known. */
 JSValue
 ns_media_get_buffered_ranges(JSContext *ctx, JSValueConst this_val)
 {
     ns_media_player *p = media_player_this(ctx, this_val);
-    if (p && p->mse) {
-        GArray *ranges = ns_mse_source_buffered(p->mse);
-        JSValue result = ns_media_time_ranges_from(ctx, (const double *)(void *)ranges->data,
-                                                   ranges->len / 2);
-        g_array_free(ranges, TRUE);
-        return result;
-    }
     double end = p && p->ready_state >= HAVE_METADATA && !isnan(p->duration)
         ? p->duration : 0.0;
     return ns_media_time_ranges_for(ctx, end);
@@ -1675,89 +1169,20 @@ ns_media_get_played_ranges(JSContext *ctx, JSValueConst this_val)
     return ns_media_time_ranges_for(ctx, p ? media_current_time(p) : 0.0);
 }
 
-static const ns_mp4_track *
-media_mse_video_track(ns_media_player *p)
-{
-    if (!p || !p->mse) return NULL;
-    return ns_mse_buffer_track(ns_mse_source_track_buffer(p->mse, NS_MSE_TRACK_VIDEO));
-}
-
-/* Natural video size from the shown frames, falling back to the MSE track. */
-static void
-media_video_size(ns_media_player *p, int *width, int *height)
-{
-    ns_image *frames = p ? media_video_frames(p) : NULL;
-    *width = frames ? frames->natural_width : 0;
-    *height = frames ? frames->natural_height : 0;
-    const ns_mp4_track *track = media_mse_video_track(p);
-    if (*width <= 0 && track) *width = track->width;
-    if (*height <= 0 && track) *height = track->height;
-}
-
-/* Fires resize when the natural video size becomes known or changes (an
- * adaptive switch to a stream of another shape), and records it on the
- * element for layout. */
-static void
-media_check_resize(ns_media_player *p)
-{
-    if (!p->video || p->ready_state < HAVE_METADATA) return;
-    int width = 0, height = 0;
-    media_video_size(p, &width, &height);
-    if (width <= 0 || height <= 0 ||
-        (width == p->reported_width && height == p->reported_height))
-        return;
-    p->reported_width = width;
-    p->reported_height = height;
-    char size[32];
-    g_snprintf(size, sizeof size, "%dx%d", width, height);
-    ns_element_set_attr(p->el, NS_MEDIA_SIZE_ATTR, size);
-    ns_js_note_media_size_change(p->js, p->el);
-    media_queue_task(p, "resize");
-}
-
-/* videoWidth from decoded frames, falling back to the MSE track. */
+/* videoWidth: always 0, since no video is decoded. */
 JSValue
 ns_media_get_video_width(JSContext *ctx, JSValueConst this_val)
 {
-    int width = 0, height = 0;
-    media_video_size(media_player_this(ctx, this_val), &width, &height);
-    return JS_NewInt32(ctx, width);
+    (void)this_val;
+    return JS_NewInt32(ctx, 0);
 }
 
-/* videoHeight from decoded frames, falling back to the MSE track. */
+/* videoHeight: always 0, since no video is decoded. */
 JSValue
 ns_media_get_video_height(JSContext *ctx, JSValueConst this_val)
 {
-    int width = 0, height = 0;
-    media_video_size(media_player_this(ctx, this_val), &width, &height);
-    return JS_NewInt32(ctx, height);
-}
-
-double
-ns_media_position(JSContext *ctx, JSValueConst this_val)
-{
-    ns_media_player *p = media_player_this(ctx, this_val);
-    return p ? media_current_time(p) : 0.0;
-}
-
-/* The <video> element's decoded frames (current frame in ->texture); NULL if none yet. */
-const ns_image *
-ns_media_video_image(ns_js *js, const ns_node *el)
-{
-    ns_media_player *p = js && el ? media_player_find(js, el) : NULL;
-    return p ? media_video_frames(p) : NULL;
-}
-
-/* Presented and dropped video frame counts; FALSE if not available. */
-gboolean
-ns_media_frame_counts(JSContext *ctx, JSValueConst this_val,
-                      guint *presented, guint *dropped)
-{
-    *presented = *dropped = 0;
-    ns_media_player *p = media_player_this(ctx, this_val);
-    ns_image *frames = p ? media_video_frames(p) : NULL;
-    return frames && frames->video &&
-           ns_video_stream_frame_counts(frames->video, presented, dropped);
+    (void)this_val;
+    return JS_NewInt32(ctx, 0);
 }
 
 /* Requests a repaint of the element when it shows native controls. */
@@ -1820,7 +1245,7 @@ ns_media_controls_get(ns_js *js, const ns_node *el,
     if (!p) return;
     out->paused = p->paused;
     out->muted = media_muted(p);
-    out->audible = !p->video || p->fetching;
+    out->audible = !p->video;
     out->position = media_current_time(p);
     out->duration = p->duration;
 }

@@ -188,28 +188,6 @@ libfontconfig = dependency('fontconfig', version: ns_floors['fontconfig'],
                            required: false)
 libfreetype = dependency('freetype2', required: false)
 
-libdav1d = dependency('dav1d', version: '>= 1.0.0', required: get_option('av1'))
-have_av1 = libdav1d.found()
-libvpx = dependency('vpx', version: '>= 1.8.0', required: get_option('vp9'))
-have_vp9 = libvpx.found()
-libopenh264 = dependency('openh264', version: '>= 2.0.0', required: get_option('h264'))
-have_h264 = libopenh264.found()
-# GStreamer is the default <video> decoder on Linux; elsewhere it is used only
-# when asked for explicitly with -Dgstreamer=enabled.
-gst_wanted = get_option('gstreamer').disable_auto_if(host_system != 'linux')
-libgstreamer = dependency('gstreamer-1.0', version: '>= 1.18', required: gst_wanted)
-libgstapp = dependency('gstreamer-app-1.0', version: '>= 1.18', required: gst_wanted)
-libgstvideo = dependency('gstreamer-video-1.0', version: '>= 1.18', required: gst_wanted)
-have_gstreamer = libgstreamer.found() and libgstapp.found() and libgstvideo.found()
-# Media Foundation is the default <video> decoder on Windows: the H.264
-# decoder that ships with the system, plus the AV1 and VP9 Video Extensions
-# where installed. mfplat.dll itself is loaded at runtime.
-mf_wanted = get_option('mediafoundation').disable_auto_if(host_system != 'windows')
-libmfuuid = cc.find_library('mfuuid', required: mf_wanted)
-libole32 = cc.find_library('ole32', required: mf_wanted)
-have_media_foundation = libmfuuid.found() and libole32.found() and \
-                        cc.has_header('mftransform.h', required: mf_wanted)
-libopus = dependency('opus', required: false)
 libavif = dependency('libavif', required: get_option('avif'))
 have_avif = libavif.found()
 
@@ -357,12 +335,6 @@ liblexbor = dependency('lexbor', version: '>=3.0.0',
 ns_feature_macros = {
   'NS_HAVE_FONTCONFIG=1': libfontconfig.found(),
   'NS_HAVE_FREETYPE=1': libfreetype.found(),
-  'NS_HAVE_AV1': have_av1,
-  'NS_HAVE_VP9': have_vp9,
-  'NS_HAVE_H264': have_h264,
-  'NS_HAVE_GSTREAMER': have_gstreamer,
-  'NS_HAVE_MEDIA_FOUNDATION': have_media_foundation,
-  'NS_HAVE_OPUS': libopus.found(),
   'NS_HAVE_AVIF=1': have_avif,
   'NS_HAVE_PDFJS=1': have_pdfjs,
   'NS_HAVE_VORBISFILE=1': libvorbisfile.found(),
@@ -464,12 +436,6 @@ install_data(
 summary({
   'WebAssembly (WAMR)': have_wasm,
   'PDF viewer (PDF.js)': pdfjs_source,
-  'AV1 video (dav1d)': have_av1,
-  'VP9 video (libvpx)': have_vp9,
-  'H.264 video (OpenH264)': have_h264,
-  'Video via GStreamer': have_gstreamer,
-  'Video via Media Foundation': have_media_foundation,
-  'Opus in WebM (libopus)': libopus.found(),
   'AVIF images (libavif)': have_avif,
   'Audio playback (SDL3)': sdl3_dep.found(),
   'JavaScript engine': js_engine + ' ' + libquickjs.version(),

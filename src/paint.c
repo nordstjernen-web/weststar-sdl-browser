@@ -22,7 +22,6 @@ static int g_dbg_paint_x = -2, g_dbg_paint_y = -2;
 #include "mathml.h"
 #include "selection.h"
 #include "svg.h"
-#include "video.h"
 
 typedef struct rgba {
     double r, g, b, a;
@@ -39,7 +38,6 @@ static GHashTable    *g_paint_hoisted;
 static gboolean       g_paint_any_negative_z = TRUE;
 static ns_js         *g_paint_js;
 static ns_anim       *g_paint_anim;
-static GArray        *g_paint_video_layers;
 static gboolean       g_search_case_sensitive;
 static const ns_box  *g_search_active_box;
 
@@ -141,12 +139,6 @@ void
 ns_paint_set_js(ns_js *js)
 {
     g_paint_js = js;
-}
-
-void
-ns_paint_set_video_layers(GArray *out)
-{
-    g_paint_video_layers = out;
 }
 
 void
@@ -5002,51 +4994,6 @@ object_fit_scale(const ns_box *b, int iw, int ih, double *out_sx,
     *out_oy = oy;
 }
 
-/* Punches a hole and records an MSE video layer rect for compositor overlay; TRUE if used. */
-static gboolean
-paint_video_layer(cairo_t *cr, const ns_box *b, const ns_image *img)
-{
-    if (!g_paint_video_layers || !img->video ||
-        !ns_video_stream_is_mse(img->video))
-        return FALSE;
-    ns_video_layer *layer = ns_video_stream_layer(img->video);
-    int iw = ns_texture_get_width(img->texture);
-    int ih = ns_texture_get_height(img->texture);
-    cairo_matrix_t m;
-    cairo_get_matrix(cr, &m);
-    const ns_style *st = b->style;
-    gboolean direct = cairo_get_group_target(cr) == cairo_get_target(cr) &&
-                      g_paint_filter_depth == 0 &&
-                      m.xy == 0 && m.yx == 0 && m.xx > 0 && m.yy > 0 &&
-                      !(st && st->values[NS_CSS_FILTER]);
-    if (!direct || iw <= 0 || ih <= 0 ||
-        b->content_width <= 0 || b->content_height <= 0) {
-        ns_video_layer_set_composited(layer, FALSE);
-        return FALSE;
-    }
-    double sx, sy, ox, oy;
-    object_fit_scale(b, iw, ih, &sx, &sy, &ox, &oy);
-    double cx = b->x + b->margin.left + b->border.left + b->padding.left;
-    double cy = b->y + b->margin.top  + b->border.top  + b->padding.top;
-    double x0 = cx + ox, y0 = cy + oy;
-    double x1 = x0 + iw * sx, y1 = y0 + ih * sy;
-    apply_box_content_clip(cr, b);
-    cairo_rectangle(cr, cx, cy, b->content_width, b->content_height);
-    cairo_clip(cr);
-    cairo_rectangle(cr, x0, y0, x1 - x0, y1 - y0);
-    cairo_clip(cr);
-    cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
-    cairo_paint(cr);
-    cairo_user_to_device(cr, &x0, &y0);
-    cairo_user_to_device(cr, &x1, &y1);
-    ns_video_layer_rect rect = {
-        ns_video_layer_ref(layer), x0, y0, x1 - x0, y1 - y0,
-    };
-    g_array_append_val(g_paint_video_layers, rect);
-    ns_video_layer_set_composited(layer, TRUE);
-    return TRUE;
-}
-
 /* Paints an image texture into the content box with object-fit, filters and clipping. */
 static gboolean
 paint_texture(cairo_t *cr, const ns_box *b, ns_texture *tex)
@@ -5357,19 +5304,11 @@ paint_media_controls(cairo_t *cr, const ns_box *b, gboolean overlay)
     cairo_restore(cr);
 }
 
-/* Paints a video frame (or overlay layer), a dark placeholder, and the controls. */
+/* Paints a <video> box: its poster, else a dark placeholder, and the
+ * controls. Weststar decodes no video, so no frame is ever shown. */
 static void
 paint_video(cairo_t *cr, const ns_box *b)
 {
-    const ns_image *decoded = b->media ? b->media->video : NULL;
-    if (decoded && decoded->loaded && decoded->texture) {
-        cairo_save(cr);
-        if (!paint_video_layer(cr, b, decoded))
-            paint_texture(cr, b, decoded->texture);
-        cairo_restore(cr);
-        paint_media_controls(cr, b, TRUE);
-        return;
-    }
     if (b->media && b->media->video_audio_src && !b->media->video_src) {
         paint_media_controls(cr, b, FALSE);
         return;

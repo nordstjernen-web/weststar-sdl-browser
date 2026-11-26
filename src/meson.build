@@ -119,24 +119,6 @@ northstar_engine_sources = files(
   'image.c',
   'smil.c',
   'svg.c',
-  'video.c',
-  'av1.c',
-  'mse.c',
-  'progressive.c',
-  'mp4.c',
-  'webm.c',
-  'yuv.c',
-  'vp9.c',
-  'avc.c',
-  'h264.c',
-  'videodec.c',
-  'gstvideo.c',
-  'mfvideo.c',
-  'videoworker.c',
-  'videolayer.c',
-  'audiodec.c',
-  'audio/aac.c',
-  'js_mse.c',
   'image_ico.c',
   'image_wuffs.c',
   'idb.c',
@@ -223,22 +205,11 @@ northstar_deps = [
   libbrotlidec,
   libzstd,
   libseccomp,
-  libdav1d,
-  libvpx,
-  libopenh264,
-  libopus,
   libavif,
   libenchant,
   libfontconfig,
   libfreetype,
 ]
-if have_gstreamer
-  northstar_deps += [libgstreamer, libgstapp, libgstvideo]
-endif
-if have_media_foundation
-  northstar_deps += [libmfuuid, libole32]
-endif
-
 northstar_win_subsystem = host_system == 'windows' ? 'windows' : 'console'
 
 northstar_link_args = []

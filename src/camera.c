@@ -1,5 +1,6 @@
-/* Weststar SDL Browser — webcam enumeration (V4L2) and per-site camera permission.
- * Per-origin allow/deny decisions with one pending prompt handed to the UI thread.
+/* Weststar SDL Browser — per-site media-capture permission for getUserMedia.
+ * Per-origin allow/deny decisions with one pending prompt handed to the UI thread. Weststar
+ * captures no video, so this now guards only the (silent) microphone track.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -16,15 +17,6 @@
 static GMutex g_camera_lock;
 static GHashTable *g_camera_decisions;
 static char *g_camera_pending;
-
-void
-ns_camera_info_free(ns_camera_info *info)
-{
-    if (!info) return;
-    g_free(info->device);
-    g_free(info->label);
-    g_free(info);
-}
 
 /* Stores an allow (1) or deny (2) camera decision for an origin; caller holds the lock. */
 static void
@@ -139,62 +131,3 @@ ns_camera_permission_locked(char *origin)
     g_free(origin);
     return -1;
 }
-
-#if defined(__linux__)
-
-#include <errno.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <sys/ioctl.h>
-#include <linux/videodev2.h>
-
-/* ioctl() retried on EINTR. */
-static int
-xioctl(int fd, unsigned long req, void *arg)
-{
-    int r;
-    do { r = ioctl(fd, req, arg); } while (r < 0 && errno == EINTR);
-    return r;
-}
-
-/* Returns the V4L2 card name if the device supports video capture; caller frees. */
-static char *
-ns_camera_label_for(const char *device)
-{
-    int fd = open(device, O_RDWR | O_NONBLOCK | O_CLOEXEC);
-    if (fd < 0) return NULL;
-    struct v4l2_capability cap;
-    memset(&cap, 0, sizeof cap);
-    char *label = NULL;
-    if (xioctl(fd, VIDIOC_QUERYCAP, &cap) == 0 &&
-        (cap.capabilities & V4L2_CAP_VIDEO_CAPTURE) &&
-        cap.card[0])
-        label = g_strdup((const char *)cap.card);
-    close(fd);
-    return label;
-}
-
-/* Lists capture-capable /dev/video0..63 devices with labels (empty off Linux). */
-GPtrArray *
-ns_camera_enumerate(void)
-{
-    GPtrArray *out = g_ptr_array_new();
-    for (int i = 0; i < 64; i++) {
-        char dev[32];
-        g_snprintf(dev, sizeof dev, "/dev/video%d", i);
-        if (!g_file_test(dev, G_FILE_TEST_EXISTS)) continue;
-        char *label = ns_camera_label_for(dev);
-        if (!label) continue;
-        ns_camera_info *info = g_new0(ns_camera_info, 1);
-        info->device = g_strdup(dev);
-        info->label = label;
-        g_ptr_array_add(out, info);
-    }
-    return out;
-}
-
-#else
-
-GPtrArray *ns_camera_enumerate(void) { return g_ptr_array_new(); }
-
-#endif

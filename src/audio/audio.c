@@ -1543,27 +1543,6 @@ ns_audio_context_stream_push(NsAudioContext *context, const char *token,
     return ok;
 }
 
-/* Flushes a streaming player and restarts its timeline at seconds. */
-void
-ns_audio_context_stream_restart(NsAudioContext *context, const char *token,
-                                double seconds)
-{
-    if (!context || !token) return;
-    audio_lock();
-    ns_audio_player *p = player_find(context, token);
-    if (p && p->streaming) {
-        if (p->converter) SDL_ClearAudioStream(p->converter);
-        p->frames = 0;
-        p->cursor = 0;
-        p->clock_floor_valid = 0;
-        p->clock_offset_valid = 0;
-        p->stream_base = seconds > 0 ? seconds : 0.0;
-        p->stream_ended = 0;
-        p->reached_end = 0;
-    }
-    audio_unlock();
-}
-
 /* Marks whether no more PCM will be pushed so playback can reach its end. */
 void
 ns_audio_context_stream_end(NsAudioContext *context, const char *token,

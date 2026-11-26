@@ -1,5 +1,5 @@
 /* Weststar SDL Browser — image cache and the decode chain (Wuffs, ICO, AVIF, SVG, MPEG-1).
- * Async fetch and worker decode, retry, animation timelines, video streams, LRU memory budget.
+ * Async fetch and worker decode, retry, animation timelines, LRU memory budget.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -32,7 +32,6 @@ ns_image_builtin_supports_mime(const char *bare)
 #include "config.h"
 #include "net.h"
 #include "svg.h"
-#include "video.h"
 
 #ifdef G_OS_WIN32
 /* Windows: true for AVIF/HEIF/HEIC/JXL MIME types, which are not decoded there. */
@@ -106,7 +105,7 @@ ns_image_drop_svg_animation(ns_image *img)
     g_clear_pointer(&img->svg_source, g_bytes_unref);
 }
 
-/* Frees a cache entry including its frames, video stream or texture. */
+/* Frees a cache entry including its frames or texture. */
 static void
 ns_image_free(gpointer p)
 {
@@ -118,18 +117,16 @@ ns_image_free(gpointer p)
     g_free(img->error);
     if (img->render_surface) cairo_surface_destroy(img->render_surface);
     if (img->anim_frames) g_array_free(img->anim_frames, TRUE);
-    else if (img->video) ns_video_stream_free(img->video);
     else ns_texture_unref(img->texture);
     ns_image_drop_svg_animation(img);
     g_free(img);
 }
 
-/* Estimates decoded memory: video stream size or 4 bytes/pixel per frame. */
+/* Estimates decoded memory: 4 bytes/pixel per frame. */
 static gint64
 ns_image_decoded_bytes(const ns_image *img)
 {
     if (!img) return 0;
-    if (img->video) return (gint64)ns_video_stream_memory(img->video);
     if (img->anim_frames && img->anim_frames->len > 0) {
         gint64 total = 0;
         for (guint i = 0; i < img->anim_frames->len; i++) {
@@ -180,10 +177,6 @@ ns_image_cache_purge(ns_image_cache *cache, ns_image *img)
     if (img->anim_frames) {
         g_array_free(img->anim_frames, TRUE);
         img->anim_frames = NULL;
-        img->texture = NULL;
-    } else if (img->video) {
-        ns_video_stream_free(img->video);
-        img->video = NULL;
         img->texture = NULL;
     } else {
         ns_texture_clear(&img->texture);
@@ -445,13 +438,12 @@ ns_image_pixel_frames_for(const guchar *data, gsize len, int *out_w, int *out_h)
 typedef struct {
     ns_texture      *tex;
     GArray          *frames;
-    ns_video_stream *video;
     GBytes          *svg_source;
     int              w;
     int              h;
 } ns_img_decoded;
 
-/* Releases whatever a decode result holds (frames, video or texture). */
+/* Releases whatever a decode result holds (frames or texture). */
 static void
 ns_img_decoded_clear(ns_img_decoded *d)
 {
@@ -459,25 +451,18 @@ ns_img_decoded_clear(ns_img_decoded *d)
         g_array_set_clear_func(d->frames, ns_image_anim_frame_clear);
         g_array_free(d->frames, TRUE);
     }
-    ns_video_stream_free(d->video);
     if (d->tex) ns_texture_unref(d->tex);
     if (d->svg_source) g_bytes_unref(d->svg_source);
 }
 
-/* Decodes a response body as MPEG-1 video, animated GIF/APNG, or a still image.  An SVG
+/* Decodes a response body as an animated GIF/APNG or a still image.  An SVG
  * with SMIL animation elements keeps its source, to be animated on the cache's thread. */
 static ns_img_decoded
 ns_image_decode_body(const guchar *data, gsize len)
 {
-    ns_img_decoded d = { NULL, NULL, NULL, NULL, 0, 0 };
+    ns_img_decoded d = { NULL, NULL, NULL, 0, 0 };
     int w = 0, h = 0;
     GArray *frames = NULL;
-    if (ns_video_bytes_are_mpeg1(data, len)) {
-        d.video = ns_video_stream_new(data, len);
-        d.w = ns_video_stream_width(d.video);
-        d.h = ns_video_stream_height(d.video);
-        return d;
-    }
     GArray *pixel_frames = ns_image_pixel_frames_for(data, len, &w, &h);
     if (pixel_frames) {
         frames = ns_image_anim_frames_from_pixels(pixel_frames, &w, &h, NULL);
@@ -507,18 +492,7 @@ static void
 ns_image_apply_decoded_state(ns_image *img, ns_img_decoded *d,
                              const char *content_type, gsize body_len)
 {
-    if (d->video) {
-        img->video = d->video;
-        img->texture = ns_video_stream_texture(d->video);
-        img->natural_width  = d->w;
-        img->natural_height = d->h;
-        img->anim_total_ms = ns_video_stream_duration_ms(d->video);
-        img->anim_start_us = g_get_monotonic_time();
-        img->anim_loop = FALSE;
-        img->anim_paused = TRUE;
-        img->anim_paused_phase_ms = 0;
-        img->loaded = TRUE;
-    } else if (d->frames) {
+    if (d->frames) {
         g_array_set_clear_func(d->frames, ns_image_anim_frame_clear);
         img->anim_frames = d->frames;
         ns_image_anim_frame *f0 =
@@ -598,7 +572,7 @@ on_image_decoded(GObject *src, GAsyncResult *res, gpointer user_data)
         ns_decode_job_free(job);
         return;
     }
-    ns_img_decoded result = { NULL, NULL, NULL, NULL, 0, 0 };
+    ns_img_decoded result = { NULL, NULL, NULL, 0, 0 };
     if (d) {
         result = *d;
         g_free(d);
@@ -818,47 +792,12 @@ ns_image_cache_peek(ns_image_cache *cache, const char *url)
     return img;
 }
 
-/* True for loaded videos or multi-frame animated images. */
+/* True for multi-frame animated images. */
 gboolean
 ns_image_is_animation(const ns_image *img)
 {
     return img && img->loaded && img->anim_total_ms > 0 &&
-           (img->video ||
-            (img->anim_frames && img->anim_frames->len > 1));
-}
-
-GBytes *
-ns_image_video_bytes(const ns_image *img)
-{
-    return img && img->loaded ? ns_video_stream_bytes(img->video) : NULL;
-}
-
-gboolean
-ns_image_video_has_audio(const ns_image *img)
-{
-    return img && img->loaded && ns_video_stream_has_audio(img->video);
-}
-
-double
-ns_image_anim_duration(const ns_image *img)
-{
-    return ns_image_is_animation(img) ? img->anim_total_ms / 1000.0 : 0.0;
-}
-
-/* Pushes the image's playback clock state into its MSE video stream. */
-static void
-image_sync_video_clock(const ns_image *img)
-{
-    if (!img || !img->video || !ns_video_stream_is_mse(img->video)) return;
-    ns_video_clock clock = {
-        .paused = img->anim_paused,
-        .loop = img->anim_loop,
-        .start_us = img->anim_start_us,
-        .paused_ms = img->anim_paused_phase_ms,
-        .total_ms = img->anim_total_ms,
-        .seek_gen = img->anim_seek_gen,
-    };
-    ns_video_stream_set_clock(img->video, &clock);
+           img->anim_frames && img->anim_frames->len > 1;
 }
 
 /* Current playback position in ms, frozen when paused and wrapped when looping. */
@@ -882,81 +821,10 @@ ns_image_anim_ended(const ns_image *img, gint64 now_us)
            ns_image_anim_phase_ms(img, now_us) >= img->anim_total_ms;
 }
 
-/* Changes looping while preserving the current playback position. */
-void
-ns_image_anim_set_loop(ns_image *img, gboolean loop, gint64 now_us)
-{
-    if (!ns_image_is_animation(img) || img->anim_loop == loop) return;
-    int phase = ns_image_anim_phase_ms(img, now_us);
-    img->anim_loop = loop;
-    if (loop) phase %= img->anim_total_ms;
-    if (img->anim_paused) img->anim_paused_phase_ms = phase;
-    else img->anim_start_us = now_us - (gint64)phase * 1000;
-    image_sync_video_clock(img);
-}
-
-double
-ns_image_anim_position(const ns_image *img, gint64 now_us)
-{
-    return ns_image_anim_phase_ms(img, now_us) / 1000.0;
-}
-
-/* Pauses or resumes playback, preserving the current position. */
-void
-ns_image_anim_set_paused(ns_image *img, gboolean paused, gint64 now_us)
-{
-    if (!ns_image_is_animation(img) || img->anim_paused == paused) return;
-    if (paused) {
-        img->anim_paused_phase_ms = ns_image_anim_phase_ms(img, now_us);
-        img->anim_paused = TRUE;
-        image_sync_video_clock(img);
-        return;
-    }
-    img->anim_paused = FALSE;
-    img->anim_start_us = now_us - (gint64)img->anim_paused_phase_ms * 1000;
-    image_sync_video_clock(img);
-}
-
-/* Seeks playback to seconds, clamped or wrapped to the duration; bumps seek generation. */
-void
-ns_image_anim_seek(ns_image *img, double seconds, gint64 now_us)
-{
-    if (!ns_image_is_animation(img)) return;
-    if (!(seconds >= 0.0)) seconds = 0.0;
-    double total_s = img->anim_total_ms / 1000.0;
-    if (seconds > total_s)
-        seconds = img->anim_loop ? fmod(seconds, total_s) : total_s;
-    int phase = (int)(seconds * 1000.0);
-    if (img->anim_loop) phase %= img->anim_total_ms;
-    if (img->anim_paused) img->anim_paused_phase_ms = phase;
-    else img->anim_start_us = now_us - (gint64)phase * 1000;
-    img->anim_seek_gen++;
-    image_sync_video_clock(img);
-}
-
-/* Shifts the start time of a playing animation by delta_us. */
-void
-ns_image_anim_shift(ns_image *img, gint64 delta_us)
-{
-    if (!ns_image_is_animation(img) || img->anim_paused) return;
-    img->anim_start_us += delta_us;
-    image_sync_video_clock(img);
-}
-
-/* Shows the video frame or animation frame for phase; TRUE if the texture changed. */
+/* Shows the animation frame for phase; TRUE if the texture changed. */
 static gboolean
 ns_image_apply_phase(ns_image *img, int phase)
 {
-    if (img->video) {
-        if (ns_video_stream_is_mse(img->video))
-            img->anim_total_ms = ns_video_stream_duration_ms(img->video);
-        image_sync_video_clock(img);
-        gboolean changed = ns_video_stream_show(img->video, phase);
-        img->texture = ns_video_stream_texture(img->video);
-        img->natural_width = ns_video_stream_width(img->video);
-        img->natural_height = ns_video_stream_height(img->video);
-        return changed;
-    }
     int idx = 0;
     gint64 acc = 0;
     for (guint i = 0; i < img->anim_frames->len; i++) {
@@ -1028,7 +896,7 @@ ns_image_cache_tick_collect(ns_image_cache *cache, gint64 now_us,
     return any;
 }
 
-/* True if any animation is playing or a video is waiting for data. */
+/* True if any animation is playing. */
 gboolean
 ns_image_cache_animating(const ns_image_cache *cache)
 {
@@ -1042,7 +910,6 @@ ns_image_cache_animating(const ns_image_cache *cache)
         if (ns_image_is_animation(img) && !img->anim_paused &&
             !ns_image_anim_ended(img, now))
             return TRUE;
-        if (img->video && ns_video_stream_waiting(img->video)) return TRUE;
         if (img->svg_source &&
             (!img->svg_doc || ns_svg_doc_animating(img->svg_doc)))
             return TRUE;
@@ -1087,8 +954,7 @@ ns_image_cache_insert_decoding(ns_image_cache *cache, const char *url,
         return NULL;
     }
     ns_image *existing = g_hash_table_lookup(cache->by_url, url);
-    if (existing || (!decoding->decoded.frames && !decoding->decoded.tex &&
-                     !decoding->decoded.video)) {
+    if (existing || (!decoding->decoded.frames && !decoding->decoded.tex)) {
         ns_image_decoding_free(decoding);
         return existing;
     }
@@ -1098,41 +964,6 @@ ns_image_cache_insert_decoding(ns_image_cache *cache, const char *url,
     g_free(decoding);
     g_hash_table_insert(cache->by_url, g_strdup(url), img);
     ns_image_cache_account(cache, img);
-    return img;
-}
-
-/* Installs a video stream as url's image, replacing any prior content; takes stream. */
-ns_image *
-ns_image_cache_insert_stream(ns_image_cache *cache, const char *url,
-                             ns_video_stream *stream)
-{
-    if (!cache || !url || !stream) {
-        ns_video_stream_free(stream);
-        return NULL;
-    }
-    ns_image *img = g_hash_table_lookup(cache->by_url, url);
-    if (img) {
-        if (img->anim_frames) g_array_free(img->anim_frames, TRUE);
-        else if (img->video) ns_video_stream_free(img->video);
-        else ns_texture_unref(img->texture);
-        ns_image_drop_svg_animation(img);
-        img->anim_frames = NULL;
-        img->failed = FALSE;
-        cache->total_bytes -= img->bytes;
-        img->bytes = 0;
-    } else {
-        img = g_new0(ns_image, 1);
-        img->url = g_strdup(url);
-        g_hash_table_insert(cache->by_url, g_strdup(url), img);
-    }
-    img->video = stream;
-    img->texture = ns_video_stream_texture(stream);
-    img->anim_total_ms = ns_video_stream_duration_ms(stream);
-    img->anim_start_us = g_get_monotonic_time();
-    img->anim_paused = TRUE;
-    img->anim_paused_phase_ms = 0;
-    img->anim_loop = FALSE;
-    img->loaded = TRUE;
     return img;
 }
 

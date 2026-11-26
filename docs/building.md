@@ -54,22 +54,14 @@ GLib or Cairo from source; on an older release, build inside an Ubuntu
 With a libcurl older than 8.11 the build warns that WebSocket is
 unavailable unless that libcurl was built with WebSocket support.
 
-**Optional, auto-detected:** `libgstreamer1.0-dev` and
-`libgstreamer-plugins-base1.0-dev` (`gstreamer-devel` /
-`gstreamer-plugins-base-devel` on Fedora and openSUSE) for GStreamer
-video decoding, the Linux default; install decoder plugins such as
-`gstreamer1.0-plugins-good`, `-bad` and `gstreamer1.0-libav` to play
-VP9, AV1 and H.264. `libavif-dev` (AVIF images — it pulls in a
+**Optional, auto-detected:** `libavif-dev` (AVIF images — it pulls in a
 full AV1 decoder for a format that is rare on the web, so
 `-Davif=disabled` drops it), `libenchant-2-dev` (+ a dictionary such as
 `hunspell-en-us`) for on-screen spell-checking, `libopusfile-dev` /
 `libvorbis-dev` (which carries `vorbisfile`) for native Ogg Opus/Vorbis
 decode in the in-process mixer, `libepoxy-dev` and `glslang-dev`
 (`libepoxy-devel` / `glslang-devel` on Fedora and openSUSE) for WebGL,
-`libthai-dev` for Thai word breaking, `libdav1d-dev`, `libvpx-dev` and
-OpenH264 (where the distribution packages it) for the built-in AV1, VP9
-and H.264 decoders that stand in where GStreamer has no decoder,
-`libopus-dev` for Opus sound in WebM, and `libbrotli-dev` and
+`libthai-dev` for Thai word breaking, and `libbrotli-dev` and
 `libzstd-dev` for Brotli and zstd `Content-Encoding`. The build works
 without them.
 
@@ -360,10 +352,7 @@ once (`apt install ccache` / `dnf install ccache`). Optionally use the
 |--------|---------|--------|
 | `wasm` | `auto` | Build the WebAssembly JS API over vendored WAMR. `auto` turns it off on 32-bit x86, which WAMR does not support; disable it on other platforms WAMR does not support. |
 | `js_engine` | `quickjs-ng` | JavaScript engine: `quickjs-ng`, or `quickjs` for Fabrice Bellard's original QuickJS. See [quickjs.md](quickjs.md). |
-| `av1`, `vp9`, `h264` | `auto` | The built-in AV1 (libdav1d), VP9 (libvpx) and H.264 (OpenH264) `<video>` decoders, each built when its library is present. They decode where GStreamer or Media Foundation is not built in or has no decoder for the codec, and with `NS_VIDEO_DECODER=native`. Only Cisco-built OpenH264 binaries are covered by the H.264 patent license Cisco pays for. |
-| `mediafoundation` | `auto` | Decode `<video>` through Windows Media Foundation, the Windows default. Not built elsewhere. |
 | `audio` | `auto` | Enable in-process audio playback (needs SDL3 3.2 or newer). |
-| `gstreamer` | `auto` | Decode `<video>` through GStreamer decoder plugins. `auto` enables it on Linux when GStreamer (≥ 1.18, with gstreamer-app and gstreamer-video) is present, where it becomes the default video decoder; other platforms need `-Dgstreamer=enabled`. Not a required dependency: without it the native libdav1d/libvpx/OpenH264 backends decode video. |
 | `avif` | `auto` | Decode AVIF through libavif. Disabling drops a full AV1 decoder; AVIF images then fail to decode. |
 | `webgl` | `auto` | WebGL 1 / 2 over an offscreen OpenGL context (libepoxy), with every shader validated by glslang first. `auto` builds it when both libraries are present; `enabled` requires them; `disabled` leaves it out, and `getContext("webgl")` returns `null`. See [webgl.md](webgl.md). |
 | `pdfjs` | `auto` | The PDF viewer, built on PDF.js and embedded at build time. `auto` builds it when PDF.js is available; `enabled` makes PDF.js a required dependency, so the build fails without it; `disabled` leaves the viewer out, and a PDF shows a link to the file. |
@@ -505,7 +494,7 @@ Others the browser reads:
 | `NS_EXTENSIONS_DIR` | WebExtensions directory (default `~/.local/share/northstar-extensions`). |
 | `NS_I18N_DIR` | Directory of the `.lang` UI catalogues. |
 | `NS_LOG_FILE`, `NS_NO_LOG_FILE` | Mirror the debug event log to a file (on by default only on Windows). |
-| `NS_CAMERA_ALLOW` | Grant every camera request without asking. Headless/test runs only; ignored by the interactive browser. |
+| `NS_CAMERA_ALLOW` | Grant every `getUserMedia` (microphone) request without asking. Headless/test runs only; ignored by the interactive browser. |
 | `NS_EARLY_JS_FILE` | Script file evaluated before each page's own scripts. Headless/test runs only; ignored by the interactive browser. |
 | `NS_FRAME_DUMP` | Directory to write every 30th rendered frame to as PNG (debugging; headless and tooling runs only). |
 | `NS_FORCE_HTTP3` | Use HTTP/3 directly instead of waiting for Alt-Svc. |

@@ -1,5 +1,6 @@
-/* Weststar SDL Browser — the one table canPlayType, mediaCapabilities and MSE answer from.
- * Maps MIME type and codecs= to probably/maybe/no by the built decoders; picks the <source>.
+/* Weststar SDL Browser — the one table canPlayType and mediaCapabilities answer from.
+ * Maps MIME type and codecs= to probably/maybe/no by the built audio decoders; picks the
+ * <source>. There are no video rows: Weststar decodes no video.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -8,10 +9,7 @@
 
 #include <string.h>
 
-#include "mse.h"
-
 typedef enum {
-    NEEDS_NOTHING,
     NEEDS_MIXER,
     NEEDS_VORBIS_OR_OPUS,
     NEEDS_OPUS,
@@ -21,7 +19,6 @@ typedef struct {
     const char           *mime;
     ns_media_element      element;
     ns_media_requirement  requires;
-    gboolean              mse;
     const char *const    *codecs;
 } ns_media_type_row;
 
@@ -41,24 +38,18 @@ static const char *const opus_codecs[] = {
     "opus", NULL,
 };
 
-static const char *const mpeg1_video_codecs[] = {
-    "mp1v", "mpeg1", NULL,
-};
-
+/* An MPEG-1 system stream (video/mpeg) plays in an <audio> element: the
+ * mixer decodes its MPEG audio track. */
 static const ns_media_type_row media_types[] = {
-    { "audio/mpeg",      NS_MEDIA_ELEMENT_AUDIO, NEEDS_MIXER,          TRUE,  mpeg_audio_codecs },
-    { "audio/mp3",       NS_MEDIA_ELEMENT_AUDIO, NEEDS_MIXER,          TRUE,  mpeg_audio_codecs },
-    { "video/mpeg",      NS_MEDIA_ELEMENT_AUDIO, NEEDS_MIXER,          TRUE,  mpeg_system_audio_codecs },
-    { "video/mpg",       NS_MEDIA_ELEMENT_AUDIO, NEEDS_MIXER,          TRUE,  mpeg_system_audio_codecs },
-    { "video/x-mpeg",    NS_MEDIA_ELEMENT_AUDIO, NEEDS_MIXER,          TRUE,  mpeg_system_audio_codecs },
-    { "video/mpeg-1",    NS_MEDIA_ELEMENT_AUDIO, NEEDS_MIXER,          TRUE,  mpeg_system_audio_codecs },
-    { "audio/ogg",       NS_MEDIA_ELEMENT_AUDIO, NEEDS_VORBIS_OR_OPUS, TRUE,  ogg_codecs },
-    { "application/ogg", NS_MEDIA_ELEMENT_AUDIO, NEEDS_VORBIS_OR_OPUS, TRUE,  ogg_codecs },
-    { "audio/opus",      NS_MEDIA_ELEMENT_AUDIO, NEEDS_OPUS,           TRUE,  opus_codecs },
-    { "video/mpeg",      NS_MEDIA_ELEMENT_VIDEO, NEEDS_NOTHING,        FALSE, mpeg1_video_codecs },
-    { "video/mpg",       NS_MEDIA_ELEMENT_VIDEO, NEEDS_NOTHING,        FALSE, mpeg1_video_codecs },
-    { "video/x-mpeg",    NS_MEDIA_ELEMENT_VIDEO, NEEDS_NOTHING,        FALSE, mpeg1_video_codecs },
-    { "video/mpeg-1",    NS_MEDIA_ELEMENT_VIDEO, NEEDS_NOTHING,        FALSE, mpeg1_video_codecs },
+    { "audio/mpeg",      NS_MEDIA_ELEMENT_AUDIO, NEEDS_MIXER,          mpeg_audio_codecs },
+    { "audio/mp3",       NS_MEDIA_ELEMENT_AUDIO, NEEDS_MIXER,          mpeg_audio_codecs },
+    { "video/mpeg",      NS_MEDIA_ELEMENT_AUDIO, NEEDS_MIXER,          mpeg_system_audio_codecs },
+    { "video/mpg",       NS_MEDIA_ELEMENT_AUDIO, NEEDS_MIXER,          mpeg_system_audio_codecs },
+    { "video/x-mpeg",    NS_MEDIA_ELEMENT_AUDIO, NEEDS_MIXER,          mpeg_system_audio_codecs },
+    { "video/mpeg-1",    NS_MEDIA_ELEMENT_AUDIO, NEEDS_MIXER,          mpeg_system_audio_codecs },
+    { "audio/ogg",       NS_MEDIA_ELEMENT_AUDIO, NEEDS_VORBIS_OR_OPUS, ogg_codecs },
+    { "application/ogg", NS_MEDIA_ELEMENT_AUDIO, NEEDS_VORBIS_OR_OPUS, ogg_codecs },
+    { "audio/opus",      NS_MEDIA_ELEMENT_AUDIO, NEEDS_OPUS,           opus_codecs },
 };
 
 static gboolean
@@ -96,7 +87,6 @@ static gboolean
 requirement_met(ns_media_requirement requirement)
 {
     switch (requirement) {
-    case NEEDS_NOTHING:        return TRUE;
     case NEEDS_MIXER:          return have_mixer();
     case NEEDS_VORBIS_OR_OPUS: return have_vorbis() || have_opus();
     case NEEDS_OPUS:           return have_opus();
@@ -159,37 +149,17 @@ codecs_parameter(char **params)
     return NULL;
 }
 
-/* Answers canPlayType for mp4/webm video outside the table via the MSE codec check. */
-static ns_media_answer
-progressive_type_support(const char *type, const char *mime, char **params)
-{
-    if (strcmp(mime, "video/mp4") != 0 && strcmp(mime, "video/webm") != 0)
-        return NS_MEDIA_CANNOT;
-    char *codecs = codecs_parameter(params);
-    ns_media_answer answer = !codecs || !*g_strstrip(codecs) ? NS_MEDIA_MAYBE
-        : ns_mse_type_supported(type) ? NS_MEDIA_PROBABLY : NS_MEDIA_CANNOT;
-    g_free(codecs);
-    return answer;
-}
-
-/* canPlayType/isTypeSupported: returns probably, maybe or cannot for a MIME type. */
+/* canPlayType: returns probably, maybe or cannot for a MIME type. */
 ns_media_answer
-ns_media_type_support(const char *type, ns_media_element element,
-                      ns_media_source source)
+ns_media_type_support(const char *type, ns_media_element element)
 {
     if (!type || !*type) return NS_MEDIA_CANNOT;
     char *lower = g_ascii_strdown(type, -1);
     char **params = g_strsplit(lower, ";", -1);
     g_free(lower);
     const char *mime = g_strstrip(params[0]);
-    if (element == NS_MEDIA_ELEMENT_VIDEO && !find_row(mime, element)) {
-        ns_media_answer answer = progressive_type_support(type, mime, params);
-        g_strfreev(params);
-        return answer;
-    }
     const ns_media_type_row *row = find_row(mime, element);
-    if (!row || !requirement_met(row->requires) ||
-        (source == NS_MEDIA_SOURCE_MSE && !row->mse)) {
+    if (!row || !requirement_met(row->requires)) {
         g_strfreev(params);
         return NS_MEDIA_CANNOT;
     }
@@ -236,8 +206,7 @@ ns_media_select_source(const ns_node *element)
         if (!csrc || !*csrc) continue;
         const char *type = ns_element_get_attr(c, "type");
         if (type && *type &&
-            ns_media_type_support(type, kind, NS_MEDIA_SOURCE_FILE) ==
-                NS_MEDIA_CANNOT)
+            ns_media_type_support(type, kind) == NS_MEDIA_CANNOT)
             continue;
         return csrc;
     }

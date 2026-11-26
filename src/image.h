@@ -15,7 +15,6 @@ G_BEGIN_DECLS
 
 typedef struct ns_image_cache  ns_image_cache;
 typedef struct ns_image        ns_image;
-typedef struct ns_video_stream ns_video_stream;
 struct ns_svg_doc;
 
 typedef struct ns_image_anim_frame {
@@ -57,8 +56,6 @@ struct ns_image {
     gboolean     anim_paused;
     int          anim_paused_phase_ms;
     gboolean     anim_loop;
-    guint        anim_seek_gen;
-    ns_video_stream *video;
     GBytes      *svg_source;
     struct ns_svg_doc *svg_doc;
 };
@@ -79,10 +76,6 @@ void            ns_image_cache_cancel_cb(ns_image_cache *cache,
                                          gpointer user_data);
 
 ns_image       *ns_image_cache_peek(ns_image_cache *cache, const char *url);
-
-ns_image       *ns_image_cache_insert_stream(ns_image_cache  *cache,
-                                             const char      *url,
-                                             ns_video_stream *stream);
 
 ns_image       *ns_image_cache_insert_encoded(ns_image_cache *cache,
                                               const char     *url,
@@ -127,16 +120,7 @@ gboolean ns_image_cache_tick_collect(ns_image_cache *cache, gint64 now_us,
                                      GPtrArray *changed);
 
 gboolean ns_image_is_animation(const ns_image *img);
-GBytes  *ns_image_video_bytes(const ns_image *img);
-gboolean ns_image_video_has_audio(const ns_image *img);
-double   ns_image_anim_duration(const ns_image *img);
-double   ns_image_anim_position(const ns_image *img, gint64 now_us);
-void     ns_image_anim_set_paused(ns_image *img, gboolean paused,
-                                  gint64 now_us);
-void     ns_image_anim_seek(ns_image *img, double seconds, gint64 now_us);
-void     ns_image_anim_shift(ns_image *img, gint64 delta_us);
 gboolean ns_image_anim_ended(const ns_image *img, gint64 now_us);
-void     ns_image_anim_set_loop(ns_image *img, gboolean loop, gint64 now_us);
 gboolean ns_image_cache_animating(const ns_image_cache *cache);
 gboolean ns_image_cache_has_pending(const ns_image_cache *cache);
 

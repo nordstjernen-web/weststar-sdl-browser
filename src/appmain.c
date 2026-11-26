@@ -37,8 +37,6 @@
 #include "config.h"
 #include "debuglog.h"
 #include "font.h"
-#include "gstvideo.h"
-#include "mfvideo.h"
 #include "engine.h"
 #include "headless.h"
 #include "spellcheck.h"
@@ -576,9 +574,6 @@ main(int argc, char **argv)
         }
     }
 
-    /* Media Foundation's decoders load from system and Store codec
-     * packages; map them before the mitigation policies narrow loading. */
-    ns_mf_video_preinit();
     ns_security_win32_mitigations_init(proc_mode);
     ns_preopen_screenshot_outputs(argc, argv);
     ns_ext_migrate_default_dir();

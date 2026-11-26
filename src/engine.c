@@ -1313,7 +1313,7 @@ wanted_image_free(gpointer data)
     g_free(w);
 }
 
-/* Maps uncached image/video URLs in the layout to fetch info; defers far lazy images. */
+/* Maps uncached image URLs in the layout (video boxes for their backgrounds) to fetch info; defers far lazy images. */
 static GHashTable *
 engine_collect_wanted_images(ns_box *root, const char *base_url,
                              ns_image_cache *cache, ns_js *js,
@@ -1348,8 +1348,6 @@ engine_collect_wanted_images(ns_box *root, const char *base_url,
             g_ptr_array_add(srcs, box->media->marker_image_src);
         if (box->media->border_image_src)
             g_ptr_array_add(srcs, box->media->border_image_src);
-        if (box->media->video_src)
-            g_ptr_array_add(srcs, box->media->video_src);
         const char *box_base = engine_node_frame_base(box->dom, base_url);
         for (guint si = 0; si < srcs->len; si++) {
             const char *src = g_ptr_array_index(srcs, si);
@@ -1362,8 +1360,7 @@ engine_collect_wanted_images(ns_box *root, const char *base_url,
                 continue;
             }
             wanted_image *w = g_new0(wanted_image, 1);
-            w->dest = src == box->media->video_src ? NS_FETCH_DEST_MEDIA
-                                                    : NS_FETCH_DEST_IMAGE;
+            w->dest = NS_FETCH_DEST_IMAGE;
             w->policy = ns_fetch_policy_ref(ns_js_fetch_policy(js, box->dom));
             g_hash_table_insert(wanted, abs, w);
         }
