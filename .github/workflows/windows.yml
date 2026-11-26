@@ -1,0 +1,165 @@
+name: windows
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  workflow_dispatch:
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NS_SAFE_BROWSING_API_KEY: ${{ secrets.NS_SAFE_BROWSING_API_KEY }}
+
+jobs:
+  build:
+    name: msys2/ucrt64 on windows-${{ matrix.windows }}
+    runs-on: windows-${{ matrix.windows }}
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        windows: ['2025']
+
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up MSYS2 (ucrt64)
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
+        with:
+          msystem: UCRT64
+          # No full system upgrade (pacman -Syuu) on every run: it took most
+          # of this job. Packages come from the MSYS2 release the action
+          # installs; if its databases go stale and installs 404, set this
+          # back to true.
+          update: false
+          cache: true
+          install: >-
+            git
+            diffutils
+            mingw-w64-ucrt-x86_64-binutils
+            mingw-w64-ucrt-x86_64-clang
+            mingw-w64-ucrt-x86_64-lld
+            mingw-w64-ucrt-x86_64-llvm-tools
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-meson
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-ccache
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-harfbuzz
+            mingw-w64-ucrt-x86_64-fribidi
+            mingw-w64-ucrt-x86_64-cairo
+            mingw-w64-ucrt-x86_64-fontconfig
+            mingw-w64-ucrt-x86_64-freetype
+            mingw-w64-ucrt-x86_64-curl
+            mingw-w64-ucrt-x86_64-ca-certificates
+            mingw-w64-ucrt-x86_64-libpsl
+            mingw-w64-ucrt-x86_64-sqlite3
+            mingw-w64-ucrt-x86_64-libavif
+            mingw-w64-ucrt-x86_64-libepoxy
+            mingw-w64-ucrt-x86_64-glslang
+            mingw-w64-ucrt-x86_64-sdl3
+            mingw-w64-ucrt-x86_64-opusfile
+            mingw-w64-ucrt-x86_64-libvorbis
+            mingw-w64-ucrt-x86_64-enchant
+
+      - name: Restore ccache
+        id: ccache-restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}\ccache
+            ${{ runner.temp }}\thinlto-cache
+          key: ccache-windows-${{ matrix.windows }}-ucrt64-${{ github.sha }}
+          restore-keys: |
+            ccache-windows-${{ matrix.windows }}-ucrt64-
+
+      - name: Configure ccache
+        run: |
+          export CCACHE_DIR="$RUNNER_TEMP/ccache"
+          echo "CCACHE_DIR=$CCACHE_DIR" >> "$GITHUB_ENV"
+          ccache --max-size=500M
+          ccache --zero-stats
+
+      - name: Show toolchain versions
+        run: |
+          clang --version
+          ld.lld --version
+          llvm-ar --version | head -2
+          ccache --version | head -1
+          meson --version
+          ninja --version
+          pkg-config --modversion gtk4
+          pkg-config --modversion libcurl
+
+      - name: Build (ThinLTO via LLD on main, no LTO on pull requests)
+        if: hashFiles('meson.build') != ''
+        run: |
+          export CC="ccache clang"
+          export CC_LD=lld
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            meson setup builddir --werror -Db_lto=false
+          else
+            meson setup builddir --werror -Db_lto=true -Db_lto_mode=thin
+            THINLTO_CACHE_DIR=$(cygpath -m "$RUNNER_TEMP/thinlto-cache")
+            mkdir -p "$THINLTO_CACHE_DIR"
+            meson configure builddir -Dc_link_args="-Wl,--thinlto-cache-dir=$THINLTO_CACHE_DIR -Wl,--thinlto-cache-policy=cache_size_bytes=300m"
+          fi
+          meson compile -C builddir
+
+      - name: ccache stats
+        if: always()
+        run: ccache --show-stats
+
+      - name: Smoke test (binary present)
+        run: |
+          test -f builddir/src/gtk/northstar.exe
+          ls -l builddir/src/gtk/northstar.exe
+
+      # The release packages (zip, installer, MSIX) are this bundle. Running
+      # it with only the Windows system folders on PATH, as an installed or
+      # Store copy runs, catches a DLL the bundle left out.
+      - name: Bundle the build (pack-windows.sh)
+        run: BUILDDIR=builddir NS_SKIP_ZIP=1 ./scripts/pack-windows.sh
+
+      - name: Bundle starts without MSYS2 on PATH
+        shell: pwsh
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-windows-bundle.ps1
+
+      - name: Upload northstar binary
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: northstar-windows-${{ matrix.windows }}-ucrt64
+          path: builddir/src/gtk/northstar.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Save ccache
+        if: always() && steps.ccache-restore.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}\ccache
+            ${{ runner.temp }}\thinlto-cache
+          key: ccache-windows-${{ matrix.windows }}-ucrt64-${{ github.sha }}

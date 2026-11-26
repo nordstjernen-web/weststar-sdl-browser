@@ -1,0 +1,518 @@
+/* Northstar Web Browser — CSS Syntax tokenizer and component-value parser.
+ * Validity and self-containment checks over raw CSS text, used by css.c and @property matching.
+ */
+
+#include "css_syntax.h"
+#include "dom.h"
+
+#include <string.h>
+
+#define CSS_SYNTAX_MAX_DEPTH 512
+
+typedef struct ns_css_syntax_parser {
+    const char *input;
+    gsize length;
+    gsize offset;
+    int depth;
+    gboolean valid;
+} ns_css_syntax_parser;
+
+/* True for CSS ident-start code units: letters, underscore and non-ASCII. */
+static gboolean
+css_syntax_name_start(guchar c)
+{
+    return g_ascii_isalpha(c) || c == '_' || c >= 0x80;
+}
+
+static gboolean
+css_syntax_name(guchar c)
+{
+    return css_syntax_name_start(c) || g_ascii_isdigit(c) || c == '-';
+}
+
+/* Returns the offset after a CSS escape at offset, or offset itself if it is invalid. */
+static gsize
+css_syntax_escape_end(const char *input, gsize length, gsize offset)
+{
+    if (offset >= length || input[offset] != '\\') return offset;
+    offset++;
+    if (offset >= length) return offset;
+    if (g_ascii_isxdigit(input[offset])) {
+        guint digits = 0;
+        while (offset < length && digits < 6 &&
+               g_ascii_isxdigit(input[offset])) {
+            offset++;
+            digits++;
+        }
+        if (offset < length && ns_is_ascii_ws(input[offset])) offset++;
+        return offset;
+    }
+    if (input[offset] == '\n' || input[offset] == '\r' ||
+        input[offset] == '\f')
+        return offset - 1;
+    return offset + 1;
+}
+
+/* Consumes an ident sequence including escapes; returns the end offset. */
+static gsize
+css_syntax_name_end(const char *input, gsize length, gsize offset)
+{
+    while (offset < length) {
+        if (css_syntax_name((guchar)input[offset])) {
+            offset++;
+            continue;
+        }
+        if (input[offset] == '\\') {
+            gsize next = css_syntax_escape_end(input, length, offset);
+            if (next == offset) break;
+            offset = next;
+            continue;
+        }
+        break;
+    }
+    return offset;
+}
+
+/* CSS Syntax "two code points are a valid escape" check at offset. */
+static gboolean
+css_syntax_valid_escape(const char *input, gsize length, gsize offset)
+{
+    return offset + 1 < length && input[offset] == '\\' &&
+           input[offset + 1] != '\n' && input[offset + 1] != '\r' &&
+           input[offset + 1] != '\f';
+}
+
+/* CSS Syntax "would start an ident sequence" check at offset. */
+static gboolean
+css_syntax_starts_ident(const char *input, gsize length, gsize offset)
+{
+    if (offset >= length) return FALSE;
+    char a = input[offset];
+    if (css_syntax_name_start((guchar)a)) return TRUE;
+    if (a == '\\') return css_syntax_valid_escape(input, length, offset);
+    if (a != '-') return FALSE;
+    if (offset + 1 >= length) return FALSE;
+    char b = input[offset + 1];
+    return css_syntax_name_start((guchar)b) || b == '-' ||
+           css_syntax_valid_escape(input, length, offset + 1);
+}
+
+/* CSS Syntax "starts with a number" check at offset. */
+static gboolean
+css_syntax_starts_number(const char *input, gsize length, gsize offset)
+{
+    if (offset >= length) return FALSE;
+    char a = input[offset];
+    char b = offset + 1 < length ? input[offset + 1] : '\0';
+    char c = offset + 2 < length ? input[offset + 2] : '\0';
+    if (g_ascii_isdigit(a)) return TRUE;
+    if (a == '.') return g_ascii_isdigit(b);
+    if (a == '+' || a == '-')
+        return g_ascii_isdigit(b) || (b == '.' && g_ascii_isdigit(c));
+    return FALSE;
+}
+
+/* Consumes a number (sign, digits, fraction, exponent); returns the end offset. */
+static gsize
+css_syntax_number_end(const char *input, gsize length, gsize offset)
+{
+    if (offset < length && (input[offset] == '+' || input[offset] == '-'))
+        offset++;
+    while (offset < length && g_ascii_isdigit(input[offset])) offset++;
+    if (offset + 1 < length && input[offset] == '.' &&
+        g_ascii_isdigit(input[offset + 1])) {
+        offset++;
+        while (offset < length && g_ascii_isdigit(input[offset])) offset++;
+    }
+    if (offset < length && (input[offset] == 'e' || input[offset] == 'E')) {
+        gsize exponent = offset + 1;
+        if (exponent < length &&
+            (input[exponent] == '+' || input[exponent] == '-'))
+            exponent++;
+        if (exponent < length && g_ascii_isdigit(input[exponent])) {
+            offset = exponent + 1;
+            while (offset < length && g_ascii_isdigit(input[offset])) offset++;
+        }
+    }
+    return offset;
+}
+
+static ns_css_component *
+css_component_new(ns_css_component_type type, gsize start)
+{
+    ns_css_component *component = g_new0(ns_css_component, 1);
+    component->type = type;
+    component->start = start;
+    return component;
+}
+
+static void
+ns_css_component_free(ns_css_component *component)
+{
+    if (!component) return;
+    g_free(component->value);
+    if (component->children) g_ptr_array_free(component->children, TRUE);
+    g_free(component);
+}
+
+/* Skips a comment, running to end of input if unterminated. */
+static void
+css_syntax_skip_comment(ns_css_syntax_parser *parser)
+{
+    parser->offset += 2;
+    while (parser->offset + 1 < parser->length &&
+           !(parser->input[parser->offset] == '*' &&
+             parser->input[parser->offset + 1] == '/'))
+        parser->offset++;
+    if (parser->offset + 1 < parser->length)
+        parser->offset += 2;
+    else
+        parser->offset = parser->length;
+}
+
+static GPtrArray *css_syntax_parse_list(ns_css_syntax_parser *parser,
+                                        char closing);
+
+/* Consumes a quoted string token; an unescaped newline marks the parse invalid. */
+static ns_css_component *
+css_syntax_consume_string(ns_css_syntax_parser *parser)
+{
+    gsize start = parser->offset;
+    char quote = parser->input[parser->offset++];
+    GString *value = g_string_new(NULL);
+    while (parser->offset < parser->length) {
+        char c = parser->input[parser->offset++];
+        if (c == quote) break;
+        if (c == '\n' || c == '\r' || c == '\f') {
+            parser->valid = FALSE;
+            break;
+        }
+        if (c == '\\' && parser->offset < parser->length) {
+            gsize escape = parser->offset - 1;
+            gsize next = css_syntax_escape_end(parser->input, parser->length,
+                                               escape);
+            if (next == escape) {
+                parser->valid = FALSE;
+                break;
+            }
+            g_string_append_len(value, parser->input + escape,
+                                (gssize)(next - escape));
+            parser->offset = next;
+        } else {
+            g_string_append_c(value, c);
+        }
+    }
+    ns_css_component *component =
+        css_component_new(NS_CSS_COMPONENT_STRING, start);
+    component->end = parser->offset;
+    component->value = g_string_free(value, FALSE);
+    component->delimiter = quote;
+    return component;
+}
+
+/* Consumes a number, percentage or dimension token; value holds the unit. */
+static ns_css_component *
+css_syntax_consume_numeric(ns_css_syntax_parser *parser)
+{
+    gsize start = parser->offset;
+    gsize number_end = css_syntax_number_end(parser->input, parser->length,
+                                             start);
+    char *number = g_strndup(parser->input + start, number_end - start);
+    ns_css_component_type type = NS_CSS_COMPONENT_NUMBER;
+    gsize end = number_end;
+    if (end < parser->length && parser->input[end] == '%') {
+        type = NS_CSS_COMPONENT_PERCENTAGE;
+        end++;
+    } else if (css_syntax_starts_ident(parser->input, parser->length, end)) {
+        type = NS_CSS_COMPONENT_DIMENSION;
+        end = css_syntax_name_end(parser->input, parser->length, end);
+    }
+    ns_css_component *component = css_component_new(type, start);
+    component->end = end;
+    component->number = g_ascii_strtod(number, NULL);
+    component->value = g_strndup(parser->input + number_end, end - number_end);
+    parser->offset = end;
+    g_free(number);
+    return component;
+}
+
+/* Consumes an ident, at-keyword, hash or function (with parsed arguments). */
+static ns_css_component *
+css_syntax_consume_ident(ns_css_syntax_parser *parser, gboolean at,
+                         gboolean hash)
+{
+    gsize start = parser->offset;
+    if (at || hash) parser->offset++;
+    gsize name_start = parser->offset;
+    parser->offset = css_syntax_name_end(parser->input, parser->length,
+                                         parser->offset);
+    ns_css_component_type type = at ? NS_CSS_COMPONENT_AT_KEYWORD
+                                    : hash ? NS_CSS_COMPONENT_HASH
+                                           : NS_CSS_COMPONENT_IDENT;
+    if (!at && !hash && parser->offset < parser->length &&
+        parser->input[parser->offset] == '(') {
+        type = NS_CSS_COMPONENT_FUNCTION;
+        parser->offset++;
+    }
+    ns_css_component *component = css_component_new(type, start);
+    component->value = g_strndup(parser->input + name_start,
+                                 parser->offset - name_start -
+                                 (type == NS_CSS_COMPONENT_FUNCTION ? 1 : 0));
+    if (type == NS_CSS_COMPONENT_FUNCTION) {
+        component->children = css_syntax_parse_list(parser, ')');
+        component->delimiter = ')';
+    }
+    component->end = parser->offset;
+    return component;
+}
+
+/* Consumes one component value: whitespace, string, numeric, ident-like, delim or block. */
+static ns_css_component *
+css_syntax_consume(ns_css_syntax_parser *parser)
+{
+    gsize start = parser->offset;
+    char c = parser->input[parser->offset];
+    if (ns_is_ascii_ws(c)) {
+        while (parser->offset < parser->length &&
+               ns_is_ascii_ws(parser->input[parser->offset]))
+            parser->offset++;
+        ns_css_component *component =
+            css_component_new(NS_CSS_COMPONENT_WHITESPACE, start);
+        component->end = parser->offset;
+        return component;
+    }
+    if (c == '"' || c == '\'') return css_syntax_consume_string(parser);
+    if (css_syntax_starts_number(parser->input, parser->length,
+                                 parser->offset))
+        return css_syntax_consume_numeric(parser);
+    if (c == '@' &&
+        css_syntax_starts_ident(parser->input, parser->length,
+                                parser->offset + 1))
+        return css_syntax_consume_ident(parser, TRUE, FALSE);
+    if (c == '#' && parser->offset + 1 < parser->length &&
+        (css_syntax_name((guchar)parser->input[parser->offset + 1]) ||
+         css_syntax_valid_escape(parser->input, parser->length,
+                                 parser->offset + 1)))
+        return css_syntax_consume_ident(parser, FALSE, TRUE);
+    if (css_syntax_starts_ident(parser->input, parser->length, parser->offset))
+        return css_syntax_consume_ident(parser, FALSE, FALSE);
+    parser->offset++;
+    ns_css_component_type type = c == ':' ? NS_CSS_COMPONENT_COLON
+        : c == ';' ? NS_CSS_COMPONENT_SEMICOLON
+        : c == ',' ? NS_CSS_COMPONENT_COMMA : NS_CSS_COMPONENT_DELIM;
+    ns_css_component *component = css_component_new(type, start);
+    component->end = parser->offset;
+    component->delimiter = c;
+    if (c == '(' || c == '[' || c == '{') {
+        component->type = NS_CSS_COMPONENT_BLOCK;
+        component->delimiter = c == '(' ? ')' : c == '[' ? ']' : '}';
+        component->children = css_syntax_parse_list(parser,
+                                                     component->delimiter);
+        component->end = parser->offset;
+    }
+    return component;
+}
+
+/* Parses component values up to closing; stray closers or excess depth mark invalid. */
+static GPtrArray *
+css_syntax_parse_list(ns_css_syntax_parser *parser, char closing)
+{
+    GPtrArray *components =
+        g_ptr_array_new_with_free_func((GDestroyNotify)ns_css_component_free);
+    if (++parser->depth > CSS_SYNTAX_MAX_DEPTH) {
+        parser->valid = FALSE;
+        parser->offset = parser->length;
+        parser->depth--;
+        return components;
+    }
+    while (parser->offset < parser->length) {
+        char c = parser->input[parser->offset];
+        if (c == '/' && parser->offset + 1 < parser->length &&
+            parser->input[parser->offset + 1] == '*') {
+            css_syntax_skip_comment(parser);
+            continue;
+        }
+        if (closing && c == closing) {
+            parser->offset++;
+            break;
+        }
+        if (c == ')' || c == ']' || c == '}') {
+            parser->valid = FALSE;
+            parser->offset++;
+            if (closing) break;
+            continue;
+        }
+        g_ptr_array_add(components, css_syntax_consume(parser));
+    }
+    parser->depth--;
+    return components;
+}
+
+/* Parses input into a component value tree; *valid reports syntax errors. Caller frees. */
+GPtrArray *
+ns_css_component_values_parse(const char *input, gssize len, gboolean *valid)
+{
+    ns_css_syntax_parser parser = {
+        .input = input ? input : "",
+        .length = input ? (len < 0 ? strlen(input) : (gsize)len) : 0,
+        .valid = TRUE,
+    };
+    GPtrArray *components = css_syntax_parse_list(&parser, 0);
+    if (valid) *valid = parser.valid;
+    return components;
+}
+
+/* Returns the first top-level terminator char outside strings, comments and brackets. */
+const char *
+ns_css_syntax_scan(const char *input, const char *end,
+                   const char *terminators, char *terminator)
+{
+    const char *p = input;
+    char quote = 0;
+    char stack[128];
+    guint depth = 0;
+    if (terminator) *terminator = 0;
+    while (p < end) {
+        char c = *p;
+        if (quote) {
+            if (c == '\\' && p + 1 < end) {
+                p += 2;
+                continue;
+            }
+            if (c == quote || c == '\n' || c == '\r' || c == '\f') quote = 0;
+            p++;
+            continue;
+        }
+        if (c == '/' && p + 1 < end && p[1] == '*') {
+            p += 2;
+            while (p + 1 < end && !(p[0] == '*' && p[1] == '/')) p++;
+            p = p + 1 < end ? p + 2 : end;
+            continue;
+        }
+        if (c == '\\' && p + 1 < end) {
+            p += 2;
+            continue;
+        }
+        if (c == '"' || c == '\'') {
+            quote = c;
+            p++;
+            continue;
+        }
+        if (depth == 0 && strchr(terminators, c)) {
+            if (terminator) *terminator = c;
+            return p;
+        }
+        if (c == '(' || c == '[' || c == '{') {
+            if (depth < G_N_ELEMENTS(stack))
+                stack[depth++] = c == '(' ? ')' : c == '[' ? ']' : '}';
+        } else if (depth > 0 && c == stack[depth - 1]) {
+            depth--;
+        }
+        p++;
+    }
+    return p;
+}
+
+/* True if CSS text ends with every string, comment, block and at-rule closed. */
+gboolean
+ns_css_syntax_is_self_contained(const char *input, gsize len)
+{
+    const char *p = input;
+    const char *end = input + len;
+    char quote = 0;
+    char stack[128];
+    guint depth = 0;
+    enum { STMT_NONE, STMT_AT, STMT_QUALIFIED } stmt = STMT_NONE;
+    while (p < end) {
+        char c = *p;
+        if (quote) {
+            if (c == '\\' && p + 1 < end) {
+                p += 2;
+                continue;
+            }
+            if (c == quote || c == '\n' || c == '\r' || c == '\f') quote = 0;
+            p++;
+            continue;
+        }
+        if (c == '/' && p + 1 < end && p[1] == '*') {
+            p += 2;
+            while (p + 1 < end && !(p[0] == '*' && p[1] == '/')) p++;
+            if (p + 1 >= end) return FALSE;
+            p += 2;
+            continue;
+        }
+        if (g_ascii_isspace(c)) {
+            p++;
+            continue;
+        }
+        if (depth == 0 && stmt == STMT_NONE) {
+            if (end - p >= 4 && memcmp(p, "<!--", 4) == 0) {
+                p += 4;
+                continue;
+            }
+            if (end - p >= 3 && memcmp(p, "-->", 3) == 0) {
+                p += 3;
+                continue;
+            }
+            stmt = c == '@' ? STMT_AT : STMT_QUALIFIED;
+        }
+        if (c == '\\') {
+            if (p + 1 >= end) return FALSE;
+            p += 2;
+            continue;
+        }
+        if (c == '"' || c == '\'') {
+            quote = c;
+        } else if (c == '(' || c == '[' || c == '{') {
+            if (depth == G_N_ELEMENTS(stack)) return FALSE;
+            stack[depth++] = c == '(' ? ')' : c == '[' ? ']' : '}';
+        } else if (depth > 0 && c == stack[depth - 1]) {
+            depth--;
+            if (depth == 0 && c == '}') stmt = STMT_NONE;
+        } else if (c == ';' && depth == 0 && stmt == STMT_AT) {
+            stmt = STMT_NONE;
+        }
+        p++;
+    }
+    return !quote && depth == 0 && stmt == STMT_NONE;
+}
+
+/* True if input parses as component values with no syntax errors. */
+gboolean
+ns_css_component_value_valid(const char *input)
+{
+    gboolean valid = FALSE;
+    GPtrArray *components =
+        ns_css_component_values_parse(input ? input : "", -1, &valid);
+    g_ptr_array_free(components, TRUE);
+    return valid;
+}
+
+/* Replaces CSS comments outside strings with a space; caller frees. */
+char *
+ns_css_strip_comments(const char *input)
+{
+    GString *out = g_string_sized_new(strlen(input));
+    char quote = 0;
+    for (const char *p = input; *p; p++) {
+        if (quote) {
+            if (*p == '\\' && p[1]) {
+                g_string_append_c(out, *p++);
+            } else if (*p == quote) {
+                quote = 0;
+            }
+            g_string_append_c(out, *p);
+            continue;
+        }
+        if (p[0] == '/' && p[1] == '*') {
+            const char *close = strstr(p + 2, "*/");
+            g_string_append_c(out, ' ');
+            if (!close) break;
+            p = close + 1;
+            continue;
+        }
+        if (*p == '"' || *p == '\'') quote = *p;
+        g_string_append_c(out, *p);
+    }
+    return g_string_free(out, FALSE);
+}

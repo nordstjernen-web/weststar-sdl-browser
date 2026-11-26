@@ -1,0 +1,788 @@
+/* Northstar Web Browser — process entry point: environment setup, sandbox, then GUI or headless.
+ * Locates bundled data (Windows/macOS), picks the GSK renderer and filters GLib logging.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+#include <gtk/gtk.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#ifdef main
+#undef main
+#endif
+
+#ifdef G_OS_WIN32
+#include <windows.h>
+#include <io.h>
+#include <fcntl.h>
+#else
+#include <glib-unix.h>
+#endif
+
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+
+#if defined(G_OS_WIN32) && defined(NS_HAVE_FONTCONFIG)
+#include <fontconfig/fontconfig.h>
+#endif
+
+#include <web-text-lib/ns-pango-cache.h>
+
+#include "audio/audio.h"
+#include "bytecode_cache.h"
+#include "cache.h"
+#include "config.h"
+#include "debuglog.h"
+#include "font.h"
+#include "glctx.h"
+#include "gstvideo.h"
+#include "mfvideo.h"
+#include "engine.h"
+#include "headless.h"
+#include "spellcheck.h"
+#include "history.h"
+#include "i18n.h"
+#include "net.h"
+#include "procview.h"
+#include "procwindow.h"
+#include "ext.h"
+#include "security.h"
+#include "threaddump.h"
+#include "trace.h"
+#include "version.h"
+#include "watchdog.h"
+#include "webgl.h"
+
+static char *g_self_exe;
+
+const char *
+ns_app_self_exe(void)
+{
+    return g_self_exe;
+}
+
+/* Resolves the absolute path of the running executable per platform, falling back to argv0. */
+static void
+init_self_exe(const char *argv0)
+{
+#ifdef __linux__
+    char *resolved = g_file_read_link("/proc/self/exe", NULL);
+    if (resolved) { g_self_exe = resolved; return; }
+#endif
+#ifdef __APPLE__
+    {
+        uint32_t size = 0;
+        _NSGetExecutablePath(NULL, &size);
+        if (size > 0 && size <= 32768) {
+            char *raw = g_malloc(size);
+            if (_NSGetExecutablePath(raw, &size) == 0) {
+                char *real = realpath(raw, NULL);
+                if (real) {
+                    g_self_exe = g_strdup(real);
+                    free(real);
+                } else {
+                    g_self_exe = g_strdup(raw);
+                }
+            }
+            g_free(raw);
+            if (g_self_exe) return;
+        }
+    }
+#endif
+#ifdef G_OS_WIN32
+    {
+        DWORD cap = MAX_PATH;
+        wchar_t *buf = g_new(wchar_t, cap);
+        DWORD n = GetModuleFileNameW(NULL, buf, cap);
+        while (n >= cap && cap < 32768) {
+            cap *= 2;
+            buf = g_renew(wchar_t, buf, cap);
+            n = GetModuleFileNameW(NULL, buf, cap);
+        }
+        if (n > 0 && n < cap)
+            g_self_exe = g_utf16_to_utf8((gunichar2 *)buf, -1, NULL, NULL, NULL);
+        g_free(buf);
+        if (g_self_exe) return;
+    }
+#endif
+    if (argv0) {
+        if (g_path_is_absolute(argv0))
+            g_self_exe = g_strdup(argv0);
+        else
+            g_self_exe = g_find_program_in_path(argv0);
+        if (!g_self_exe) g_self_exe = g_strdup(argv0);
+    }
+}
+
+/* GLib log writer: drops known-harmless GTK noise and mirrors messages into the debug log. */
+static GLogWriterOutput
+ns_log_writer(GLogLevelFlags log_level,
+              const GLogField *fields, gsize n_fields,
+              gpointer user_data)
+{
+    (void)user_data;
+    const char *captured = NULL;
+    const char *captured_domain = NULL;
+    for (gsize i = 0; i < n_fields; i++) {
+        if (g_strcmp0(fields[i].key, "MESSAGE") == 0 && fields[i].value) {
+            const char *m = fields[i].value;
+            captured = m;
+            if (strstr(m, "win32 session dbus binary not found") ||
+                strstr(m, "but sizes must be >= 0") ||
+                strstr(m, "Baselines must be inside the widget size") ||
+                strstr(m, "without a current allocation") ||
+                strstr(m, "No IM module matching GTK_IM_MODULE="))
+                return G_LOG_WRITER_HANDLED;
+        }
+        if (g_strcmp0(fields[i].key, "GLIB_DOMAIN") == 0 && fields[i].value)
+            captured_domain = fields[i].value;
+    }
+    if (captured) {
+        ns_dlog_level lvl = NS_DLOG_INFO;
+        if (log_level & (G_LOG_LEVEL_ERROR | G_LOG_LEVEL_CRITICAL))
+            lvl = NS_DLOG_ERROR;
+        else if (log_level & G_LOG_LEVEL_WARNING)
+            lvl = NS_DLOG_WARN;
+        ns_debug_log_emit(lvl, captured_domain ? captured_domain : "glib",
+                          "%s", captured);
+    }
+    return g_log_writer_default(log_level, fields, n_fields, user_data);
+}
+
+#ifdef G_OS_WIN32
+
+__declspec(dllimport) HRESULT __stdcall
+SetCurrentProcessExplicitAppUserModelID(PCWSTR AppID);
+
+/* Sets the Windows AppUserModelID so taskbar grouping and pinning work. */
+static void
+ns_win32_set_app_id(void)
+{
+    (void)SetCurrentProcessExplicitAppUserModelID(L"Northstar.Browser");
+}
+
+/* Points fontconfig at the bundled fonts.conf and forces the fc Pango backend (Windows). */
+static void
+ns_win32_use_fontconfig_backend(const char *dir)
+{
+#ifdef NS_HAVE_FONTCONFIG
+    if (dir && !g_getenv("FONTCONFIG_FILE")) {
+        char *conf = g_build_filename(dir, "etc", "fonts", "fonts.conf", NULL);
+        if (g_file_test(conf, G_FILE_TEST_EXISTS))
+            g_setenv("FONTCONFIG_FILE", conf, TRUE);
+        g_free(conf);
+    }
+    if (dir && !g_getenv("FONTCONFIG_PATH")) {
+        char *fonts = g_build_filename(dir, "etc", "fonts", NULL);
+        if (g_file_test(fonts, G_FILE_TEST_IS_DIR))
+            g_setenv("FONTCONFIG_PATH", fonts, TRUE);
+        g_free(fonts);
+    }
+    if (!g_getenv("PANGOCAIRO_BACKEND"))
+        g_setenv("PANGOCAIRO_BACKEND", "fc", TRUE);
+    if (!g_getenv("NS_PANGOCAIRO_BACKEND"))
+        g_setenv("NS_PANGOCAIRO_BACKEND", "fc", TRUE);
+    FcInit();
+#endif
+}
+
+/* Points GTK, pixbuf loaders and CA bundle env vars at data next to the exe (Windows). */
+static void
+ns_win32_anchor_gtk_data(void)
+{
+    if (!g_self_exe) {
+        ns_win32_use_fontconfig_backend(NULL);
+        return;
+    }
+    char *dir = g_path_get_dirname(g_self_exe);
+    if (!dir) {
+        ns_win32_use_fontconfig_backend(NULL);
+        return;
+    }
+    ns_win32_use_fontconfig_backend(dir);
+    char *share_dir = g_build_filename(dir, "share", NULL);
+    if (g_file_test(share_dir, G_FILE_TEST_IS_DIR)) {
+        if (!g_getenv("GTK_DATA_PREFIX")) g_setenv("GTK_DATA_PREFIX", dir, TRUE);
+        if (!g_getenv("GTK_EXE_PREFIX"))  g_setenv("GTK_EXE_PREFIX",  dir, TRUE);
+        if (!g_getenv("XDG_DATA_DIRS"))   g_setenv("XDG_DATA_DIRS", share_dir, TRUE);
+    }
+    g_free(share_dir);
+    if (!g_getenv("GDK_PIXBUF_MODULE_FILE")) {
+        char *loaders = g_build_filename(dir,
+            "lib", "gdk-pixbuf-2.0", "2.10.0", "loaders.cache", NULL);
+        if (g_file_test(loaders, G_FILE_TEST_EXISTS))
+            g_setenv("GDK_PIXBUF_MODULE_FILE", loaders, TRUE);
+        g_free(loaders);
+    }
+    {
+        char *ca = g_build_filename(dir,
+            "etc", "ssl", "certs", "ca-bundle.crt", NULL);
+        if (g_file_test(ca, G_FILE_TEST_EXISTS)) {
+            if (!g_getenv("CURL_CA_BUNDLE")) g_setenv("CURL_CA_BUNDLE", ca, TRUE);
+            if (!g_getenv("SSL_CERT_FILE"))  g_setenv("SSL_CERT_FILE",  ca, TRUE);
+        }
+        g_free(ca);
+    }
+    g_free(dir);
+}
+
+/* TRUE if the arguments request a console-output mode (headless, dump, eval, ...). */
+static gboolean
+ns_win32_args_need_console(int argc, char **argv)
+{
+    for (int i = 1; i < argc; i++) {
+        if (!argv[i]) continue;
+        if (g_strcmp0(argv[i], "--headless")     == 0 ||
+            g_strcmp0(argv[i], "--print-config") == 0 ||
+            g_strcmp0(argv[i], "--version")      == 0 ||
+            g_strcmp0(argv[i], "--wpt")          == 0 ||
+            g_str_has_prefix(argv[i], "--dump=") ||
+            g_str_has_prefix(argv[i], "--export=") ||
+            g_str_has_prefix(argv[i], "--url=")  ||
+            g_str_has_prefix(argv[i], "--viewport=") ||
+            g_str_has_prefix(argv[i], "--eval=") ||
+            g_str_has_prefix(argv[i], "--inspect=") ||
+            g_str_has_prefix(argv[i], "--inspect-at=") ||
+            g_str_has_prefix(argv[i], "--wpt-timeout-ms=") ||
+            g_str_has_prefix(argv[i], "--settle-ms="))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+ns_win32_fd_is_bound(int fd)
+{
+    HANDLE h = (HANDLE)_get_osfhandle(fd);
+    return h != NULL && h != INVALID_HANDLE_VALUE;
+}
+
+/* Attaches to the parent console and rebinds unbound stdio to it, unbuffered. */
+static void
+ns_win32_attach_parent_console(void)
+{
+    if (!AttachConsole(ATTACH_PARENT_PROCESS)) return;
+    FILE *fp;
+    if (!ns_win32_fd_is_bound(_fileno(stdout)))
+        (void)freopen_s(&fp, "CONOUT$", "w", stdout);
+    if (!ns_win32_fd_is_bound(_fileno(stderr)))
+        (void)freopen_s(&fp, "CONOUT$", "w", stderr);
+    if (!ns_win32_fd_is_bound(_fileno(stdin)))
+        (void)freopen_s(&fp, "CONIN$",  "r", stdin);
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+}
+#endif
+
+#ifdef __APPLE__
+/* Points GSettings, pixbuf loaders and CA bundle env vars into the .app Resources. */
+static void
+ns_macos_anchor_gtk_data(void)
+{
+    if (!g_self_exe) return;
+    char *macos_dir = g_path_get_dirname(g_self_exe);
+    if (!macos_dir) return;
+    char *contents = g_path_get_dirname(macos_dir);
+    g_free(macos_dir);
+    if (!contents) return;
+    char *res = g_build_filename(contents, "Resources", NULL);
+    g_free(contents);
+
+    char *schemas = g_build_filename(res, "share", "glib-2.0", "schemas", NULL);
+    if (g_file_test(schemas, G_FILE_TEST_IS_DIR) &&
+        !g_getenv("GSETTINGS_SCHEMA_DIR"))
+        g_setenv("GSETTINGS_SCHEMA_DIR", schemas, TRUE);
+    g_free(schemas);
+
+    char *loaders = g_build_filename(res, "lib", "gdk-pixbuf-2.0",
+                                     "2.10.0", "loaders", NULL);
+    char *cache = g_build_filename(res, "lib", "gdk-pixbuf-2.0",
+                                   "2.10.0", "loaders.cache", NULL);
+    if (g_file_test(cache, G_FILE_TEST_EXISTS)) {
+        if (!g_getenv("GDK_PIXBUF_MODULE_FILE"))
+            g_setenv("GDK_PIXBUF_MODULE_FILE", cache, TRUE);
+        if (!g_getenv("GDK_PIXBUF_MODULEDIR"))
+            g_setenv("GDK_PIXBUF_MODULEDIR", loaders, TRUE);
+    }
+    g_free(cache);
+    g_free(loaders);
+
+    char *ca = g_build_filename(res, "etc", "ssl", "certs",
+                                "ca-bundle.crt", NULL);
+    if (g_file_test(ca, G_FILE_TEST_EXISTS)) {
+        if (!g_getenv("CURL_CA_BUNDLE")) g_setenv("CURL_CA_BUNDLE", ca, TRUE);
+        if (!g_getenv("SSL_CERT_FILE"))  g_setenv("SSL_CERT_FILE",  ca, TRUE);
+    }
+    g_free(ca);
+
+    g_free(res);
+}
+#endif
+
+#ifdef __linux__
+/* TRUE if /dev/dri has a render or card node, i.e. a usable GPU. */
+static gboolean
+ns_linux_has_gpu_render_node(void)
+{
+    GDir *dir = g_dir_open("/dev/dri", 0, NULL);
+    if (!dir) return FALSE;
+    const char *name;
+    gboolean found = FALSE;
+    while ((name = g_dir_read_name(dir))) {
+        if (g_str_has_prefix(name, "renderD") || g_str_has_prefix(name, "card")) {
+            found = TRUE;
+            break;
+        }
+    }
+    g_dir_close(dir);
+    return found;
+}
+#endif
+
+/* Sets GSK_RENDERER from preference unless set; auto falls back to cairo without a GPU. */
+static void
+ns_apply_gsk_renderer(const char *pref)
+{
+    if (g_getenv("GSK_RENDERER")) return;
+    if (!pref || !*pref ||
+        g_ascii_strcasecmp(pref, "auto")    == 0 ||
+        g_ascii_strcasecmp(pref, "default") == 0 ||
+        g_ascii_strcasecmp(pref, "system")  == 0) {
+#ifdef __linux__
+        if (!ns_linux_has_gpu_render_node()) {
+            g_setenv("GSK_RENDERER", "cairo", TRUE);
+            g_message("no GPU detected; using the software (cairo) renderer");
+        }
+#endif
+        return;
+    }
+    static const char *const known[] = {
+        "gl", "ngl", "opengl", "vulkan", "cairo", "help",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(known); i++) {
+        if (g_ascii_strcasecmp(pref, known[i]) == 0) {
+            g_setenv("GSK_RENDERER", known[i], TRUE);
+            return;
+        }
+    }
+    g_warning("ignoring unknown gsk_renderer '%s' "
+              "(expected one of: auto, gl, ngl, vulkan, cairo)", pref);
+}
+
+/* TRUE unless the arguments request a headless or tool mode, i.e. the GUI should run. */
+static gboolean
+ns_proc_mode_wanted(int argc, char **argv)
+{
+    for (int i = 1; i < argc; i++) {
+        const char *a = argv[i];
+        if (g_strcmp0(a, "--headless") == 0 ||
+            g_strcmp0(a, "--print-config") == 0 ||
+            g_strcmp0(a, "--wpt") == 0 ||
+            g_str_has_prefix(a, "--dump=") ||
+            g_str_has_prefix(a, "--export=") ||
+            g_str_has_prefix(a, "--eval=") ||
+            g_str_has_prefix(a, "--inspect=") ||
+            g_str_has_prefix(a, "--inspect-at=") ||
+            g_str_has_prefix(a, "--act="))
+            return FALSE;
+    }
+    return TRUE;
+}
+
+/* Output files named on the command line are opened now, before the
+ * sandbox, instead of granting write access to their whole directory
+ * (which for --screenshot=~/x.png would be all of $HOME) while untrusted
+ * pages render. */
+static void
+ns_preopen_screenshot_outputs(int argc, char **argv)
+{
+    for (int i = 1; i < argc; i++) {
+        const char *p = NULL;
+        if (g_str_has_prefix(argv[i], "--dump=png:")) {
+            p = argv[i] + 11;
+        } else if (g_str_has_prefix(argv[i], "--export=pdf:")) {
+            p = argv[i] + 13;
+        } else if (g_str_has_prefix(argv[i], "--screenshot=")) {
+            p = argv[i] + 13;
+        }
+        if (!p || !*p || *p == '-') continue;
+        char *dir = g_path_get_dirname(p);
+        if (dir && *dir) g_mkdir_with_parents(dir, 0700);
+        g_free(dir);
+        if (!ns_engine_preopen_output(p))
+            g_printerr("northstar: cannot write to %s\n", p);
+        /* Headless --dump captures also write a "-initial" render. */
+        if (g_str_has_prefix(argv[i], "--dump=png:")) {
+            g_autofree char *initial = ns_engine_suffix_before_ext(p, "-initial");
+            ns_engine_preopen_output(initial);
+        }
+    }
+}
+
+/* Initializes subsystems for a headless run, executes it and prints perf stats with --debug. */
+static int
+ns_run_headless(ns_headless_opts *hopts)
+{
+    ns_security_set_tool_mode(TRUE);
+    /* Headless runs skip ns_browser_init(), which applies this for the GUI. */
+    if (ns_config_get()->harden_allocator)
+        ns_security_harden_allocator();
+    ns_net_init();
+    ns_net_set_allow_file_urls(TRUE);
+    if (hopts->debug_levels & (1u << NS_DLOG_NET))
+        ns_net_set_log_fetches(TRUE);
+    ns_cache_init();
+    ns_bytecode_cache_init();
+    ns_history_init();
+    ns_font_init();
+    ns_spell_init();
+    char *file_url = NULL;
+    if (hopts->url && !strstr(hopts->url, "://") &&
+        !g_str_has_prefix(hopts->url, "about:") &&
+        !g_str_has_prefix(hopts->url, "data:") &&
+        g_file_test(hopts->url, G_FILE_TEST_EXISTS)) {
+        char *abs_path = g_canonicalize_filename(hopts->url, NULL);
+        file_url = g_filename_to_uri(abs_path, NULL, NULL);
+        g_free(abs_path);
+        if (file_url) hopts->url = file_url;
+    }
+    ns_audio_set_silent(TRUE);
+    int rc = ns_headless_run(hopts);
+    ns_audio_shutdown();
+    if (hopts->debug_levels & (1u << NS_DLOG_NET)) {
+        guint64 fetches = 0, bytes = 0, relayouts = 0;
+        double sum_ms = 0, span_ms = 0, layout_ms = 0;
+        ns_net_perf_snapshot(&fetches, &bytes, &sum_ms, &span_ms);
+        ns_engine_layout_perf(&relayouts, &layout_ms);
+        guint64 shape_hits = 0, shape_misses = 0, shape_skips = 0, shape_entries = 0;
+        guint64 brk_hits = 0, brk_misses = 0, brk_skips = 0, brk_entries = 0;
+        guint64 it_hits = 0, it_misses = 0, it_skips = 0, it_entries = 0;
+        ns_pango_cache_get_stats(&shape_hits, &shape_misses, &shape_skips,
+                                 &shape_entries);
+        ns_pango_break_cache_stats(&brk_hits, &brk_misses, &brk_skips,
+                                   &brk_entries);
+        ns_pango_item_cache_stats(&it_hits, &it_misses, &it_skips,
+                                  &it_entries);
+        g_printerr("[net perf] fetches=%" G_GUINT64_FORMAT " bytes=%"
+                   G_GUINT64_FORMAT " net_span=%.1fms net_sum=%.1fms | "
+                   "relayouts=%" G_GUINT64_FORMAT " layout=%.1fms | "
+                   "shape_cache hits=%" G_GUINT64_FORMAT " misses=%"
+                   G_GUINT64_FORMAT " skipped=%" G_GUINT64_FORMAT " entries=%"
+                   G_GUINT64_FORMAT " | break_cache hits=%" G_GUINT64_FORMAT
+                   " misses=%" G_GUINT64_FORMAT " skipped=%" G_GUINT64_FORMAT
+                   " entries=%" G_GUINT64_FORMAT " | item_cache hits=%"
+                   G_GUINT64_FORMAT " misses=%" G_GUINT64_FORMAT " skipped=%"
+                   G_GUINT64_FORMAT " entries=%" G_GUINT64_FORMAT "\n",
+                   fetches, bytes, span_ms, sum_ms, relayouts, layout_ms,
+                   shape_hits, shape_misses, shape_skips, shape_entries,
+                   brk_hits, brk_misses, brk_skips, brk_entries,
+                   it_hits, it_misses, it_skips, it_entries);
+    }
+    g_free(file_url);
+    ns_bytecode_cache_shutdown();
+    ns_history_shutdown();
+    ns_cache_shutdown();
+    ns_net_shutdown();
+    ns_config_shutdown();
+    return rc;
+}
+
+/* Runs the GUI app on the start URL (local paths become file: URLs) and returns its status. */
+static int
+ns_run_proc_gui(const char *url, const char *gsk_renderer_override,
+                const char *session_path, gboolean recover,
+                gboolean private_mode)
+{
+    const ns_config *cfg = ns_config_get();
+    ns_apply_gsk_renderer(gsk_renderer_override ? gsk_renderer_override
+                          : (cfg ? cfg->gsk_renderer : NULL));
+    const char *start = url;
+    if (!start || !*start)
+        start = (cfg && cfg->home_url && *cfg->home_url) ? cfg->home_url
+                                                         : "about:start";
+    char *file_url = NULL;
+    if (!strstr(start, "://") && !g_str_has_prefix(start, "about:") &&
+        !g_str_has_prefix(start, "data:") &&
+        g_file_test(start, G_FILE_TEST_EXISTS)) {
+        char *abs_path = g_canonicalize_filename(start, NULL);
+        file_url = g_filename_to_uri(abs_path, NULL, NULL);
+        g_free(abs_path);
+        if (file_url) start = file_url;
+    }
+    int status = ns_procapp_run(start, session_path, recover, private_mode);
+    g_free(file_url);
+    g_free(g_self_exe);
+    g_self_exe = NULL;
+    ns_config_shutdown();
+    return status;
+}
+
+/* Applies the "--" end-of-options marker in place: the marker is removed
+ * and every argument after it becomes a positional (a URL or file), never
+ * an option. Options are matched by their leading "--" in several places
+ * (here, the watchdog, the window), so an argument after the marker that
+ * begins with '-' is rewritten to "./<arg>", the relative file it names.
+ * The URL and file handlers are registered as `northstar -- "%1"`, so text
+ * smuggled into the URL by another program cannot add options such as
+ * --proxy= or --trace=. */
+static void
+ns_args_apply_end_of_options(int *argc, char **argv)
+{
+    int n = *argc;
+    int marker = 0;
+    for (int i = 1; i < n; i++)
+        if (g_strcmp0(argv[i], "--") == 0) { marker = i; break; }
+    if (!marker) return;
+    for (int i = marker; i + 1 < n; i++) {
+        char *arg = argv[i + 1];
+        argv[i] = arg && arg[0] == '-' ? g_strconcat("./", arg, NULL) : arg;
+    }
+    argv[n - 1] = NULL;
+    *argc = n - 1;
+}
+
+/* Entry point: watchdog supervision, sandbox setup, argument parsing, then GUI or headless. */
+int
+main(int argc, char **argv)
+{
+    ns_args_apply_end_of_options(&argc, argv);
+#ifdef G_OS_WIN32
+    if (ns_win32_args_need_console(argc, argv))
+        ns_win32_attach_parent_console();
+#endif
+    for (int i = 1; i < argc; i++) {
+        if (g_strcmp0(argv[i], "--version") == 0) {
+            g_print("Northstar Web Browser %s\n", NS_VERSION);
+            return 0;
+        }
+    }
+    if (!ns_security_refuse_root()) return 77;
+    init_self_exe(argc > 0 ? argv[0] : NULL);
+    ns_i18n_init(g_self_exe);
+    ns_config_init();
+
+    gboolean proc_mode = ns_proc_mode_wanted(argc, argv);
+
+    if (proc_mode) {
+        const ns_config *cfg = ns_config_get();
+        if (ns_watchdog_should_supervise(argc, argv,
+                                         cfg && cfg->watchdog_enabled)) {
+            int rc = ns_watchdog_run_supervisor(g_self_exe, argc, argv);
+            g_free(g_self_exe);
+            g_self_exe = NULL;
+            ns_config_shutdown();
+            return rc;
+        }
+    }
+
+    /* Media Foundation's decoders load from system and Store codec
+     * packages; map them before the mitigation policies narrow loading. */
+    ns_mf_video_preinit();
+    ns_security_win32_mitigations_init(proc_mode);
+    ns_preopen_screenshot_outputs(argc, argv);
+    ns_ext_migrate_default_dir();
+    /* The trace file comes from the user's own command line; open it now
+     * rather than granting its whole directory inside the sandbox. */
+    for (int i = 1; i < argc; i++)
+        if (g_str_has_prefix(argv[i], "--trace=") &&
+            !ns_trace_open(argv[i] + 8))
+            g_printerr("northstar: cannot write a trace to %s\n", argv[i] + 8);
+
+    /* Decided once, before the sandbox: the content filter below either
+     * leaves room for a GPU driver or does not, for the whole run. */
+    gboolean webgl = ns_webgl_startup();
+    if (proc_mode)
+        ns_security_add_writable_dir("/dev/shm");
+    if (proc_mode || webgl)
+        ns_security_allow_gpu_devices();
+    /* GStreamer's decoder plugins are shared objects; load them while the
+     * sandbox still lets dlopen map code. */
+    ns_gst_video_preinit();
+    ns_security_sandbox_init(g_self_exe);
+    if (webgl)
+        ns_gl_prepare_for_sandbox();
+    if (!proc_mode)
+        ns_security_deny_exec_memory(TRUE, webgl);
+    ns_security_seccomp_init();
+    /* Landlock and seccomp only bind threads created after them, so the
+     * SIGQUIT dump thread starts here. */
+    ns_thread_dump_install_signal("northstar");
+    ns_debug_log_init();
+    g_log_set_writer_func(ns_log_writer, NULL, NULL);
+#ifdef G_OS_WIN32
+    ns_win32_set_app_id();
+    ns_win32_anchor_gtk_data();
+#endif
+#ifdef __APPLE__
+    ns_macos_anchor_gtk_data();
+#endif
+
+    const char *gsk_renderer_override = NULL;
+    gboolean private_window = FALSE;
+    ns_headless_opts hopts = {
+        .url = NULL,
+        .dump = NS_DUMP_TEXT,
+        .out_path = NULL,
+        .viewport_width = 1000,
+        .settle_ms = 200,
+        .time_ms = 1000,
+    };
+    gboolean dump_set = FALSE;
+    for (int i = 1; i < argc; i++) {
+        if (g_str_has_prefix(argv[i], "--proxy=")) {
+            const char *pxy = argv[i] + 8;
+            ns_net_set_proxy_override(pxy);
+            if (pxy && *pxy) {
+                g_setenv("NS_HTTP_PROXY", pxy, TRUE);
+                g_setenv("NS_HTTPS_PROXY", pxy, TRUE);
+            }
+        } else if (g_str_has_prefix(argv[i], "--gsk-renderer=")) {
+            gsk_renderer_override = argv[i] + 15;
+        } else if (g_strcmp0(argv[i], "--private") == 0) {
+            private_window = TRUE;
+        } else if (g_strcmp0(argv[i], "--ignore-certificate-errors") == 0) {
+            ns_net_set_ignore_cert_errors(TRUE);
+        } else if (g_str_has_prefix(argv[i], "--window-size=")) {
+            char *end = NULL;
+            gint64 w = g_ascii_strtoll(argv[i] + 14, &end, 10);
+            if (end != argv[i] + 14 && (*end == 'x' || *end == 'X') &&
+                w > 0 && w < 100000) {
+                const char *hs = end + 1;
+                gint64 h = g_ascii_strtoll(hs, &end, 10);
+                if (end != hs && *end == '\0' && h > 0 && h < 100000)
+                    ns_procapp_set_window_size((int)w, (int)h);
+            }
+        } else if (g_strcmp0(argv[i], "--print-config") == 0) {
+            char *dump = ns_config_dump();
+            fputs(dump, stdout);
+            g_free(dump);
+            ns_config_shutdown();
+            return 0;
+        } else if (g_strcmp0(argv[i], "--headless") == 0) {
+        } else if (g_str_has_prefix(argv[i], "--dump=")) {
+            const char *v = argv[i] + 7;
+            dump_set = TRUE;
+            if      (g_strcmp0(v, "text")   == 0) hopts.dump = NS_DUMP_TEXT;
+            else if (g_strcmp0(v, "dom")    == 0) hopts.dump = NS_DUMP_DOM;
+            else if (g_strcmp0(v, "layout") == 0) hopts.dump = NS_DUMP_LAYOUT;
+            else if (g_strcmp0(v, "none")   == 0) hopts.dump = NS_DUMP_NONE;
+            else if (g_str_has_prefix(v, "png:")) { hopts.dump = NS_DUMP_PNG; hopts.out_path = v + 4; }
+            else {
+                fprintf(stderr,
+                        "northstar: --dump wants text, dom, layout, none "
+                        "or png:FILE, got '%s'%s\n", v,
+                        g_str_has_prefix(v, "pdf:")
+                            ? "; write a PDF with --export=pdf:FILE" : "");
+                return 2;
+            }
+        } else if (g_str_has_prefix(argv[i], "--export=")) {
+            const char *v = argv[i] + 9;
+            dump_set = TRUE;
+            if (g_str_has_prefix(v, "pdf:") && v[4]) {
+                hopts.dump = NS_DUMP_PDF;
+                hopts.out_path = v + 4;
+            } else {
+                fprintf(stderr,
+                        "northstar: --export wants pdf:FILE, got '%s'\n", v);
+                return 2;
+            }
+        } else if (g_str_has_prefix(argv[i], "--viewport=")) {
+            const char *spec = argv[i] + 11;
+            char *end = NULL;
+            gint64 w = g_ascii_strtoll(spec, &end, 10);
+            gboolean ok = end != spec && w > 0 && w < 100000;
+            gint64 h = 0;
+            if (ok && (*end == 'x' || *end == 'X')) {
+                const char *hs = end + 1;
+                h = g_ascii_strtoll(hs, &end, 10);
+                ok = end != hs && *end == '\0' && h > 0 && h < 100000;
+            } else if (ok) {
+                ok = *end == '\0';
+            }
+            if (!ok) {
+                fprintf(stderr,
+                        "northstar: --viewport wants WIDTH or WIDTHxHEIGHT, "
+                        "got '%s'\n", spec);
+                return 2;
+            }
+            hopts.viewport_width = (int)w;
+            hopts.viewport_set = TRUE;
+            if (h > 0) hopts.viewport_height = (int)h;
+        } else if (g_str_has_prefix(argv[i], "--viewport-height=")) {
+            char *end = NULL;
+            gint64 n = g_ascii_strtoll(argv[i] + 18, &end, 10);
+            if (end != argv[i] + 18 && *end == '\0' && n > 0 && n < 100000)
+                hopts.viewport_height = (int)n;
+        } else if (g_str_has_prefix(argv[i], "--settle-ms=")) {
+            char *end = NULL;
+            gint64 n = g_ascii_strtoll(argv[i] + 12, &end, 10);
+            if (end != argv[i] + 12 && *end == '\0' && n >= 0 && n < 600000)
+                hopts.settle_ms = (int)n;
+        } else if (g_str_has_prefix(argv[i], "--time-ms=")) {
+            char *end = NULL;
+            gint64 n = g_ascii_strtoll(argv[i] + 10, &end, 10);
+            if (end != argv[i] + 10 && *end == '\0' && n >= 0 && n < 600000)
+                hopts.time_ms = (int)n;
+        } else if (g_strcmp0(argv[i], "--wpt") == 0) {
+            hopts.wpt = TRUE;
+        } else if (g_str_has_prefix(argv[i], "--wpt-timeout-ms=")) {
+            char *end = NULL;
+            gint64 n = g_ascii_strtoll(argv[i] + 17, &end, 10);
+            if (end != argv[i] + 17 && *end == '\0' && n > 0 && n < 600000)
+                hopts.wpt_timeout_ms = (int)n;
+        } else if (g_str_has_prefix(argv[i], "--act=")) {
+            hopts.actions = argv[i] + 6;
+        } else if (g_str_has_prefix(argv[i], "--eval=")) {
+            hopts.eval = argv[i] + 7;
+        } else if (g_str_has_prefix(argv[i], "--inspect=")) {
+            hopts.inspect = argv[i] + 10;
+        } else if (g_str_has_prefix(argv[i], "--inspect-at=")) {
+            hopts.inspect_at = argv[i] + 13;
+        } else if (g_strcmp0(argv[i], "--debug") == 0) {
+            hopts.debug_levels = ns_headless_debug_mask("all");
+        } else if (g_str_has_prefix(argv[i], "--debug=")) {
+            hopts.debug_levels = ns_headless_debug_mask(argv[i] + 8);
+        } else if (g_str_has_prefix(argv[i], "--url=")) {
+            hopts.url = argv[i] + 6;
+        } else if (argv[i][0] != '-' && !hopts.url) {
+            hopts.url = argv[i];
+        }
+    }
+    if (private_window)
+        ns_config_mut()->private_mode = TRUE;
+    if (ns_net_ignore_cert_errors())
+        g_printerr("northstar: warning: --ignore-certificate-errors is on; "
+                   "pages with an untrusted TLS certificate will load. Use "
+                   "it only for servers you control.\n");
+    if (!dump_set && (hopts.inspect || hopts.inspect_at || hopts.wpt))
+        hopts.dump = NS_DUMP_NONE;
+
+    if (proc_mode) {
+        if (ns_watchdog_is_child(argc, argv)) {
+            ns_watchdog_child_guard_parent_death();
+            const ns_config *wcfg = ns_config_get();
+            ns_watchdog_child_arm_hang_monitor(
+                wcfg ? wcfg->js_eval_budget_ms : 0);
+        }
+        const char *session = ns_watchdog_child_session_arg(argc, argv);
+        gboolean recover = ns_watchdog_child_is_recovery();
+        int gui_rc = ns_run_proc_gui(hopts.url, gsk_renderer_override, session,
+                                     recover, private_window);
+        ns_trace_close();
+        return gui_rc;
+    }
+
+    ns_apply_gsk_renderer(gsk_renderer_override ? gsk_renderer_override
+                          : (ns_config_get() ? ns_config_get()->gsk_renderer
+                                             : NULL));
+    int headless_rc = ns_run_headless(&hopts);
+    ns_trace_close();
+    if (!ns_net_idle()) {
+        fflush(NULL);
+        _exit(headless_rc);
+    }
+    return headless_rc;
+}
