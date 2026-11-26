@@ -15116,9 +15116,9 @@ box_hit_untransform_point(const ns_box *b, double *x, double *y)
     ns_mat4 m;
     ns_css_transform_to_mat4(&eff, bw, bh, &m);
     if (!mat4_maps_xy_plane_affinely(&m)) return TRUE;
-    cairo_matrix_t cm;
-    cairo_matrix_init(&cm, m.m[0], m.m[4], m.m[1], m.m[5], m.m[3], m.m[7]);
-    if (cairo_matrix_invert(&cm) != CAIRO_STATUS_SUCCESS) return FALSE;
+    gfx_matrix_t cm;
+    gfx_matrix_init(&cm, m.m[0], m.m[4], m.m[1], m.m[5], m.m[3], m.m[7]);
+    if (gfx_matrix_invert(&cm) != GFX_STATUS_SUCCESS) return FALSE;
     double px = *x - ox, py = *y - oy;
     double qx = cm.xx * px + cm.xy * py + cm.x0;
     double qy = cm.yx * px + cm.yy * py + cm.y0;

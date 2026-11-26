@@ -6,7 +6,7 @@
 #ifndef NS_PAINT_H
 #define NS_PAINT_H
 
-#include <cairo.h>
+#include "gfx.h"
 #include <glib.h>
 #include "ns_pango.h"
 
@@ -17,8 +17,8 @@ G_BEGIN_DECLS
 
 struct ns_selection;
 struct ns_anim;
-void ns_paint(cairo_t *cr, const ns_box *root, const char *highlight_query);
-void ns_paint_with_selection(cairo_t *cr, const ns_box *root,
+void ns_paint(gfx_t *cr, const ns_box *root, const char *highlight_query);
+void ns_paint_with_selection(gfx_t *cr, const ns_box *root,
                              const char *highlight_query,
                              const struct ns_selection *sel);
 void ns_paint_set_js(ns_js *js);

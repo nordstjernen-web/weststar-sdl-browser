@@ -220,6 +220,23 @@ gfx_destroy(gfx_t *g)
     free(g);
 }
 
+const char *
+gfx_status_to_string(gfx_status_t status)
+{
+    switch (status) {
+    case GFX_STATUS_SUCCESS:           return "no error";
+    case GFX_STATUS_NO_MEMORY:         return "out of memory";
+    case GFX_STATUS_INVALID_RESTORE:   return "restore without a matching save";
+    case GFX_STATUS_INVALID_POP_GROUP: return "pop_group without a matching push_group";
+    case GFX_STATUS_NO_CURRENT_POINT:  return "no current point";
+    case GFX_STATUS_INVALID_MATRIX:    return "invalid matrix";
+    case GFX_STATUS_INVALID_SIZE:      return "invalid size";
+    case GFX_STATUS_INVALID_FORMAT:    return "invalid format";
+    case GFX_STATUS_WRITE_ERROR:       return "error while writing";
+    }
+    return "unknown error";
+}
+
 gfx_status_t
 gfx_status(const gfx_t *g)
 {

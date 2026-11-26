@@ -48,10 +48,10 @@ static const ns_box  *g_search_active_box;
  * once the page is done, where no later positioned box can cover it. */
 typedef struct {
     const ns_box  *box;
-    cairo_matrix_t ctm;
+    gfx_matrix_t ctm;
     double         x, y, w, h;
 } paint_dropdown;
-static cairo_t       *g_paint_root_cr;
+static gfx_t       *g_paint_root_cr;
 static GArray        *g_paint_dropdowns;
 static gboolean       g_paint_dropdown_pass;
 
@@ -61,10 +61,30 @@ ns_paint_set_caret_visible(gboolean visible)
     g_caret_visible = visible;
 }
 
-static cairo_surface_t *texture_surface_cached(ns_texture *tex,
+static gfx_surface_t *texture_surface_cached(ns_texture *tex,
                                                const char *filter_kw);
 
 /* Creates a layout on a shared cached context with grayscale antialiasing font options. */
+/* Glyphs are still drawn by pangocairo, into gfx's pixels, in gfx's
+ * current solid source colour. */
+static void
+paint_show_layout(gfx_t *g, double x, double y, NsPangoLayout *layout)
+{
+    cairo_t *tcr = gfx_cairo_begin(g);
+    cairo_move_to(tcr, x, y);
+    ns_pango_cairo_show_layout(tcr, layout);
+    gfx_cairo_end(g, tcr);
+}
+
+static void
+paint_show_layout_line(gfx_t *g, double x, double y, NsPangoLayoutLine *line)
+{
+    cairo_t *tcr = gfx_cairo_begin(g);
+    cairo_move_to(tcr, x, y);
+    ns_pango_cairo_show_layout_line(tcr, line);
+    gfx_cairo_end(g, tcr);
+}
+
 static NsPangoLayout *
 paint_create_layout(void)
 {
@@ -175,9 +195,9 @@ rgba_anim(const ns_box *b, ns_css_anim_target which,
 }
 
 static inline void
-set_source_rgba(cairo_t *cr, rgba c)
+set_source_rgba(gfx_t *cr, rgba c)
 {
-    cairo_set_source_rgba(cr, c.r, c.g, c.b, c.a);
+    gfx_set_source_rgba(cr, c.r, c.g, c.b, c.a);
 }
 
 #define length_or ns_css_length_or
@@ -290,60 +310,60 @@ corner_radii_fit(corner_radii *c, double w, double h)
 }
 
 static void
-corner_arc(cairo_t *cr, double cx, double cy, double rx, double ry,
+corner_arc(gfx_t *cr, double cx, double cy, double rx, double ry,
            double from, double to)
 {
-    cairo_save(cr);
-    cairo_translate(cr, cx, cy);
-    cairo_scale(cr, rx, ry);
-    cairo_arc(cr, 0, 0, 1.0, from, to);
-    cairo_restore(cr);
+    gfx_save(cr);
+    gfx_translate(cr, cx, cy);
+    gfx_scale(cr, rx, ry);
+    gfx_arc(cr, 0, 0, 1.0, from, to);
+    gfx_restore(cr);
 }
 
 /* Appends a rounded-rectangle path, fitting radii and degenerating to a plain rect. */
 static void
-rounded_rect_path(cairo_t *cr, double x, double y, double w, double h,
+rounded_rect_path(gfx_t *cr, double x, double y, double w, double h,
                   corner_radii c)
 {
     for (int i = 0; i < 4; i++) {
         if (c.x[i] <= 0 || c.y[i] <= 0) c.x[i] = c.y[i] = 0;
     }
     corner_radii_fit(&c, w, h);
-    if (corner_radii_zero(c)) { cairo_rectangle(cr, x, y, w, h); return; }
-    cairo_new_sub_path(cr);
+    if (corner_radii_zero(c)) { gfx_rectangle(cr, x, y, w, h); return; }
+    gfx_new_sub_path(cr);
     if (c.x[NS_CORNER_TR] > 0)
         corner_arc(cr, x + w - c.x[NS_CORNER_TR], y + c.y[NS_CORNER_TR],
                    c.x[NS_CORNER_TR], c.y[NS_CORNER_TR], -G_PI_2, 0);
     else
-        cairo_move_to(cr, x + w, y);
+        gfx_move_to(cr, x + w, y);
     if (c.x[NS_CORNER_BR] > 0)
         corner_arc(cr, x + w - c.x[NS_CORNER_BR], y + h - c.y[NS_CORNER_BR],
                    c.x[NS_CORNER_BR], c.y[NS_CORNER_BR], 0, G_PI_2);
     else
-        cairo_line_to(cr, x + w, y + h);
+        gfx_line_to(cr, x + w, y + h);
     if (c.x[NS_CORNER_BL] > 0)
         corner_arc(cr, x + c.x[NS_CORNER_BL], y + h - c.y[NS_CORNER_BL],
                    c.x[NS_CORNER_BL], c.y[NS_CORNER_BL], G_PI_2, G_PI);
     else
-        cairo_line_to(cr, x, y + h);
+        gfx_line_to(cr, x, y + h);
     if (c.x[NS_CORNER_TL] > 0)
         corner_arc(cr, x + c.x[NS_CORNER_TL], y + c.y[NS_CORNER_TL],
                    c.x[NS_CORNER_TL], c.y[NS_CORNER_TL], G_PI, 1.5 * G_PI);
     else
-        cairo_line_to(cr, x, y);
-    cairo_close_path(cr);
+        gfx_line_to(cr, x, y);
+    gfx_close_path(cr);
 }
 
 /* Fills the even-odd ring between an outer and inner rounded rect. */
 static void
-fill_outer_shadow(cairo_t *cr, double ox, double oy, double ow, double oh,
+fill_outer_shadow(gfx_t *cr, double ox, double oy, double ow, double oh,
                   double ix, double iy, double iw, double ih, corner_radii radii)
 {
     rounded_rect_path(cr, ox, oy, ow, oh, radii);
     rounded_rect_path(cr, ix, iy, iw, ih, radii);
-    cairo_set_fill_rule(cr, CAIRO_FILL_RULE_EVEN_ODD);
-    cairo_fill(cr);
-    cairo_set_fill_rule(cr, CAIRO_FILL_RULE_WINDING);
+    gfx_set_fill_rule(cr, GFX_FILL_RULE_EVEN_ODD);
+    gfx_fill(cr);
+    gfx_set_fill_rule(cr, GFX_FILL_RULE_WINDING);
 }
 
 static void box_blur_argb(guchar *data, int stride, int w, int h, int radius);
@@ -377,7 +397,7 @@ shadow_key_equal(gconstpointer a, gconstpointer b)
 }
 
 /* Renders a triple box-blurred shadow shape, cached by geometry and color; caller unrefs. */
-static cairo_surface_t *
+static gfx_surface_t *
 blurred_shadow_surface(double sw, double sh_h, corner_radii radii, int radius,
                        int pad, int surf_w, int surf_h,
                        double br, double bg, double bb, double ba)
@@ -396,28 +416,28 @@ blurred_shadow_surface(double sw, double sh_h, corner_radii radii, int radius,
     if (!g_shadow_cache)
         g_shadow_cache = g_hash_table_new_full(
             shadow_key_hash, shadow_key_equal, g_free,
-            (GDestroyNotify)cairo_surface_destroy);
-    cairo_surface_t *hit = g_hash_table_lookup(g_shadow_cache, &key);
-    if (hit) return cairo_surface_reference(hit);
+            (GDestroyNotify)gfx_surface_destroy);
+    gfx_surface_t *hit = g_hash_table_lookup(g_shadow_cache, &key);
+    if (hit) return gfx_surface_reference(hit);
 
-    cairo_surface_t *surf =
-        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, surf_w, surf_h);
-    if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
-        cairo_surface_destroy(surf);
+    gfx_surface_t *surf =
+        gfx_image_surface_create(GFX_FORMAT_ARGB32, surf_w, surf_h);
+    if (gfx_surface_status(surf) != GFX_STATUS_SUCCESS) {
+        gfx_surface_destroy(surf);
         return NULL;
     }
-    cairo_t *scr = cairo_create(surf);
+    gfx_t *scr = gfx_create(surf);
     rounded_rect_path(scr, pad, pad, sw, sh_h, radii);
-    cairo_set_source_rgba(scr, br, bg, bb, ba);
-    cairo_fill(scr);
-    cairo_destroy(scr);
-    cairo_surface_flush(surf);
-    guchar *data = cairo_image_surface_get_data(surf);
-    int stride = cairo_image_surface_get_stride(surf);
+    gfx_set_source_rgba(scr, br, bg, bb, ba);
+    gfx_fill(scr);
+    gfx_destroy(scr);
+    gfx_surface_flush(surf);
+    guchar *data = gfx_image_surface_get_data(surf);
+    int stride = gfx_image_surface_get_stride(surf);
     box_blur_argb(data, stride, surf_w, surf_h, radius);
     box_blur_argb(data, stride, surf_w, surf_h, radius);
     box_blur_argb(data, stride, surf_w, surf_h, radius);
-    cairo_surface_mark_dirty(surf);
+    gfx_surface_mark_dirty(surf);
 
     gsize bytes = (gsize)stride * (gsize)surf_h;
     if (bytes <= NS_SHADOW_CACHE_MAX_BYTES / 4) {
@@ -426,7 +446,7 @@ blurred_shadow_surface(double sw, double sh_h, corner_radii radii, int radius,
             g_shadow_cache_bytes = 0;
         }
         g_hash_table_insert(g_shadow_cache, g_memdup2(&key, sizeof key),
-                            cairo_surface_reference(surf));
+                            gfx_surface_reference(surf));
         g_shadow_cache_bytes += bytes;
     }
     return surf;
@@ -435,26 +455,26 @@ blurred_shadow_surface(double sw, double sh_h, corner_radii radii, int radius,
 /* Rebuilds a full-size shadow from one blurred without its repeated
  * columns and rows: column keep_x of the small surface stands for cut_x + 1
  * identical columns of the full one, and row keep_y for cut_y + 1 rows. */
-static cairo_surface_t *
-shadow_surface_expand(cairo_surface_t *small, int full_w, int full_h,
+static gfx_surface_t *
+shadow_surface_expand(gfx_surface_t *small, int full_w, int full_h,
                       int keep_x, int cut_x, int keep_y, int cut_y)
 {
-    int small_w = cairo_image_surface_get_width(small);
-    int small_h = cairo_image_surface_get_height(small);
+    int small_w = gfx_image_surface_get_width(small);
+    int small_h = gfx_image_surface_get_height(small);
     if (small_w != full_w - cut_x || small_h != full_h - cut_y ||
         keep_x < 0 || keep_x >= small_w || keep_y < 0 || keep_y >= small_h)
         return NULL;
-    cairo_surface_t *full =
-        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, full_w, full_h);
-    if (cairo_surface_status(full) != CAIRO_STATUS_SUCCESS) {
-        cairo_surface_destroy(full);
+    gfx_surface_t *full =
+        gfx_image_surface_create(GFX_FORMAT_ARGB32, full_w, full_h);
+    if (gfx_surface_status(full) != GFX_STATUS_SUCCESS) {
+        gfx_surface_destroy(full);
         return NULL;
     }
-    cairo_surface_flush(small);
-    const guchar *src = cairo_image_surface_get_data(small);
-    int src_stride = cairo_image_surface_get_stride(small);
-    guchar *dst = cairo_image_surface_get_data(full);
-    int dst_stride = cairo_image_surface_get_stride(full);
+    gfx_surface_flush(small);
+    const guchar *src = gfx_image_surface_get_data(small);
+    int src_stride = gfx_image_surface_get_stride(small);
+    guchar *dst = gfx_image_surface_get_data(full);
+    int dst_stride = gfx_image_surface_get_stride(full);
     int left = keep_x + 1;
     int right = small_w - left;
     const guchar *repeated_row = NULL;
@@ -475,13 +495,13 @@ shadow_surface_expand(cairo_surface_t *small, int full_w, int full_h,
                (gsize)right * 4);
         if (y == keep_y) repeated_row = d;
     }
-    cairo_surface_mark_dirty(full);
+    gfx_surface_mark_dirty(full);
     return full;
 }
 
 /* Paints a blurred outer box-shadow, clipped to exclude the box's own border area. */
 static void
-paint_blurred_box_shadow(cairo_t *cr, double sx, double sy, double sw, double sh_h,
+paint_blurred_box_shadow(gfx_t *cr, double sx, double sy, double sw, double sh_h,
                          corner_radii radii, double blur,
                          double br, double bg, double bb, double ba,
                          double clip_x, double clip_y, double clip_w, double clip_h,
@@ -497,7 +517,7 @@ paint_blurred_box_shadow(cairo_t *cr, double sx, double sy, double sw, double sh
     int surf_w = isw + pad * 2, surf_h = ish + pad * 2;
     if (surf_w > 8192 || surf_h > 8192) return;
     double cx0, cy0, cx1, cy1;
-    cairo_clip_extents(cr, &cx0, &cy0, &cx1, &cy1);
+    gfx_clip_extents(cr, &cx0, &cy0, &cx1, &cy1);
     if (sx - pad >= cx1 || sy - pad >= cy1 ||
         sx - pad + surf_w <= cx0 || sy - pad + surf_h <= cy0)
         return;
@@ -522,32 +542,32 @@ paint_blurred_box_shadow(cairo_t *cr, double sx, double sy, double sw, double sh
                 keep_y - 1;
     if (cut_x < 8) cut_x = 0;
     if (cut_y < 8) cut_y = 0;
-    cairo_surface_t *surf = blurred_shadow_surface(sw - cut_x, sh_h - cut_y,
+    gfx_surface_t *surf = blurred_shadow_surface(sw - cut_x, sh_h - cut_y,
                                                    radii, radius, pad,
                                                    surf_w - cut_x,
                                                    surf_h - cut_y,
                                                    br, bg, bb, ba);
     if (!surf) return;
     if (cut_x > 0 || cut_y > 0) {
-        cairo_surface_t *full =
+        gfx_surface_t *full =
             shadow_surface_expand(surf, surf_w, surf_h, keep_x, cut_x,
                                   keep_y, cut_y);
-        cairo_surface_destroy(surf);
+        gfx_surface_destroy(surf);
         surf = full;
         if (!surf) return;
     }
 
-    cairo_save(cr);
-    cairo_new_path(cr);
-    cairo_rectangle(cr, sx - pad, sy - pad, surf_w, surf_h);
+    gfx_save(cr);
+    gfx_new_path(cr);
+    gfx_rectangle(cr, sx - pad, sy - pad, surf_w, surf_h);
     rounded_rect_path(cr, clip_x, clip_y, clip_w, clip_h, clip_radii);
-    cairo_set_fill_rule(cr, CAIRO_FILL_RULE_EVEN_ODD);
-    cairo_clip(cr);
-    cairo_set_fill_rule(cr, CAIRO_FILL_RULE_WINDING);
-    cairo_set_source_surface(cr, surf, sx - pad, sy - pad);
-    cairo_paint(cr);
-    cairo_restore(cr);
-    cairo_surface_destroy(surf);
+    gfx_set_fill_rule(cr, GFX_FILL_RULE_EVEN_ODD);
+    gfx_clip(cr);
+    gfx_set_fill_rule(cr, GFX_FILL_RULE_WINDING);
+    gfx_set_source_surface(cr, surf, sx - pad, sy - pad);
+    gfx_paint(cr);
+    gfx_restore(cr);
+    gfx_surface_destroy(surf);
 }
 
 static gboolean
@@ -625,7 +645,7 @@ inline_control_css_min_width(const ns_inline_attr *r, const ns_box *b)
 
 /* Paints outer box-shadows for an inline box, approximating blur with stepped rings. */
 static void
-paint_inline_box_shadow(cairo_t *cr, const ns_style *s, double x, double y,
+paint_inline_box_shadow(gfx_t *cr, const ns_style *s, double x, double y,
                         double w, double h, corner_radii radii)
 {
     if (!s || !s->values[NS_CSS_BOX_SHADOW] ||
@@ -647,14 +667,14 @@ paint_inline_box_shadow(cairo_t *cr, const ns_style *s, double x, double y,
                 double t = (double)i / steps;
                 double pad = sh->blur * t;
                 double alpha = (sh->a / 255.0) * (1.0 - t) * 0.7;
-                cairo_set_source_rgba(cr,
+                gfx_set_source_rgba(cr,
                     sh->r / 255.0, sh->g / 255.0, sh->b / 255.0, alpha);
                 fill_outer_shadow(cr, sx - pad, sy - pad,
                                   sw + pad * 2, sh_h + pad * 2,
                                   x, y, w, h, radii);
             }
         } else {
-            cairo_set_source_rgba(cr,
+            gfx_set_source_rgba(cr,
                 sh->r / 255.0, sh->g / 255.0, sh->b / 255.0,
                 sh->a / 255.0);
             fill_outer_shadow(cr, sx, sy, sw, sh_h, x, y, w, h, radii);
@@ -690,7 +710,7 @@ bg_position_offset(const ns_css_value *p, double free_space)
 
 /* Paints a background image honoring repeat, size (cover/contain) and position, clipped. */
 static void
-paint_bg_image_core(cairo_t *cr, ns_image *img,
+paint_bg_image_core(gfx_t *cr, ns_image *img,
                     const ns_css_value *rep_v, const ns_css_value *sz,
                     const ns_css_value *px, const ns_css_value *py,
                     gboolean pixelated,
@@ -741,36 +761,36 @@ paint_bg_image_core(cairo_t *cr, ns_image *img,
     if (draw_h < 1) draw_h = 1;
     double off_x = bg_position_offset(px, w - draw_w);
     double off_y = bg_position_offset(py, h - draw_h);
-    cairo_surface_t *surf = texture_surface_cached(img->texture, NULL);
+    gfx_surface_t *surf = texture_surface_cached(img->texture, NULL);
     if (!surf) return;
-    cairo_save(cr);
+    gfx_save(cr);
     rounded_rect_path(cr, clip_x, clip_y, clip_w, clip_h, radii);
-    cairo_clip(cr);
-    cairo_pattern_t *pat = cairo_pattern_create_for_surface(surf);
-    cairo_pattern_set_extend(pat,
-        (tile_x || tile_y) ? CAIRO_EXTEND_REPEAT : CAIRO_EXTEND_NONE);
+    gfx_clip(cr);
+    gfx_pattern_t *pat = gfx_pattern_create_for_surface(surf);
+    gfx_pattern_set_extend(pat,
+        (tile_x || tile_y) ? GFX_EXTEND_REPEAT : GFX_EXTEND_NONE);
     if (pixelated)
-        cairo_pattern_set_filter(pat, CAIRO_FILTER_NEAREST);
-    cairo_matrix_t m;
-    cairo_matrix_init_identity(&m);
-    cairo_matrix_scale(&m, (double)iw / draw_w, (double)ih / draw_h);
-    cairo_matrix_translate(&m, -(x + off_x), -(y + off_y));
-    cairo_pattern_set_matrix(pat, &m);
-    cairo_set_source(cr, pat);
+        gfx_pattern_set_filter(pat, GFX_FILTER_NEAREST);
+    gfx_matrix_t m;
+    gfx_matrix_init_identity(&m);
+    gfx_matrix_scale(&m, (double)iw / draw_w, (double)ih / draw_h);
+    gfx_matrix_translate(&m, -(x + off_x), -(y + off_y));
+    gfx_pattern_set_matrix(pat, &m);
+    gfx_set_source(cr, pat);
     if (tile_x && tile_y) {
-        cairo_paint(cr);
+        gfx_paint(cr);
     } else if (!tile_x && !tile_y) {
-        cairo_rectangle(cr, x + off_x, y + off_y, draw_w, draw_h);
-        cairo_fill(cr);
+        gfx_rectangle(cr, x + off_x, y + off_y, draw_w, draw_h);
+        gfx_fill(cr);
     } else if (tile_x) {
-        cairo_rectangle(cr, x, y + off_y, w, draw_h);
-        cairo_fill(cr);
+        gfx_rectangle(cr, x, y + off_y, w, draw_h);
+        gfx_fill(cr);
     } else {
-        cairo_rectangle(cr, x + off_x, y, draw_w, h);
-        cairo_fill(cr);
+        gfx_rectangle(cr, x + off_x, y, draw_w, h);
+        gfx_fill(cr);
     }
-    cairo_pattern_destroy(pat);
-    cairo_restore(cr);
+    gfx_pattern_destroy(pat);
+    gfx_restore(cr);
 }
 
 /* Interpolates the conic-gradient color at an angle fraction, handling repeating stops. */
@@ -838,13 +858,13 @@ paint_gradient_repeat_window(const ns_css_gradient *gr, double *frac,
  * other end's color, which makes both interpolations identical, and a
  * segment between two different non-zero alphas is subdivided. */
 static void
-paint_gradient_add_stops(cairo_pattern_t *pat, const ns_css_gradient *gr,
+paint_gradient_add_stops(gfx_pattern_t *pat, const ns_css_gradient *gr,
                          const double *frac, double period)
 {
     enum { SUBDIV = 8 };
     if (gr->n_stops == 1) {
         const ns_css_gradient_stop *st = &gr->stops[0];
-        cairo_pattern_add_color_stop_rgba(pat, frac[0] / period,
+        gfx_pattern_add_color_stop_rgba(pat, frac[0] / period,
             st->r / 255.0, st->g / 255.0, st->b / 255.0, st->a / 255.0);
         return;
     }
@@ -856,24 +876,24 @@ paint_gradient_add_stops(cairo_pattern_t *pat, const ns_css_gradient *gr,
         double a0 = s0->a / 255.0, a1 = s1->a / 255.0;
         if (s0->a == 0 && s1->a != 0) { r0 = r1; g0 = g1; b0 = b1; }
         if (s1->a == 0 && s0->a != 0) { r1 = r0; g1 = g0; b1 = b0; }
-        cairo_pattern_add_color_stop_rgba(pat, o0, r0, g0, b0, a0);
+        gfx_pattern_add_color_stop_rgba(pat, o0, r0, g0, b0, a0);
         if (s0->a != s1->a && s0->a != 0 && s1->a != 0 && o1 > o0) {
             for (int k = 1; k < SUBDIV; k++) {
                 double t = (double)k / SUBDIV;
                 double am = a0 * (1 - t) + a1 * t;
-                cairo_pattern_add_color_stop_rgba(pat, o0 + (o1 - o0) * t,
+                gfx_pattern_add_color_stop_rgba(pat, o0 + (o1 - o0) * t,
                     (r0 * a0 * (1 - t) + r1 * a1 * t) / am,
                     (g0 * a0 * (1 - t) + g1 * a1 * t) / am,
                     (b0 * a0 * (1 - t) + b1 * a1 * t) / am, am);
             }
         }
-        cairo_pattern_add_color_stop_rgba(pat, o1, r1, g1, b1, a1);
+        gfx_pattern_add_color_stop_rgba(pat, o1, r1, g1, b1, a1);
     }
 }
 
 /* Paints a linear, radial or conic gradient; conic is built from mesh-pattern wedges. */
 static void
-paint_bg_gradient_core(cairo_t *cr, const ns_css_gradient *gr,
+paint_bg_gradient_core(gfx_t *cr, const ns_css_gradient *gr,
                        double border_x, double border_y,
                        double border_w, double border_h,
                        double clip_x, double clip_y,
@@ -903,10 +923,10 @@ paint_bg_gradient_core(cairo_t *cr, const ns_css_gradient *gr,
         }
         double r_outer = sqrt(border_w * border_w + border_h * border_h) /
                          cos(G_PI / CONIC_BASE);
-        cairo_save(cr);
+        gfx_save(cr);
         rounded_rect_path(cr, clip_x, clip_y, clip_w, clip_h, radii);
-        cairo_clip(cr);
-        cairo_pattern_t *mesh = cairo_pattern_create_mesh();
+        gfx_clip(cr);
+        gfx_pattern_t *mesh = gfx_pattern_create_mesh();
         for (int i = 0; i + 1 < nb; i++) {
             double f1 = bnd[i], f2 = bnd[i + 1];
             double span = f2 - f1;
@@ -917,25 +937,25 @@ paint_bg_gradient_core(cairo_t *cr, const ns_css_gradient *gr,
             double r1, g1, b1, al1, r2, g2, b2, al2;
             conic_color_at(gr, f1 + eps, &r1, &g1, &b1, &al1);
             conic_color_at(gr, f2 - eps, &r2, &g2, &b2, &al2);
-            cairo_mesh_pattern_begin_patch(mesh);
-            cairo_mesh_pattern_move_to(mesh, cx, cy);
-            cairo_mesh_pattern_line_to(mesh, cx + r_outer * cos(a1),
+            gfx_mesh_pattern_begin_patch(mesh);
+            gfx_mesh_pattern_move_to(mesh, cx, cy);
+            gfx_mesh_pattern_line_to(mesh, cx + r_outer * cos(a1),
                                        cy + r_outer * sin(a1));
-            cairo_mesh_pattern_line_to(mesh, cx + r_outer * cos(a2),
+            gfx_mesh_pattern_line_to(mesh, cx + r_outer * cos(a2),
                                        cy + r_outer * sin(a2));
-            cairo_mesh_pattern_line_to(mesh, cx, cy);
-            cairo_mesh_pattern_set_corner_color_rgba(mesh, 0, r1, g1, b1, al1);
-            cairo_mesh_pattern_set_corner_color_rgba(mesh, 1, r1, g1, b1, al1);
-            cairo_mesh_pattern_set_corner_color_rgba(mesh, 2, r2, g2, b2, al2);
-            cairo_mesh_pattern_set_corner_color_rgba(mesh, 3, r2, g2, b2, al2);
-            cairo_mesh_pattern_end_patch(mesh);
+            gfx_mesh_pattern_line_to(mesh, cx, cy);
+            gfx_mesh_pattern_set_corner_color_rgba(mesh, 0, r1, g1, b1, al1);
+            gfx_mesh_pattern_set_corner_color_rgba(mesh, 1, r1, g1, b1, al1);
+            gfx_mesh_pattern_set_corner_color_rgba(mesh, 2, r2, g2, b2, al2);
+            gfx_mesh_pattern_set_corner_color_rgba(mesh, 3, r2, g2, b2, al2);
+            gfx_mesh_pattern_end_patch(mesh);
         }
-        cairo_set_source(cr, mesh);
-        cairo_paint(cr);
-        cairo_pattern_destroy(mesh);
-        cairo_restore(cr);
+        gfx_set_source(cr, mesh);
+        gfx_paint(cr);
+        gfx_pattern_destroy(mesh);
+        gfx_restore(cr);
     } else {
-        cairo_pattern_t *pat;
+        gfx_pattern_t *pat;
         double dxh = 0, dyh = 0, r_outer = 1, r_outer_y = 1, line_len;
         if (gr->radial) {
             ns_css_gradient_radii(gr, border_w, border_h, cx - border_x,
@@ -957,30 +977,30 @@ paint_bg_gradient_core(cairo_t *cr, const ns_css_gradient *gr,
         double start, period;
         paint_gradient_repeat_window(gr, frac, &start, &period);
         if (gr->radial) {
-            pat = cairo_pattern_create_radial(0, 0, start, 0, 0,
+            pat = gfx_pattern_create_radial(0, 0, start, 0, 0,
                                               start + period);
-            cairo_matrix_t m;
-            cairo_matrix_init_scale(&m, 1.0 / r_outer, 1.0 / r_outer_y);
-            cairo_matrix_translate(&m, -cx, -cy);
-            cairo_pattern_set_matrix(pat, &m);
+            gfx_matrix_t m;
+            gfx_matrix_init_scale(&m, 1.0 / r_outer, 1.0 / r_outer_y);
+            gfx_matrix_translate(&m, -cx, -cy);
+            gfx_pattern_set_matrix(pat, &m);
         } else {
             double x0 = cx - dxh, y0 = cy - dyh;
             double x1 = cx + dxh, y1 = cy + dyh;
-            pat = cairo_pattern_create_linear(
+            pat = gfx_pattern_create_linear(
                 x0 + (x1 - x0) * start, y0 + (y1 - y0) * start,
                 x0 + (x1 - x0) * (start + period),
                 y0 + (y1 - y0) * (start + period));
         }
         paint_gradient_add_stops(pat, gr, frac, period);
         if (gr->repeating)
-            cairo_pattern_set_extend(pat, CAIRO_EXTEND_REPEAT);
-        cairo_save(cr);
+            gfx_pattern_set_extend(pat, GFX_EXTEND_REPEAT);
+        gfx_save(cr);
         rounded_rect_path(cr, clip_x, clip_y, clip_w, clip_h, radii);
-        cairo_clip(cr);
-        cairo_set_source(cr, pat);
-        cairo_paint(cr);
-        cairo_pattern_destroy(pat);
-        cairo_restore(cr);
+        gfx_clip(cr);
+        gfx_set_source(cr, pat);
+        gfx_paint(cr);
+        gfx_pattern_destroy(pat);
+        gfx_restore(cr);
     }
 }
 
@@ -989,7 +1009,7 @@ paint_bg_gradient_core(cairo_t *cr, const ns_css_gradient *gr,
  * (and cover/contain) takes the positioning area's. One tile is painted
  * clipped to itself; repeated tiles come from a rendered pattern. */
 static void
-paint_bg_gradient_layer(cairo_t *cr, const ns_css_gradient *gr,
+paint_bg_gradient_layer(gfx_t *cr, const ns_css_gradient *gr,
                         const ns_css_value *rep_v, const ns_css_value *sz,
                         const ns_css_value *px, const ns_css_value *py,
                         double x, double y, double w, double h,
@@ -1024,60 +1044,60 @@ paint_bg_gradient_layer(cairo_t *cr, const ns_css_gradient *gr,
     }
     double tx = x + ox, ty = y + oy;
     if (!tile_x && !tile_y) {
-        cairo_save(cr);
-        cairo_rectangle(cr, tx, ty, tw, th);
-        cairo_clip(cr);
+        gfx_save(cr);
+        gfx_rectangle(cr, tx, ty, tw, th);
+        gfx_clip(cr);
         paint_bg_gradient_core(cr, gr, tx, ty, tw, th,
                                clip_x, clip_y, clip_w, clip_h, radii);
-        cairo_restore(cr);
+        gfx_restore(cr);
         return;
     }
     double sx = 1, sy = 1;
-    cairo_surface_get_device_scale(cairo_get_target(cr), &sx, &sy);
+    gfx_surface_get_device_scale(gfx_get_target(cr), &sx, &sy);
     int pw = (int)ceil(tw * sx), ph = (int)ceil(th * sy);
     if (pw < 1) pw = 1;
     if (ph < 1) ph = 1;
     if (pw > 4096) pw = 4096;
     if (ph > 4096) ph = 4096;
-    cairo_surface_t *tile = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+    gfx_surface_t *tile = gfx_image_surface_create(GFX_FORMAT_ARGB32,
                                                        pw, ph);
-    if (cairo_surface_status(tile) != CAIRO_STATUS_SUCCESS) {
-        cairo_surface_destroy(tile);
+    if (gfx_surface_status(tile) != GFX_STATUS_SUCCESS) {
+        gfx_surface_destroy(tile);
         return;
     }
-    cairo_t *tc = cairo_create(tile);
-    cairo_scale(tc, pw / tw, ph / th);
+    gfx_t *tc = gfx_create(tile);
+    gfx_scale(tc, pw / tw, ph / th);
     corner_radii none;
     memset(&none, 0, sizeof none);
     paint_bg_gradient_core(tc, gr, 0, 0, tw, th, 0, 0, tw, th, none);
-    cairo_destroy(tc);
-    cairo_save(cr);
+    gfx_destroy(tc);
+    gfx_save(cr);
     rounded_rect_path(cr, clip_x, clip_y, clip_w, clip_h, radii);
-    cairo_clip(cr);
-    cairo_pattern_t *pat = cairo_pattern_create_for_surface(tile);
-    cairo_pattern_set_extend(pat, CAIRO_EXTEND_REPEAT);
-    cairo_matrix_t m;
-    cairo_matrix_init_scale(&m, pw / tw, ph / th);
-    cairo_matrix_translate(&m, -tx, -ty);
-    cairo_pattern_set_matrix(pat, &m);
-    cairo_set_source(cr, pat);
+    gfx_clip(cr);
+    gfx_pattern_t *pat = gfx_pattern_create_for_surface(tile);
+    gfx_pattern_set_extend(pat, GFX_EXTEND_REPEAT);
+    gfx_matrix_t m;
+    gfx_matrix_init_scale(&m, pw / tw, ph / th);
+    gfx_matrix_translate(&m, -tx, -ty);
+    gfx_pattern_set_matrix(pat, &m);
+    gfx_set_source(cr, pat);
     if (tile_x && tile_y)
-        cairo_paint(cr);
+        gfx_paint(cr);
     else if (tile_x) {
-        cairo_rectangle(cr, clip_x, ty, clip_w, th);
-        cairo_fill(cr);
+        gfx_rectangle(cr, clip_x, ty, clip_w, th);
+        gfx_fill(cr);
     } else {
-        cairo_rectangle(cr, tx, clip_y, tw, clip_h);
-        cairo_fill(cr);
+        gfx_rectangle(cr, tx, clip_y, tw, clip_h);
+        gfx_fill(cr);
     }
-    cairo_pattern_destroy(pat);
-    cairo_surface_destroy(tile);
-    cairo_restore(cr);
+    gfx_pattern_destroy(pat);
+    gfx_surface_destroy(tile);
+    gfx_restore(cr);
 }
 
 /* Paints an inline box's background-image over its full rect. */
 static void
-paint_inline_background_image(cairo_t *cr, const ns_inline_attr *r,
+paint_inline_background_image(gfx_t *cr, const ns_inline_attr *r,
                               const ns_style *s, double x, double y,
                               double w, double h, corner_radii radii)
 {
@@ -1094,19 +1114,19 @@ paint_inline_background_image(cairo_t *cr, const ns_inline_attr *r,
 
 /* Paints shadow, background and borders for an inline box (e.g. a styled span). */
 static void
-paint_inline_css_chrome(cairo_t *cr, const ns_inline_attr *r, double x, double y,
+paint_inline_css_chrome(gfx_t *cr, const ns_inline_attr *r, double x, double y,
                         double w, double h)
 {
     const ns_style *s = r ? r->style : NULL;
     if (!ns_style_has_box_paint(s) || w <= 0 || h <= 0) return;
     corner_radii radii = style_border_radii(s, w, h);
-    cairo_save(cr);
+    gfx_save(cr);
     paint_inline_box_shadow(cr, s, x, y, w, h, radii);
     rgba bg = rgba_of(s->values[NS_CSS_BACKGROUND_COLOR], 0, 0, 0, 0);
     if (bg.a > 0) {
         set_source_rgba(cr, bg);
         rounded_rect_path(cr, x, y, w, h, radii);
-        cairo_fill(cr);
+        gfx_fill(cr);
     }
     paint_inline_background_image(cr, r, s, x, y, w, h, radii);
     double uniform_bw = 0;
@@ -1114,11 +1134,11 @@ paint_inline_css_chrome(cairo_t *cr, const ns_inline_attr *r, double x, double y
     if (!corner_radii_zero(radii) &&
         style_uniform_solid_border(s, &uniform_bw, &uniform_color)) {
         set_source_rgba(cr, uniform_color);
-        cairo_set_line_width(cr, uniform_bw);
+        gfx_set_line_width(cr, uniform_bw);
         rounded_rect_path(cr, x + uniform_bw / 2.0, y + uniform_bw / 2.0,
                           w - uniform_bw, h - uniform_bw, radii);
-        cairo_stroke(cr);
-        cairo_restore(cr);
+        gfx_stroke(cr);
+        gfx_restore(cr);
         return;
     }
     const struct {
@@ -1143,12 +1163,12 @@ paint_inline_css_chrome(cairo_t *cr, const ns_inline_attr *r, double x, double y
         rgba c = rgba_of(s->values[sides[i].color] ? s->values[sides[i].color]
                                                    : s->values[NS_CSS_COLOR], 0, 0, 0, 1);
         set_source_rgba(cr, c);
-        cairo_set_line_width(cr, bw);
-        cairo_move_to(cr, sides[i].x1, sides[i].y1);
-        cairo_line_to(cr, sides[i].x2, sides[i].y2);
-        cairo_stroke(cr);
+        gfx_set_line_width(cr, bw);
+        gfx_move_to(cr, sides[i].x1, sides[i].y1);
+        gfx_line_to(cr, sides[i].x2, sides[i].y2);
+        gfx_stroke(cr);
     }
-    cairo_restore(cr);
+    gfx_restore(cr);
 }
 
 static gboolean g_paint_have_viewport;
@@ -1174,11 +1194,11 @@ ns_paint_clear_device_viewport(void)
 
 /* Viewport bounds in user space from the device viewport, else the clip extents. */
 static void
-paint_viewport_user_extents(cairo_t *cr, double *x0, double *y0,
+paint_viewport_user_extents(gfx_t *cr, double *x0, double *y0,
                             double *x1, double *y1)
 {
     if (!g_paint_have_device_vp) {
-        cairo_clip_extents(cr, x0, y0, x1, y1);
+        gfx_clip_extents(cr, x0, y0, x1, y1);
         return;
     }
     double xs[4] = { g_paint_device_vp[0], g_paint_device_vp[2],
@@ -1186,7 +1206,7 @@ paint_viewport_user_extents(cairo_t *cr, double *x0, double *y0,
     double ys[4] = { g_paint_device_vp[1], g_paint_device_vp[1],
                      g_paint_device_vp[3], g_paint_device_vp[3] };
     for (int i = 0; i < 4; i++)
-        cairo_device_to_user(cr, &xs[i], &ys[i]);
+        gfx_device_to_user(cr, &xs[i], &ys[i]);
     *x0 = *x1 = xs[0];
     *y0 = *y1 = ys[0];
     for (int i = 1; i < 4; i++) {
@@ -1331,7 +1351,7 @@ border_image_slices(const char *text, double iw, double ih, double out[4],
 
 /* Draws one nine-slice piece into its destination with stretch/repeat/round tiling. */
 static void
-border_image_draw_piece(cairo_t *cr, cairo_surface_t *surf,
+border_image_draw_piece(gfx_t *cr, gfx_surface_t *surf,
                         double sx, double sy, double sw, double sh,
                         double dx, double dy, double dw, double dh,
                         const char *repeat_x, const char *repeat_y)
@@ -1354,49 +1374,49 @@ border_image_draw_piece(cairo_t *cr, cairo_surface_t *surf,
             scale_y = dh / (sh * count);
         }
     }
-    cairo_save(cr);
-    cairo_rectangle(cr, dx, dy, dw, dh);
-    cairo_clip(cr);
-    cairo_pattern_t *pat = cairo_pattern_create_for_surface(surf);
-    cairo_pattern_set_extend(pat, (tile_x || tile_y) ? CAIRO_EXTEND_REPEAT
-                                                     : CAIRO_EXTEND_PAD);
-    cairo_matrix_t m;
+    gfx_save(cr);
+    gfx_rectangle(cr, dx, dy, dw, dh);
+    gfx_clip(cr);
+    gfx_pattern_t *pat = gfx_pattern_create_for_surface(surf);
+    gfx_pattern_set_extend(pat, (tile_x || tile_y) ? GFX_EXTEND_REPEAT
+                                                     : GFX_EXTEND_PAD);
+    gfx_matrix_t m;
     double off_x = tile_x ? (dw - floor(dw / (sw * scale_x)) * sw * scale_x) / 2.0 : 0;
     double off_y = tile_y ? (dh - floor(dh / (sh * scale_y)) * sh * scale_y) / 2.0 : 0;
     if (tile_x && strcmp(repeat_x, "round") == 0) off_x = 0;
     if (tile_y && strcmp(repeat_y, "round") == 0) off_y = 0;
     if (tile_x || tile_y) {
-        cairo_surface_t *piece = cairo_surface_create_similar_image(
-            surf, CAIRO_FORMAT_ARGB32, MAX(1, (int)ceil(sw)), MAX(1, (int)ceil(sh)));
-        cairo_t *pc = cairo_create(piece);
-        cairo_set_source_surface(pc, surf, -sx, -sy);
-        cairo_paint(pc);
-        cairo_destroy(pc);
-        cairo_pattern_destroy(pat);
-        pat = cairo_pattern_create_for_surface(piece);
-        cairo_pattern_set_extend(pat, CAIRO_EXTEND_REPEAT);
-        cairo_matrix_init_scale(&m, 1.0 / scale_x, 1.0 / scale_y);
-        cairo_matrix_translate(&m, -(dx + off_x), -(dy + off_y));
-        cairo_pattern_set_matrix(pat, &m);
-        cairo_set_source(cr, pat);
-        cairo_paint(cr);
-        cairo_pattern_destroy(pat);
-        cairo_surface_destroy(piece);
+        gfx_surface_t *piece = gfx_image_surface_create(
+            GFX_FORMAT_ARGB32, MAX(1, (int)ceil(sw)), MAX(1, (int)ceil(sh)));
+        gfx_t *pc = gfx_create(piece);
+        gfx_set_source_surface(pc, surf, -sx, -sy);
+        gfx_paint(pc);
+        gfx_destroy(pc);
+        gfx_pattern_destroy(pat);
+        pat = gfx_pattern_create_for_surface(piece);
+        gfx_pattern_set_extend(pat, GFX_EXTEND_REPEAT);
+        gfx_matrix_init_scale(&m, 1.0 / scale_x, 1.0 / scale_y);
+        gfx_matrix_translate(&m, -(dx + off_x), -(dy + off_y));
+        gfx_pattern_set_matrix(pat, &m);
+        gfx_set_source(cr, pat);
+        gfx_paint(cr);
+        gfx_pattern_destroy(pat);
+        gfx_surface_destroy(piece);
     } else {
-        cairo_matrix_init_scale(&m, 1.0 / scale_x, 1.0 / scale_y);
-        cairo_matrix_translate(&m, -dx, -dy);
-        cairo_matrix_translate(&m, sx * scale_x, sy * scale_y);
-        cairo_pattern_set_matrix(pat, &m);
-        cairo_set_source(cr, pat);
-        cairo_paint(cr);
-        cairo_pattern_destroy(pat);
+        gfx_matrix_init_scale(&m, 1.0 / scale_x, 1.0 / scale_y);
+        gfx_matrix_translate(&m, -dx, -dy);
+        gfx_matrix_translate(&m, sx * scale_x, sy * scale_y);
+        gfx_pattern_set_matrix(pat, &m);
+        gfx_set_source(cr, pat);
+        gfx_paint(cr);
+        gfx_pattern_destroy(pat);
     }
-    cairo_restore(cr);
+    gfx_restore(cr);
 }
 
 /* Paints border-image (url or gradient source) as nine slices; FALSE if not applicable. */
 static gboolean
-paint_border_image(cairo_t *cr, const ns_box *b,
+paint_border_image(gfx_t *cr, const ns_box *b,
                    double bx, double by, double bw, double bh)
 {
     const ns_style *s = b->style;
@@ -1417,7 +1437,7 @@ paint_border_image(cairo_t *cr, const ns_box *b,
     double ax = bx - outset[3], ay = by - outset[0];
     double aw = bw + outset[3] + outset[1], ah = bh + outset[0] + outset[2];
     if (aw <= 0 || ah <= 0) return FALSE;
-    cairo_surface_t *surf = NULL;
+    gfx_surface_t *surf = NULL;
     gboolean own = FALSE;
     double iw, ih;
     if (src->kind == NS_CSS_V_URL) {
@@ -1435,20 +1455,20 @@ paint_border_image(cairo_t *cr, const ns_box *b,
          * otherwise allocate gigabytes on every repaint.  The device scale
          * keeps the surface's logical size iw x ih for the slicing below. */
         double k = MIN(1.0, 4096.0 / MAX(iw, ih));
-        surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+        surf = gfx_image_surface_create(GFX_FORMAT_ARGB32,
                                           MAX(1, (int)ceil(iw * k)),
                                           MAX(1, (int)ceil(ih * k)));
-        cairo_surface_set_device_scale(surf, k, k);
-        cairo_t *gc = cairo_create(surf);
+        gfx_surface_set_device_scale(surf, k, k);
+        gfx_t *gc = gfx_create(surf);
         corner_radii none;
         memset(&none, 0, sizeof none);
         paint_bg_gradient_core(gc, &src->u.gradient, 0, 0, iw, ih,
                                0, 0, iw, ih, none);
-        cairo_destroy(gc);
+        gfx_destroy(gc);
         own = TRUE;
     }
     if (iw <= 0 || ih <= 0) {
-        if (own) cairo_surface_destroy(surf);
+        if (own) gfx_surface_destroy(surf);
         return FALSE;
     }
     const ns_css_value *sv = s->values[NS_CSS_BORDER_IMAGE_SLICE];
@@ -1472,7 +1492,7 @@ paint_border_image(cairo_t *cr, const ns_box *b,
     double wt = width[0], wr = width[1], wb = width[2], wl = width[3];
     double mid_sw = iw - sl - sr, mid_sh = ih - st - sb;
     double mid_dw = aw - wl - wr, mid_dh = ah - wt - wb;
-    cairo_save(cr);
+    gfx_save(cr);
     border_image_draw_piece(cr, surf, 0, 0, sl, st, ax, ay, wl, wt, "stretch", "stretch");
     border_image_draw_piece(cr, surf, iw - sr, 0, sr, st, ax + aw - wr, ay, wr, wt, "stretch", "stretch");
     border_image_draw_piece(cr, surf, 0, ih - sb, sl, sb, ax, ay + ah - wb, wl, wb, "stretch", "stretch");
@@ -1483,15 +1503,15 @@ paint_border_image(cairo_t *cr, const ns_box *b,
     border_image_draw_piece(cr, surf, iw - sr, st, sr, mid_sh, ax + aw - wr, ay + wt, wr, mid_dh, "stretch", rep_y);
     if (fill)
         border_image_draw_piece(cr, surf, sl, st, mid_sw, mid_sh, ax + wl, ay + wt, mid_dw, mid_dh, rep_x, rep_y);
-    cairo_restore(cr);
+    gfx_restore(cr);
     g_strfreev(rep);
-    if (own) cairo_surface_destroy(surf);
+    if (own) gfx_surface_destroy(surf);
     return TRUE;
 }
 
 /* Draws the bar of a <progress> or <meter> that is a block box, inside (x, y, w, h). */
 static void
-paint_block_gauge(cairo_t *cr, const ns_box *b, double x, double y, double w,
+paint_block_gauge(gfx_t *cr, const ns_box *b, double x, double y, double w,
                   double h, corner_radii radii)
 {
     const ns_node *n = b->kind == NS_BOX_BLOCK ? b->dom : NULL;
@@ -1520,25 +1540,25 @@ paint_block_gauge(cairo_t *cr, const ns_box *b, double x, double y, double w,
     if (frac > 1) frac = 1;
     if (native)
         for (int i = 0; i < 4; i++) radii.x[i] = radii.y[i] = h / 2.0;
-    cairo_save(cr);
+    gfx_save(cr);
     rounded_rect_path(cr, x, y, w, h, radii);
     if (native) {
-        cairo_set_source_rgb(cr, 0.88, 0.88, 0.90);
-        cairo_fill_preserve(cr);
+        gfx_set_source_rgb(cr, 0.88, 0.88, 0.90);
+        gfx_fill_preserve(cr);
     }
-    cairo_clip(cr);
+    gfx_clip(cr);
     set_source_rgba(cr, fill);
     if (frac >= 0)
-        cairo_rectangle(cr, x, y, w * frac, h);
+        gfx_rectangle(cr, x, y, w * frac, h);
     else if (native)
-        cairo_rectangle(cr, x + w * 0.325, y, w * 0.35, h);
-    cairo_fill(cr);
-    cairo_restore(cr);
+        gfx_rectangle(cr, x + w * 0.325, y, w * 0.35, h);
+    gfx_fill(cr);
+    gfx_restore(cr);
 }
 
 /* Paints a block's decorations: shadows, background layers, mask, borders and outline. */
 static void
-paint_block(cairo_t *cr, const ns_box *b)
+paint_block(gfx_t *cr, const ns_box *b)
 {
     double border_x = b->x + b->margin.left;
     double border_y = b->y + b->margin.top;
@@ -1579,20 +1599,20 @@ paint_block(cairo_t *cr, const ns_box *b)
             double sy = border_y + sh->y - sh->spread;
             double sw = border_w + sh->spread * 2;
             double sh_h = border_h + sh->spread * 2;
-            cairo_save(cr);
+            gfx_save(cr);
             if (sh->blur > 0) {
                 paint_blurred_box_shadow(cr, sx, sy, sw, sh_h, radii, sh->blur,
                     sh->r / 255.0, sh->g / 255.0, sh->b / 255.0, sh->a / 255.0,
                     border_x, border_y, border_w, border_h, radii);
             } else {
-                cairo_set_source_rgba(cr,
+                gfx_set_source_rgba(cr,
                     sh->r / 255.0, sh->g / 255.0, sh->b / 255.0,
                     sh->a / 255.0);
                 fill_outer_shadow(cr, sx, sy, sw, sh_h,
                                   border_x, border_y, border_w, border_h,
                                   radii);
             }
-            cairo_restore(cr);
+            gfx_restore(cr);
         }
     }
 
@@ -1604,7 +1624,7 @@ paint_block(cairo_t *cr, const ns_box *b)
     if (bg.a > 0 && !has_mask) {
         set_source_rgba(cr, bg);
         rounded_rect_path(cr, clip_x, clip_y, clip_w, clip_h, radii);
-        cairo_fill(cr);
+        gfx_fill(cr);
     }
 
     gboolean masked_fill = FALSE;
@@ -1619,23 +1639,23 @@ paint_block(cairo_t *cr, const ns_box *b)
             double draw_w = iw * sc, draw_h = ih * sc;
             double off_x = (clip_w - draw_w) / 2.0;
             double off_y = (clip_h - draw_h) / 2.0;
-            cairo_surface_t *surf = texture_surface_cached(mimg->texture, NULL);
+            gfx_surface_t *surf = texture_surface_cached(mimg->texture, NULL);
             if (surf) {
-                cairo_save(cr);
+                gfx_save(cr);
                 rounded_rect_path(cr, clip_x, clip_y, clip_w, clip_h, radii);
-                cairo_clip(cr);
+                gfx_clip(cr);
                 set_source_rgba(cr, bg);
-                cairo_pattern_t *mp = cairo_pattern_create_for_surface(surf);
-                cairo_matrix_t mm;
-                cairo_matrix_init_identity(&mm);
-                cairo_matrix_scale(&mm, (double)iw / draw_w,
+                gfx_pattern_t *mp = gfx_pattern_create_for_surface(surf);
+                gfx_matrix_t mm;
+                gfx_matrix_init_identity(&mm);
+                gfx_matrix_scale(&mm, (double)iw / draw_w,
                                    (double)ih / draw_h);
-                cairo_matrix_translate(&mm, -(clip_x + off_x),
+                gfx_matrix_translate(&mm, -(clip_x + off_x),
                                        -(clip_y + off_y));
-                cairo_pattern_set_matrix(mp, &mm);
-                cairo_mask(cr, mp);
-                cairo_pattern_destroy(mp);
-                cairo_restore(cr);
+                gfx_pattern_set_matrix(mp, &mm);
+                gfx_mask(cr, mp);
+                gfx_pattern_destroy(mp);
+                gfx_restore(cr);
                 masked_fill = TRUE;
             }
         }
@@ -1703,31 +1723,31 @@ paint_block(cairo_t *cr, const ns_box *b)
         for (int si = sl->n - 1; si >= 0; si--) {
             const ns_css_shadow *sh = &sl->s[si];
             if (!sh->inset) continue;
-            cairo_save(cr);
+            gfx_save(cr);
             rounded_rect_path(cr, border_x, border_y, border_w, border_h, radii);
-            cairo_clip(cr);
-            cairo_set_source_rgba(cr,
+            gfx_clip(cr);
+            gfx_set_source_rgba(cr,
                 sh->r / 255.0, sh->g / 255.0, sh->b / 255.0, sh->a / 255.0);
-            cairo_set_line_width(cr, sh->blur > 0 ? sh->blur : 4);
-            cairo_translate(cr, sh->x, sh->y);
+            gfx_set_line_width(cr, sh->blur > 0 ? sh->blur : 4);
+            gfx_translate(cr, sh->x, sh->y);
             rounded_rect_path(cr, border_x, border_y, border_w, border_h, radii);
-            cairo_stroke(cr);
-            cairo_restore(cr);
+            gfx_stroke(cr);
+            gfx_restore(cr);
         }
     }
 
     if (legend_gap) {
         double cx0, cy0, cx1, cy1;
-        cairo_save(cr);
-        cairo_clip_extents(cr, &cx0, &cy0, &cx1, &cy1);
-        cairo_set_fill_rule(cr, CAIRO_FILL_RULE_EVEN_ODD);
-        cairo_rectangle(cr, cx0, cy0, cx1 - cx0, cy1 - cy0);
-        cairo_rectangle(cr, gap_x0, gap_y0, gap_x1 - gap_x0, gap_y1 - gap_y0);
-        cairo_clip(cr);
-        cairo_set_fill_rule(cr, CAIRO_FILL_RULE_WINDING);
+        gfx_save(cr);
+        gfx_clip_extents(cr, &cx0, &cy0, &cx1, &cy1);
+        gfx_set_fill_rule(cr, GFX_FILL_RULE_EVEN_ODD);
+        gfx_rectangle(cr, cx0, cy0, cx1 - cx0, cy1 - cy0);
+        gfx_rectangle(cr, gap_x0, gap_y0, gap_x1 - gap_x0, gap_y1 - gap_y0);
+        gfx_clip(cr);
+        gfx_set_fill_rule(cr, GFX_FILL_RULE_WINDING);
     }
     if (s && paint_border_image(cr, b, border_x, border_y, border_w, border_h)) {
-        if (legend_gap) cairo_restore(cr);
+        if (legend_gap) gfx_restore(cr);
         return;
     }
     if (s) {
@@ -1737,14 +1757,14 @@ paint_block(cairo_t *cr, const ns_box *b)
         if (!corner_radii_zero(radii) &&
             style_uniform_solid_border(s, &uniform_bw, &uniform_color)) {
             set_source_rgba(cr, uniform_color);
-            cairo_set_line_width(cr, uniform_bw);
+            gfx_set_line_width(cr, uniform_bw);
             rounded_rect_path(cr,
                               border_x + uniform_bw / 2.0,
                               border_y + uniform_bw / 2.0,
                               border_w - uniform_bw,
                               border_h - uniform_bw,
                               radii);
-            cairo_stroke(cr);
+            gfx_stroke(cr);
             drew_uniform = TRUE;
         }
         const struct {
@@ -1809,21 +1829,21 @@ paint_block(cairo_t *cr, const ns_box *b)
                                  0, 0, 0, 1);
                 if (c.a <= 0) continue;
                 int a = i, z = (i + 1) % 4;
-                cairo_save(cr);
-                cairo_move_to(cr, cxs[a], cys[a]);
-                cairo_line_to(cr, cxs[z], cys[z]);
-                cairo_line_to(cr, dx[z], dy[z]);
-                cairo_line_to(cr, dx[a], dy[a]);
-                cairo_close_path(cr);
-                cairo_clip(cr);
-                cairo_set_fill_rule(cr, CAIRO_FILL_RULE_EVEN_ODD);
+                gfx_save(cr);
+                gfx_move_to(cr, cxs[a], cys[a]);
+                gfx_line_to(cr, cxs[z], cys[z]);
+                gfx_line_to(cr, dx[z], dy[z]);
+                gfx_line_to(cr, dx[a], dy[a]);
+                gfx_close_path(cr);
+                gfx_clip(cr);
+                gfx_set_fill_rule(cr, GFX_FILL_RULE_EVEN_ODD);
                 rounded_rect_path(cr, x0, y0, border_w, border_h, radii);
                 rounded_rect_path(cr, x0 + bw[3], y0 + bw[0],
                                   border_w - bw[1] - bw[3],
                                   border_h - bw[0] - bw[2], inner);
                 set_source_rgba(cr, c);
-                cairo_fill(cr);
-                cairo_restore(cr);
+                gfx_fill(cr);
+                gfx_restore(cr);
             }
             drew_uniform = TRUE;
         }
@@ -1838,14 +1858,14 @@ paint_block(cairo_t *cr, const ns_box *b)
                                           : (s ? s->values[NS_CSS_COLOR] : NULL),
                              0, 0, 0, 1);
             set_source_rgba(cr, c);
-            cairo_set_line_width(cr, sides[i].w);
-            cairo_save(cr);
+            gfx_set_line_width(cr, sides[i].w);
+            gfx_save(cr);
             if (strcmp(bs->u.keyword, "dashed") == 0) {
                 double dashes[] = { sides[i].w * 3, sides[i].w * 2 };
-                cairo_set_dash(cr, dashes, 2, 0);
+                gfx_set_dash(cr, dashes, 2, 0);
             } else if (strcmp(bs->u.keyword, "dotted") == 0) {
                 double dashes[] = { sides[i].w, sides[i].w };
-                cairo_set_dash(cr, dashes, 2, 0);
+                gfx_set_dash(cr, dashes, 2, 0);
             }
             double x1 = sides[i].x1, y1 = sides[i].y1;
             double x2 = sides[i].x2, y2 = sides[i].y2;
@@ -1853,13 +1873,13 @@ paint_block(cairo_t *cr, const ns_box *b)
                 if (x1 == x2) { x1 = floor(x1) + 0.5; x2 = x1; }
                 if (y1 == y2) { y1 = floor(y1) + 0.5; y2 = y1; }
             }
-            cairo_move_to(cr, x1, y1);
-            cairo_line_to(cr, x2, y2);
-            cairo_stroke(cr);
-            cairo_restore(cr);
+            gfx_move_to(cr, x1, y1);
+            gfx_line_to(cr, x2, y2);
+            gfx_stroke(cr);
+            gfx_restore(cr);
         }
         if (legend_gap) {
-            cairo_restore(cr);
+            gfx_restore(cr);
             legend_gap = FALSE;
         }
         double ow = length_or(s->values[NS_CSS_OUTLINE_WIDTH], 0);
@@ -1870,26 +1890,26 @@ paint_block(cairo_t *cr, const ns_box *b)
         if (ow > 0 && ostyle_drawable) {
             double off = length_or(s->values[NS_CSS_OUTLINE_OFFSET], 0);
             rgba oc = rgba_of(s->values[NS_CSS_OUTLINE_COLOR], 0, 0, 0, 1);
-            cairo_save(cr);
+            gfx_save(cr);
             set_source_rgba(cr, oc);
-            cairo_set_line_width(cr, ow);
+            gfx_set_line_width(cr, ow);
             if (strcmp(ostyle->u.keyword, "dashed") == 0) {
                 double dashes[] = { ow * 3, ow * 2 };
-                cairo_set_dash(cr, dashes, 2, 0);
+                gfx_set_dash(cr, dashes, 2, 0);
             } else if (strcmp(ostyle->u.keyword, "dotted") == 0) {
                 double dashes[] = { ow, ow };
-                cairo_set_dash(cr, dashes, 2, 0);
+                gfx_set_dash(cr, dashes, 2, 0);
             }
-            cairo_rectangle(cr,
+            gfx_rectangle(cr,
                 border_x - off - ow / 2.0,
                 border_y - off - ow / 2.0,
                 border_w + (off + ow / 2.0) * 2,
                 border_h + (off + ow / 2.0) * 2);
-            cairo_stroke(cr);
-            cairo_restore(cr);
+            gfx_stroke(cr);
+            gfx_restore(cr);
         }
     }
-    if (legend_gap) cairo_restore(cr);
+    if (legend_gap) gfx_restore(cr);
 }
 
 /* Returns the style of the nearest ancestor box that has one. */
@@ -2672,7 +2692,7 @@ apply_nowrap_align_width(NsPangoLayout *layout, const ns_box *b)
         ns_pango_layout_set_width(layout, (int)(b->content_width * NS_PANGO_SCALE));
 }
 
-static void paint_walk(cairo_t *cr, const ns_box *b, const char *highlight);
+static void paint_walk(gfx_t *cr, const ns_box *b, const char *highlight);
 
 /* TRUE if the inline box's attribute runs include an input field or button. */
 static gboolean
@@ -2837,7 +2857,7 @@ underline_dash_style(const ns_inline_attr *r, const ns_style *s)
 
 /* Strokes dotted/dashed underline, overline and line-through runs per layout line. */
 static void
-paint_inline_dashed_decorations(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
+paint_inline_dashed_decorations(gfx_t *cr, const ns_box *b, NsPangoLayout *layout,
                                double text_x, double y_origin,
                                const ns_style *s, rgba base)
 {
@@ -2900,25 +2920,25 @@ paint_inline_dashed_decorations(cairo_t *cr, const ns_box *b, NsPangoLayout *lay
                 uy = base_y + thick * 1.5;
             const ns_css_value *dc =
                 r->style ? r->style->values[NS_CSS_TEXT_DECORATION_COLOR] : NULL;
-            cairo_save(cr);
+            gfx_save(cr);
             if (dc && dc->kind == NS_CSS_V_COLOR)
-                cairo_set_source_rgba(cr, dc->u.color.r / 255.0,
+                gfx_set_source_rgba(cr, dc->u.color.r / 255.0,
                                       dc->u.color.g / 255.0,
                                       dc->u.color.b / 255.0,
                                       dc->u.color.a / 255.0);
             else
-                cairo_set_source_rgba(cr, base.r, base.g, base.b, base.a);
-            cairo_set_line_width(cr, thick);
+                gfx_set_source_rgba(cr, base.r, base.g, base.b, base.a);
+            gfx_set_line_width(cr, thick);
             double on = dotted ? thick : thick * 3.0;
             double off = dotted ? thick * 1.6 : thick * 2.5;
             double dash[2] = { on, off };
-            cairo_set_dash(cr, dash, 2, 0);
-            cairo_set_line_cap(cr, dotted ? CAIRO_LINE_CAP_ROUND
-                                          : CAIRO_LINE_CAP_BUTT);
-            cairo_move_to(cr, x0, uy);
-            cairo_line_to(cr, x1, uy);
-            cairo_stroke(cr);
-            cairo_restore(cr);
+            gfx_set_dash(cr, dash, 2, 0);
+            gfx_set_line_cap(cr, dotted ? GFX_LINE_CAP_ROUND
+                                          : GFX_LINE_CAP_BUTT);
+            gfx_move_to(cr, x0, uy);
+            gfx_line_to(cr, x1, uy);
+            gfx_stroke(cr);
+            gfx_restore(cr);
         }
     } while (ns_pango_layout_iter_next_line(iter));
     ns_pango_layout_iter_free(iter);
@@ -2964,7 +2984,7 @@ ns_box_blur_a8(unsigned char *data, int w, int h, int stride, int radius)
 
 /* Paints one text-shadow by blurring a downsampled A8 glyph mask; unblurred if huge. */
 static void
-paint_text_shadow_layer(cairo_t *cr, NsPangoLayout *layout, double x, double y,
+paint_text_shadow_layer(gfx_t *cr, NsPangoLayout *layout, double x, double y,
                         const ns_css_shadow *sh)
 {
     int lw = 0, lh = 0;
@@ -2984,53 +3004,51 @@ paint_text_shadow_layer(cairo_t *cr, NsPangoLayout *layout, double x, double y,
     int mh = (int)ceil(lh / ds) + 2 * pad;
 
     if (mw > 4096 || mh > 4096) {
-        cairo_save(cr);
-        cairo_set_source_rgba(cr, sh->r / 255.0, sh->g / 255.0,
+        gfx_save(cr);
+        gfx_set_source_rgba(cr, sh->r / 255.0, sh->g / 255.0,
                               sh->b / 255.0, sh->a / 255.0);
-        cairo_move_to(cr, x + sh->x, y + sh->y);
-        ns_pango_cairo_show_layout(cr, layout);
-        cairo_restore(cr);
+        paint_show_layout(cr, x + sh->x, y + sh->y, layout);
+        gfx_restore(cr);
         return;
     }
 
-    cairo_surface_t *mask = cairo_image_surface_create(CAIRO_FORMAT_A8, mw, mh);
-    if (cairo_surface_status(mask) != CAIRO_STATUS_SUCCESS) {
-        cairo_surface_destroy(mask);
+    gfx_surface_t *mask = gfx_image_surface_create(GFX_FORMAT_A8, mw, mh);
+    if (gfx_surface_status(mask) != GFX_STATUS_SUCCESS) {
+        gfx_surface_destroy(mask);
         return;
     }
-    cairo_t *mcr = cairo_create(mask);
-    cairo_scale(mcr, 1.0 / ds, 1.0 / ds);
-    cairo_move_to(mcr, pad * ds, pad * ds);
-    ns_pango_cairo_show_layout(mcr, layout);
-    cairo_destroy(mcr);
-    cairo_surface_flush(mask);
+    gfx_t *mcr = gfx_create(mask);
+    gfx_scale(mcr, 1.0 / ds, 1.0 / ds);
+    paint_show_layout(mcr, pad * ds, pad * ds, layout);
+    gfx_destroy(mcr);
+    gfx_surface_flush(mask);
 
     if (blur > 0) {
-        unsigned char *data = cairo_image_surface_get_data(mask);
-        int stride = cairo_image_surface_get_stride(mask);
+        unsigned char *data = gfx_image_surface_get_data(mask);
+        int stride = gfx_image_surface_get_stride(mask);
         ns_box_blur_a8(data, mw, mh, stride, blur_s);
         ns_box_blur_a8(data, mw, mh, stride, blur_s);
-        cairo_surface_mark_dirty(mask);
+        gfx_surface_mark_dirty(mask);
     }
 
     double ox = x + sh->x - pad * ds;
     double oy = y + sh->y - pad * ds;
-    cairo_save(cr);
-    cairo_set_source_rgba(cr, sh->r / 255.0, sh->g / 255.0,
+    gfx_save(cr);
+    gfx_set_source_rgba(cr, sh->r / 255.0, sh->g / 255.0,
                           sh->b / 255.0, sh->a / 255.0);
     if (ds == 1.0) {
-        cairo_mask_surface(cr, mask, ox, oy);
+        gfx_mask_surface(cr, mask, ox, oy);
     } else {
-        cairo_pattern_t *mp = cairo_pattern_create_for_surface(mask);
-        cairo_matrix_t m;
-        cairo_matrix_init_scale(&m, 1.0 / ds, 1.0 / ds);
-        cairo_matrix_translate(&m, -ox, -oy);
-        cairo_pattern_set_matrix(mp, &m);
-        cairo_mask(cr, mp);
-        cairo_pattern_destroy(mp);
+        gfx_pattern_t *mp = gfx_pattern_create_for_surface(mask);
+        gfx_matrix_t m;
+        gfx_matrix_init_scale(&m, 1.0 / ds, 1.0 / ds);
+        gfx_matrix_translate(&m, -ox, -oy);
+        gfx_pattern_set_matrix(mp, &m);
+        gfx_mask(cr, mp);
+        gfx_pattern_destroy(mp);
     }
-    cairo_restore(cr);
-    cairo_surface_destroy(mask);
+    gfx_restore(cr);
+    gfx_surface_destroy(mask);
 }
 
 /* Adds red error underlines to misspelled words (2+ letters) within a byte range. */
@@ -3458,49 +3476,48 @@ selection_pseudo_color(const ns_box *b, ns_css_prop prop, rgba *out)
 
 /* Fills the selection highlight behind a run using ::selection background or default. */
 static void
-paint_selection_background(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
+paint_selection_background(gfx_t *cr, const ns_box *b, NsPangoLayout *layout,
                            double ox, double oy, const ns_selection_run *run)
 {
     GArray *rects = paint_selection_rects(layout, ox, oy, run);
     if (!rects) return;
     rgba bg = { 0.20, 0.40, 0.85, 0.30 };
     selection_pseudo_color(b, NS_CSS_BACKGROUND_COLOR, &bg);
-    cairo_save(cr);
+    gfx_save(cr);
     set_source_rgba(cr, bg);
     for (guint i = 0; i < rects->len; i++) {
         const sel_rect *r = &g_array_index(rects, sel_rect, i);
-        cairo_rectangle(cr, r->x, r->y, r->w, r->h);
+        gfx_rectangle(cr, r->x, r->y, r->w, r->h);
     }
-    cairo_fill(cr);
-    cairo_restore(cr);
+    gfx_fill(cr);
+    gfx_restore(cr);
     g_array_free(rects, TRUE);
 }
 
 /* Repaints selected text clipped to the selection in the ::selection color, if set. */
 static void
-paint_selection_foreground(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
+paint_selection_foreground(gfx_t *cr, const ns_box *b, NsPangoLayout *layout,
                            double ox, double oy, const ns_selection_run *run)
 {
     rgba fg;
     if (!selection_pseudo_color(b, NS_CSS_COLOR, &fg)) return;
     GArray *rects = paint_selection_rects(layout, ox, oy, run);
     if (!rects) return;
-    cairo_save(cr);
+    gfx_save(cr);
     for (guint i = 0; i < rects->len; i++) {
         const sel_rect *r = &g_array_index(rects, sel_rect, i);
-        cairo_rectangle(cr, r->x, r->y, r->w, r->h);
+        gfx_rectangle(cr, r->x, r->y, r->w, r->h);
     }
-    cairo_clip(cr);
+    gfx_clip(cr);
     set_source_rgba(cr, fg);
-    cairo_move_to(cr, ox, oy);
-    ns_pango_cairo_show_layout(cr, layout);
-    cairo_restore(cr);
+    paint_show_layout(cr, ox, oy, layout);
+    gfx_restore(cr);
     g_array_free(rects, TRUE);
 }
 
 /* Paints an inline text box: controls, shadows, selection, text, caret, widgets, atomics. */
 static void
-paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
+paint_inline(gfx_t *cr, const ns_box *b, const char *highlight)
 {
     if (!b->text || !*b->text) return;
     const ns_style *s = inherited_style(b);
@@ -3517,11 +3534,10 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             ns_pango_layout_set_alignment(layout, NS_PANGO_ALIGN_CENTER);
             ns_pango_layout_set_text(layout, stacked, -1);
             g_free(stacked);
-            cairo_save(cr);
+            gfx_save(cr);
             set_source_rgba(cr, color);
-            cairo_move_to(cr, b->x, b->y);
-            ns_pango_cairo_show_layout(cr, layout);
-            cairo_restore(cr);
+            paint_show_layout(cr, b->x, b->y, layout);
+            gfx_restore(cr);
             g_object_unref(layout);
             return;
         }
@@ -3540,12 +3556,11 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             double col_left = (b->vertical_wm == 2)
                 ? b->x + acc
                 : b->x + b->content_width - acc - line_h;
-            cairo_save(cr);
-            cairo_translate(cr, col_left + line_h, b->y);
-            cairo_rotate(cr, G_PI / 2.0);
-            cairo_move_to(cr, 0, ascent);
-            ns_pango_cairo_show_layout_line(cr, line);
-            cairo_restore(cr);
+            gfx_save(cr);
+            gfx_translate(cr, col_left + line_h, b->y);
+            gfx_rotate(cr, G_PI / 2.0);
+            paint_show_layout_line(cr, 0, ascent, line);
+            gfx_restore(cr);
             acc += line_h;
         } while (ns_pango_layout_iter_next_line(it));
         ns_pango_layout_iter_free(it);
@@ -3683,29 +3698,29 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             if (!draw_native_chrome && !block_chrome)
                 paint_inline_css_chrome(cr, r, x0, y0, x1 - x0, y1 - y0);
             if (draw_native_chrome) {
-                cairo_save(cr);
+                gfx_save(cr);
                 if (r->kind == NS_INLINE_BUTTON)
-                    cairo_set_source_rgb(cr, 0.902, 0.902, 0.902);
+                    gfx_set_source_rgb(cr, 0.902, 0.902, 0.902);
                 else
-                    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-                cairo_rectangle(cr, x0, y0, x1 - x0, y1 - y0);
-                cairo_fill(cr);
-                cairo_set_source_rgb(cr, 0.722, 0.722, 0.722);
-                cairo_set_line_width(cr, 1.0);
-                cairo_rectangle(cr, x0 + 0.5, y0 + 0.5,
+                    gfx_set_source_rgb(cr, 1.0, 1.0, 1.0);
+                gfx_rectangle(cr, x0, y0, x1 - x0, y1 - y0);
+                gfx_fill(cr);
+                gfx_set_source_rgb(cr, 0.722, 0.722, 0.722);
+                gfx_set_line_width(cr, 1.0);
+                gfx_rectangle(cr, x0 + 0.5, y0 + 0.5,
                                 x1 - x0 - 1, y1 - y0 - 1);
-                cairo_stroke(cr);
-                cairo_restore(cr);
+                gfx_stroke(cr);
+                gfx_restore(cr);
             }
             if (r->kind == NS_INLINE_INPUT_FIELD_FOCUSED &&
                 draw_native_chrome) {
-                cairo_save(cr);
-                cairo_set_source_rgb(cr, 0.13, 0.36, 0.80);
-                cairo_set_line_width(cr, 2.0);
-                cairo_rectangle(cr, x0 + 0.5, y0 + 0.5,
+                gfx_save(cr);
+                gfx_set_source_rgb(cr, 0.13, 0.36, 0.80);
+                gfx_set_line_width(cr, 2.0);
+                gfx_rectangle(cr, x0 + 0.5, y0 + 0.5,
                                 x1 - x0 - 1, y1 - y0 - 1);
-                cairo_stroke(cr);
-                cairo_restore(cr);
+                gfx_stroke(cr);
+                gfx_restore(cr);
             }
         }
         if (opt_count > 0 && opt_maxx > opt_minx) {
@@ -3714,29 +3729,29 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             double py = opt_miny;
             double ph = opt_maxy - opt_miny;
             corner_radii pr = {{3, 3, 3, 3}, {3, 3, 3, 3}};
-            cairo_save(cr);
+            gfx_save(cr);
             rounded_rect_path(cr, px + 0.5, py + 1.5, pw, ph, pr);
-            cairo_set_source_rgba(cr, 0, 0, 0, 0.12);
-            cairo_fill(cr);
+            gfx_set_source_rgba(cr, 0, 0, 0, 0.12);
+            gfx_fill(cr);
             rounded_rect_path(cr, px, py, pw, ph, pr);
-            cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-            cairo_fill(cr);
+            gfx_set_source_rgb(cr, 1.0, 1.0, 1.0);
+            gfx_fill(cr);
             for (int k = 0; k < opt_nsel; k++) {
-                cairo_rectangle(cr, px, opt_sel[k].y0, pw,
+                gfx_rectangle(cr, px, opt_sel[k].y0, pw,
                                 opt_sel[k].y1 - opt_sel[k].y0);
-                cairo_set_source_rgb(cr, 0.816, 0.886, 0.988);
-                cairo_fill(cr);
+                gfx_set_source_rgb(cr, 0.816, 0.886, 0.988);
+                gfx_fill(cr);
             }
             rounded_rect_path(cr, px + 0.5, py + 0.5, pw - 1, ph - 1, pr);
-            cairo_set_source_rgb(cr, 0.70, 0.72, 0.75);
-            cairo_set_line_width(cr, 1.0);
-            cairo_stroke(cr);
-            cairo_restore(cr);
+            gfx_set_source_rgb(cr, 0.70, 0.72, 0.75);
+            gfx_set_line_width(cr, 1.0);
+            gfx_stroke(cr);
+            gfx_restore(cr);
             if (opt_popup > 0 && !g_paint_dropdown_pass &&
                 g_paint_dropdowns && cr == g_paint_root_cr) {
                 paint_dropdown d = { .box = b, .x = px, .y = py,
                                      .w = pw, .h = ph };
-                cairo_get_matrix(cr, &d.ctm);
+                gfx_get_matrix(cr, &d.ctm);
                 g_array_append_val(g_paint_dropdowns, d);
             }
         }
@@ -3752,28 +3767,27 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
     if (g_dbg_paint_x >= 0 && b->text) {
         double px0 = b->x, py0 = b->y;
         double px1 = b->x + b->content_width, py1 = b->y + b->content_height;
-        cairo_user_to_device(cr, &px0, &py0);
-        cairo_user_to_device(cr, &px1, &py1);
+        gfx_user_to_device(cr, &px0, &py0);
+        gfx_user_to_device(cr, &px1, &py1);
         if (g_dbg_paint_x >= px0 && g_dbg_paint_x <= px1 &&
             g_dbg_paint_y >= py0 && g_dbg_paint_y <= py1) {
             double cx0, cy0, cx1, cy1;
-            cairo_clip_extents(cr, &cx0, &cy0, &cx1, &cy1);
+            gfx_clip_extents(cr, &cx0, &cy0, &cx1, &cy1);
             g_printerr("[paint-at] TEXT \"%.30s\" rgba(%.2f,%.2f,%.2f,%.2f) "
                        "at %.0f,%.0f clip=%.0f,%.0f..%.0f,%.0f grp=%d\n",
                        b->text, color.r, color.g, color.b, color.a,
                        text_x, y_origin, cx0, cy0, cx1, cy1,
-                       cairo_get_group_target(cr) != cairo_get_target(cr));
+                       gfx_get_group_target(cr) != gfx_get_target(cr));
         }
     }
     const ns_selection_run *sel_run = paint_selection_run(b);
     if (sel_run)
         paint_selection_background(cr, b, layout, text_x, y_origin, sel_run);
 
-    cairo_save(cr);
+    gfx_save(cr);
     set_source_rgba(cr, color);
-    cairo_move_to(cr, text_x, y_origin);
-    ns_pango_cairo_show_layout(cr, layout);
-    cairo_restore(cr);
+    paint_show_layout(cr, text_x, y_origin, layout);
+    gfx_restore(cr);
 
     if (sel_run)
         paint_selection_foreground(cr, b, layout, text_x, y_origin, sel_run);
@@ -3792,7 +3806,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             double cy = y_origin + (double)pos.y / NS_PANGO_SCALE;
             double ch = (double)pos.height / NS_PANGO_SCALE;
             if (ch < 1.0) ch = 14.0;
-            cairo_save(cr);
+            gfx_save(cr);
             const ns_style *cstyle = s;
             for (guint j = 0; j < b->attrs->len; j++) {
                 const ns_inline_attr *f = &g_array_index(b->attrs, ns_inline_attr, j);
@@ -3806,18 +3820,18 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             const ns_css_value *cc = cstyle ? cstyle->values[NS_CSS_CARET_COLOR] : NULL;
             const ns_css_value *tc = cstyle ? cstyle->values[NS_CSS_COLOR] : NULL;
             if (cc && cc->kind == NS_CSS_V_COLOR)
-                cairo_set_source_rgb(cr, cc->u.color.r / 255.0,
+                gfx_set_source_rgb(cr, cc->u.color.r / 255.0,
                                      cc->u.color.g / 255.0, cc->u.color.b / 255.0);
             else if (tc && tc->kind == NS_CSS_V_COLOR)
-                cairo_set_source_rgb(cr, tc->u.color.r / 255.0,
+                gfx_set_source_rgb(cr, tc->u.color.r / 255.0,
                                      tc->u.color.g / 255.0, tc->u.color.b / 255.0);
             else
-                cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
-            cairo_set_line_width(cr, 1.5);
-            cairo_move_to(cr, cx + 0.5, cy);
-            cairo_line_to(cr, cx + 0.5, cy + ch);
-            cairo_stroke(cr);
-            cairo_restore(cr);
+                gfx_set_source_rgb(cr, 0.0, 0.0, 0.0);
+            gfx_set_line_width(cr, 1.5);
+            gfx_move_to(cr, cx + 0.5, cy);
+            gfx_line_to(cr, cx + 0.5, cy + ch);
+            gfx_stroke(cr);
+            gfx_restore(cr);
         }
     }
 
@@ -3855,40 +3869,40 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                               r->kind == NS_INLINE_RADIO_CHECKED);
             gboolean checked = (r->kind == NS_INLINE_CHECKBOX_CHECKED ||
                                 r->kind == NS_INLINE_RADIO_CHECKED);
-            cairo_save(cr);
-            cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+            gfx_save(cr);
+            gfx_set_source_rgb(cr, 1.0, 1.0, 1.0);
             if (radio) {
-                cairo_new_sub_path(cr);
-                cairo_arc(cr, bx + side / 2.0, by + side / 2.0,
+                gfx_new_sub_path(cr);
+                gfx_arc(cr, bx + side / 2.0, by + side / 2.0,
                           side / 2.0, 0, 2 * G_PI);
             } else {
-                cairo_rectangle(cr, bx, by, side, side);
+                gfx_rectangle(cr, bx, by, side, side);
             }
-            cairo_fill_preserve(cr);
-            cairo_set_source_rgb(cr, 0.45, 0.45, 0.45);
-            cairo_set_line_width(cr, 1.0);
-            cairo_stroke(cr);
+            gfx_fill_preserve(cr);
+            gfx_set_source_rgb(cr, 0.45, 0.45, 0.45);
+            gfx_set_line_width(cr, 1.0);
+            gfx_stroke(cr);
             if (checked) {
-                cairo_set_source_rgba(cr, accent.r, accent.g, accent.b, accent.a);
+                gfx_set_source_rgba(cr, accent.r, accent.g, accent.b, accent.a);
                 if (radio) {
                     double rdot = side * 0.30;
-                    cairo_new_sub_path(cr);
-                    cairo_arc(cr, bx + side / 2.0, by + side / 2.0,
+                    gfx_new_sub_path(cr);
+                    gfx_arc(cr, bx + side / 2.0, by + side / 2.0,
                               rdot, 0, 2 * G_PI);
-                    cairo_fill(cr);
+                    gfx_fill(cr);
                 } else {
-                    cairo_rectangle(cr, bx, by, side, side);
-                    cairo_fill(cr);
-                    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-                    cairo_set_line_width(cr, side * 0.18);
-                    cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
-                    cairo_move_to(cr, bx + side * 0.20, by + side * 0.55);
-                    cairo_line_to(cr, bx + side * 0.42, by + side * 0.78);
-                    cairo_line_to(cr, bx + side * 0.80, by + side * 0.28);
-                    cairo_stroke(cr);
+                    gfx_rectangle(cr, bx, by, side, side);
+                    gfx_fill(cr);
+                    gfx_set_source_rgb(cr, 1.0, 1.0, 1.0);
+                    gfx_set_line_width(cr, side * 0.18);
+                    gfx_set_line_cap(cr, GFX_LINE_CAP_ROUND);
+                    gfx_move_to(cr, bx + side * 0.20, by + side * 0.55);
+                    gfx_line_to(cr, bx + side * 0.42, by + side * 0.78);
+                    gfx_line_to(cr, bx + side * 0.80, by + side * 0.28);
+                    gfx_stroke(cr);
                 }
             }
-            cairo_restore(cr);
+            gfx_restore(cr);
         }
     }
 
@@ -3918,31 +3932,31 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             if (bh < 6) bh = 6;
             double by = gy0 + ((gy1 - gy0) - bh) / 2.0;
             double radius = bh / 2.0;
-            cairo_save(cr);
-            cairo_new_sub_path(cr);
-            cairo_arc(cr, bx + radius,      by + radius, radius,  G_PI / 2,  3 * G_PI / 2);
-            cairo_arc(cr, bx + bw - radius, by + radius, radius, -G_PI / 2,      G_PI / 2);
-            cairo_close_path(cr);
-            cairo_set_source_rgb(cr, 0.88, 0.88, 0.90);
-            cairo_fill_preserve(cr);
-            cairo_clip(cr);
+            gfx_save(cr);
+            gfx_new_sub_path(cr);
+            gfx_arc(cr, bx + radius,      by + radius, radius,  G_PI / 2,  3 * G_PI / 2);
+            gfx_arc(cr, bx + bw - radius, by + radius, radius, -G_PI / 2,      G_PI / 2);
+            gfx_close_path(cr);
+            gfx_set_source_rgb(cr, 0.88, 0.88, 0.90);
+            gfx_fill_preserve(cr);
+            gfx_clip(cr);
             double frac = r->font_size_px;
             if (frac > 1) frac = 1;
             rgba fill = accent;
             if (r->kind == NS_INLINE_METER && r->a)
                 fill = (rgba){ r->r / 255.0, r->g / 255.0,
                                r->b / 255.0, r->a / 255.0 };
-            cairo_set_source_rgba(cr, fill.r, fill.g, fill.b, fill.a);
+            gfx_set_source_rgba(cr, fill.r, fill.g, fill.b, fill.a);
             if (r->kind == NS_INLINE_PROGRESS && frac < 0) {
                 double iw = bw * 0.35;
                 double ix = bx + (bw - iw) / 2.0;
-                cairo_rectangle(cr, ix, by, iw, bh);
+                gfx_rectangle(cr, ix, by, iw, bh);
             } else {
                 if (frac < 0) frac = 0;
-                cairo_rectangle(cr, bx, by, bw * frac, bh);
+                gfx_rectangle(cr, bx, by, bw * frac, bh);
             }
-            cairo_fill(cr);
-            cairo_restore(cr);
+            gfx_fill(cr);
+            gfx_restore(cr);
         }
     }
 
@@ -3957,15 +3971,15 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             double sy = y_origin + (double)pos.y / NS_PANGO_SCALE + a->relative_y;
             a->owner_offset_x = sx - b->x;
             a->owner_offset_y = sy - b->y;
-            cairo_save(cr);
-            cairo_translate(cr, sx - a->box->x, sy - a->box->y);
+            gfx_save(cr);
+            gfx_translate(cr, sx - a->box->x, sy - a->box->y);
             g_paint_no_cull++;
             const ns_box *saved_flush = g_paint_flush_box;
             g_paint_flush_box = a->box;
             paint_walk(cr, a->box, highlight);
             g_paint_flush_box = saved_flush;
             g_paint_no_cull--;
-            cairo_restore(cr);
+            gfx_restore(cr);
         }
     }
 
@@ -4458,8 +4472,8 @@ parse_filter_drop_shadows(const char *filter, rgba current_color,
 }
 
 /* Renders an image's alpha as a tinted, blurred drop-shadow surface; caller destroys. */
-static cairo_surface_t *
-drop_shadow_surface(cairo_surface_t *src, int cw, int ch, double ox, double oy,
+static gfx_surface_t *
+drop_shadow_surface(gfx_surface_t *src, int cw, int ch, double ox, double oy,
                     double sx, double sy, image_drop_shadow shadow,
                     int *pad_out)
 {
@@ -4471,28 +4485,28 @@ drop_shadow_surface(cairo_surface_t *src, int cw, int ch, double ox, double oy,
     int pad = radius * 2 + 2;
     int sw = cw + pad * 2;
     int sh = ch + pad * 2;
-    cairo_surface_t *shadow_surf =
-        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, sw, sh);
-    if (cairo_surface_status(shadow_surf) != CAIRO_STATUS_SUCCESS) {
-        cairo_surface_destroy(shadow_surf);
+    gfx_surface_t *shadow_surf =
+        gfx_image_surface_create(GFX_FORMAT_ARGB32, sw, sh);
+    if (gfx_surface_status(shadow_surf) != GFX_STATUS_SUCCESS) {
+        gfx_surface_destroy(shadow_surf);
         return NULL;
     }
 
-    cairo_t *s_cr = cairo_create(shadow_surf);
-    cairo_set_operator(s_cr, CAIRO_OPERATOR_CLEAR);
-    cairo_paint(s_cr);
-    cairo_set_operator(s_cr, CAIRO_OPERATOR_OVER);
-    cairo_rectangle(s_cr, pad, pad, cw, ch);
-    cairo_clip(s_cr);
-    cairo_translate(s_cr, pad + ox, pad + oy);
-    cairo_scale(s_cr, sx, sy);
-    cairo_set_source_surface(s_cr, src, 0, 0);
-    cairo_paint(s_cr);
-    cairo_destroy(s_cr);
+    gfx_t *s_cr = gfx_create(shadow_surf);
+    gfx_set_operator(s_cr, GFX_OPERATOR_CLEAR);
+    gfx_paint(s_cr);
+    gfx_set_operator(s_cr, GFX_OPERATOR_OVER);
+    gfx_rectangle(s_cr, pad, pad, cw, ch);
+    gfx_clip(s_cr);
+    gfx_translate(s_cr, pad + ox, pad + oy);
+    gfx_scale(s_cr, sx, sy);
+    gfx_set_source_surface(s_cr, src, 0, 0);
+    gfx_paint(s_cr);
+    gfx_destroy(s_cr);
 
-    cairo_surface_flush(shadow_surf);
-    guchar *data = cairo_image_surface_get_data(shadow_surf);
-    int stride = cairo_image_surface_get_stride(shadow_surf);
+    gfx_surface_flush(shadow_surf);
+    guchar *data = gfx_image_surface_get_data(shadow_surf);
+    int stride = gfx_image_surface_get_stride(shadow_surf);
     for (int y = 0; y < sh; y++) {
         guchar *row = data + y * stride;
         for (int x = 0; x < sw; x++) {
@@ -4506,14 +4520,14 @@ drop_shadow_surface(cairo_surface_t *src, int cw, int ch, double ox, double oy,
     }
     if (radius > 0)
         box_blur_argb(data, stride, sw, sh, radius);
-    cairo_surface_mark_dirty(shadow_surf);
+    gfx_surface_mark_dirty(shadow_surf);
     if (pad_out) *pad_out = pad;
     return shadow_surf;
 }
 
 /* Paints filter drop-shadow() layers for an image box beneath its content. */
 static void
-paint_texture_drop_shadows(cairo_t *cr, cairo_surface_t *surf, const ns_box *b,
+paint_texture_drop_shadows(gfx_t *cr, gfx_surface_t *surf, const ns_box *b,
                            double sx, double sy, double ox, double oy,
                            const char *filter_kw)
 {
@@ -4527,18 +4541,18 @@ paint_texture_drop_shadows(cairo_t *cr, cairo_surface_t *surf, const ns_box *b,
     int ch = MAX(1, (int)ceil(b->content_height));
     for (int i = 0; i < n; i++) {
         int pad = 0;
-        cairo_surface_t *shadow =
+        gfx_surface_t *shadow =
             drop_shadow_surface(surf, cw, ch, ox, oy, sx, sy, shadows[i], &pad);
         if (!shadow) continue;
-        cairo_save(cr);
-        cairo_set_source_surface(cr, shadow,
+        gfx_save(cr);
+        gfx_set_source_surface(cr, shadow,
                                  b->x + b->margin.left + b->border.left +
                                      b->padding.left + shadows[i].x - pad,
                                  b->y + b->margin.top + b->border.top +
                                      b->padding.top + shadows[i].y - pad);
-        cairo_paint(cr);
-        cairo_restore(cr);
-        cairo_surface_destroy(shadow);
+        gfx_paint(cr);
+        gfx_restore(cr);
+        gfx_surface_destroy(shadow);
     }
 }
 
@@ -4705,7 +4719,7 @@ ns_paint_filter_blur_px(const ns_style *style)
 
 /* Clips to the content box radii and basic clip-path shapes; TRUE if clipped. */
 static gboolean
-apply_box_content_clip(cairo_t *cr, const ns_box *b)
+apply_box_content_clip(gfx_t *cr, const ns_box *b)
 {
     if (!b) return FALSE;
     gboolean clipped = FALSE;
@@ -4717,7 +4731,7 @@ apply_box_content_clip(cairo_t *cr, const ns_box *b)
     if (!corner_radii_zero(radii)) {
         rounded_rect_path(cr, b->x, b->y,
                           b->content_width, b->content_height, radii);
-        cairo_clip(cr);
+        gfx_clip(cr);
         clipped = TRUE;
     }
     const ns_style *st = b->style;
@@ -4742,17 +4756,17 @@ apply_box_content_clip(cairo_t *cr, const ns_box *b)
                     r = (*endp == '%') ? rv / 100.0 * ((w < h ? w : h) / 2.0) : rv;
             }
         }
-        cairo_new_sub_path(cr);
-        cairo_arc(cr, cx, cy, r, 0, 2 * G_PI);
-        cairo_clip(cr);
+        gfx_new_sub_path(cr);
+        gfx_arc(cr, cx, cy, r, 0, 2 * G_PI);
+        gfx_clip(cr);
         clipped = TRUE;
     } else if (g_ascii_strncasecmp(cp, "ellipse", 7) == 0) {
-        cairo_save(cr);
-        cairo_translate(cr, cx, cy);
-        cairo_scale(cr, w / 2.0, h / 2.0);
-        cairo_arc(cr, 0, 0, 1.0, 0, 2 * G_PI);
-        cairo_restore(cr);
-        cairo_clip(cr);
+        gfx_save(cr);
+        gfx_translate(cr, cx, cy);
+        gfx_scale(cr, w / 2.0, h / 2.0);
+        gfx_arc(cr, 0, 0, 1.0, 0, 2 * G_PI);
+        gfx_restore(cr);
+        gfx_clip(cr);
         clipped = TRUE;
     } else if (g_ascii_strncasecmp(cp, "polygon", 7) == 0) {
         const char *paren = strchr(cp, '(');
@@ -4763,7 +4777,7 @@ apply_box_content_clip(cairo_t *cr, const ns_box *b)
         char *body = g_strndup(paren, (gsize)(end - paren));
         gchar **verts = g_strsplit(body, ",", -1);
         gboolean first = TRUE;
-        cairo_new_sub_path(cr);
+        gfx_new_sub_path(cr);
         for (int i = 0; verts[i]; i++) {
             char *coords = g_strstrip(verts[i]);
             if (!*coords) continue;
@@ -4779,14 +4793,14 @@ apply_box_content_clip(cairo_t *cr, const ns_box *b)
             gboolean ypct = (*endp2 == '%');
             double px = xpct ? b->x + xv / 100.0 * w : b->x + xv;
             double py = ypct ? b->y + yv / 100.0 * h : b->y + yv;
-            if (first) { cairo_move_to(cr, px, py); first = FALSE; }
-            else       cairo_line_to(cr, px, py);
+            if (first) { gfx_move_to(cr, px, py); first = FALSE; }
+            else       gfx_line_to(cr, px, py);
         }
         g_strfreev(verts);
         g_free(body);
         if (!first) {
-            cairo_close_path(cr);
-            cairo_clip(cr);
+            gfx_close_path(cr);
+            gfx_clip(cr);
             clipped = TRUE;
         }
     } else if (g_ascii_strncasecmp(cp, "inset", 5) == 0) {
@@ -4798,9 +4812,9 @@ apply_box_content_clip(cairo_t *cr, const ns_box *b)
             double pv = g_ascii_strtod(paren, &endp);
             if (endp && endp != paren) {
                 pad = (*endp == '%') ? pv / 100.0 * ((w < h ? w : h)) : pv;
-                cairo_rectangle(cr, b->x + pad, b->y + pad,
+                gfx_rectangle(cr, b->x + pad, b->y + pad,
                                 w - 2 * pad, h - 2 * pad);
-                cairo_clip(cr);
+                gfx_clip(cr);
                 clipped = TRUE;
             }
         }
@@ -4809,42 +4823,42 @@ apply_box_content_clip(cairo_t *cr, const ns_box *b)
 }
 
 typedef struct {
-    cairo_surface_t *plain;
+    gfx_surface_t *plain;
     char            *filter;
-    cairo_surface_t *filtered;
+    gfx_surface_t *filtered;
 } texture_surfaces;
 
 static void
 texture_surfaces_free(gpointer data)
 {
     texture_surfaces *ts = data;
-    if (ts->plain) cairo_surface_destroy(ts->plain);
-    if (ts->filtered) cairo_surface_destroy(ts->filtered);
+    if (ts->plain) gfx_surface_destroy(ts->plain);
+    if (ts->filtered) gfx_surface_destroy(ts->filtered);
     g_free(ts->filter);
     g_free(ts);
 }
 
 /* Downloads a texture into a new ARGB surface, optionally applying a CSS filter. */
-static cairo_surface_t *
+static gfx_surface_t *
 texture_surface_create(ns_texture *tex, int iw, int ih, const char *filter_kw)
 {
-    cairo_surface_t *surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+    gfx_surface_t *surf = gfx_image_surface_create(GFX_FORMAT_ARGB32,
                                                        iw, ih);
-    if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
-        cairo_surface_destroy(surf);
+    if (gfx_surface_status(surf) != GFX_STATUS_SUCCESS) {
+        gfx_surface_destroy(surf);
         return NULL;
     }
-    guchar *dst = cairo_image_surface_get_data(surf);
-    int dst_stride = cairo_image_surface_get_stride(surf);
+    guchar *dst = gfx_image_surface_get_data(surf);
+    int dst_stride = gfx_image_surface_get_stride(surf);
     ns_texture_download(tex, dst, (gsize)dst_stride);
     if (filter_kw)
         apply_image_filter(dst, dst_stride, iw, ih, filter_kw);
-    cairo_surface_mark_dirty(surf);
+    gfx_surface_mark_dirty(surf);
     return surf;
 }
 
 /* Returns the texture's cached plain or filtered surface (one filter cached); borrowed. */
-static cairo_surface_t *
+static gfx_surface_t *
 texture_surface_cached(ns_texture *tex, const char *filter_kw)
 {
     int iw = ns_texture_get_width(tex);
@@ -4861,9 +4875,9 @@ texture_surface_cached(ns_texture *tex, const char *filter_kw)
     }
     if (ts->filtered && g_strcmp0(ts->filter, filter_kw) == 0)
         return ts->filtered;
-    cairo_surface_t *surf = texture_surface_create(tex, iw, ih, filter_kw);
+    gfx_surface_t *surf = texture_surface_create(tex, iw, ih, filter_kw);
     if (!surf) return NULL;
-    if (ts->filtered) cairo_surface_destroy(ts->filtered);
+    if (ts->filtered) gfx_surface_destroy(ts->filtered);
     g_free(ts->filter);
     ts->filtered = surf;
     ts->filter = g_strdup(filter_kw);
@@ -4920,7 +4934,7 @@ object_fit_scale(const ns_box *b, int iw, int ih, double *out_sx,
 
 /* Paints an image texture into the content box with object-fit, filters and clipping. */
 static gboolean
-paint_texture(cairo_t *cr, const ns_box *b, ns_texture *tex)
+paint_texture(gfx_t *cr, const ns_box *b, ns_texture *tex)
 {
     int iw = ns_texture_get_width(tex);
     int ih = ns_texture_get_height(tex);
@@ -4935,7 +4949,7 @@ paint_texture(cairo_t *cr, const ns_box *b, ns_texture *tex)
     }
     const char *surface_filter =
         filter_has_bitmap_effect(filter_kw) ? filter_kw : NULL;
-    cairo_surface_t *surf = texture_surface_cached(tex, surface_filter);
+    gfx_surface_t *surf = texture_surface_cached(tex, surface_filter);
     if (!surf) return FALSE;
     double cw = b->content_width, ch = b->content_height;
     double sx, sy, ox, oy;
@@ -4944,51 +4958,51 @@ paint_texture(cairo_t *cr, const ns_box *b, ns_texture *tex)
     double cy = b->y + b->margin.top  + b->border.top  + b->padding.top;
     paint_texture_drop_shadows(cr, surf, b, sx, sy, ox, oy, filter_kw);
     apply_box_content_clip(cr, b);
-    cairo_rectangle(cr, cx, cy, cw, ch);
-    cairo_clip(cr);
-    cairo_translate(cr, cx + ox, cy + oy);
-    cairo_scale(cr, sx, sy);
-    cairo_set_source_surface(cr, surf, 0, 0);
+    gfx_rectangle(cr, cx, cy, cw, ch);
+    gfx_clip(cr);
+    gfx_translate(cr, cx + ox, cy + oy);
+    gfx_scale(cr, sx, sy);
+    gfx_set_source_surface(cr, surf, 0, 0);
     const ns_css_value *ir = st ? st->values[NS_CSS_IMAGE_RENDERING] : NULL;
     if (ir && ir->kind == NS_CSS_V_KEYWORD && ir->u.keyword &&
         (strcmp(ir->u.keyword, "pixelated") == 0 ||
          strcmp(ir->u.keyword, "crisp-edges") == 0))
-        cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_NEAREST);
-    cairo_paint(cr);
+        gfx_pattern_set_filter(gfx_get_source(cr), GFX_FILTER_NEAREST);
+    gfx_paint(cr);
     return TRUE;
 }
 
 /* Draws the broken-image placeholder: white box with border and red cross. */
 static void
-paint_failed_image(cairo_t *cr, const ns_box *b)
+paint_failed_image(gfx_t *cr, const ns_box *b)
 {
     double w = b->content_width;
     double h = b->content_height;
     if (w <= 0 || h <= 0) return;
-    cairo_set_source_rgb(cr, 1, 1, 1);
-    cairo_rectangle(cr, b->x, b->y, w, h);
-    cairo_fill_preserve(cr);
-    cairo_set_source_rgb(cr, 0.78, 0.78, 0.78);
-    cairo_set_line_width(cr, 1);
-    cairo_stroke(cr);
+    gfx_set_source_rgb(cr, 1, 1, 1);
+    gfx_rectangle(cr, b->x, b->y, w, h);
+    gfx_fill_preserve(cr);
+    gfx_set_source_rgb(cr, 0.78, 0.78, 0.78);
+    gfx_set_line_width(cr, 1);
+    gfx_stroke(cr);
     double s = MIN(10.0, MIN(w, h) - 2.0);
     if (s < 4.0) return;
     double x = b->x + 3.0;
     double y = b->y + 3.0;
     if (x + s > b->x + w) x = b->x + MAX(0.0, w - s - 1.0);
     if (y + s > b->y + h) y = b->y + MAX(0.0, h - s - 1.0);
-    cairo_set_source_rgb(cr, 0.82, 0.0, 0.0);
-    cairo_set_line_width(cr, 2.0);
-    cairo_move_to(cr, x, y);
-    cairo_line_to(cr, x + s, y + s);
-    cairo_move_to(cr, x + s, y);
-    cairo_line_to(cr, x, y + s);
-    cairo_stroke(cr);
+    gfx_set_source_rgb(cr, 0.82, 0.0, 0.0);
+    gfx_set_line_width(cr, 2.0);
+    gfx_move_to(cr, x, y);
+    gfx_line_to(cr, x + s, y + s);
+    gfx_move_to(cr, x + s, y);
+    gfx_line_to(cr, x, y + s);
+    gfx_stroke(cr);
 }
 
 /* Renders an inline SVG element into its content box. */
 static void
-paint_svg(cairo_t *cr, const ns_box *b)
+paint_svg(gfx_t *cr, const ns_box *b)
 {
     if (!b->dom) return;
     double w = b->content_width;
@@ -4996,19 +5010,15 @@ paint_svg(cairo_t *cr, const ns_box *b)
     if (w <= 0 || h <= 0) return;
     double x = b->x + b->margin.left + b->border.left + b->padding.left;
     double y = b->y + b->margin.top  + b->border.top  + b->padding.top;
-    cairo_save(cr);
-    cairo_translate(cr, x, y);
-    /* The SVG renderer draws with gfx, into this context's target. */
-    gfx_from_cairo *bridge;
-    gfx_t *g = gfx_from_cairo_begin(cr, &bridge);
-    ns_svg_render_node(g, b->dom, w, h, b->svg_styles, b->style);
-    gfx_from_cairo_end(cr, g, bridge);
-    cairo_restore(cr);
+    gfx_save(cr);
+    gfx_translate(cr, x, y);
+    ns_svg_render_node(cr, b->dom, w, h, b->svg_styles, b->style);
+    gfx_restore(cr);
 }
 
 /* Paints a MathML element at its content origin using the box's font size and color. */
 static void
-paint_math(cairo_t *cr, const ns_box *b)
+paint_math(gfx_t *cr, const ns_box *b)
 {
     if (!b->dom) return;
     const ns_style *s = b->style;
@@ -5023,15 +5033,12 @@ paint_math(cairo_t *cr, const ns_box *b)
     }
     double ox = b->x + b->margin.left + b->border.left + b->padding.left;
     double oy = b->y + b->margin.top + b->border.top + b->padding.top;
-    gfx_from_cairo *bridge;
-    gfx_t *gx = gfx_from_cairo_begin(cr, &bridge);
-    ns_math_paint(gx, b->dom, ox, oy, fpx, r, g, bl, a);
-    gfx_from_cairo_end(cr, gx, bridge);
+    ns_math_paint(cr, b->dom, ox, oy, fpx, r, g, bl, a);
 }
 
 /* Paints an img: loaded texture, broken placeholder, or grey placeholder with alt text. */
 static void
-paint_image(cairo_t *cr, const ns_box *b)
+paint_image(gfx_t *cr, const ns_box *b)
 {
     if (ns_node_is_tag(b->dom, NS_TAG_CANVAS)) return;
     const ns_image *img = NULL;
@@ -5039,7 +5046,7 @@ paint_image(cairo_t *cr, const ns_box *b)
         img = ns_js_image_for_node(g_paint_js, b->dom);
     if (!img && b->media)
         img = b->media->image;
-    cairo_save(cr);
+    gfx_save(cr);
     if (img && img->loaded && img->texture) {
         paint_texture(cr, b, img->texture);
     } else if (img && img->failed) {
@@ -5047,7 +5054,7 @@ paint_image(cairo_t *cr, const ns_box *b)
             paint_failed_image(cr, b);
     } else {
         if (b->content_width <= 24 && b->content_height <= 24) {
-            cairo_restore(cr);
+            gfx_restore(cr);
             return;
         }
         const ns_style *s = b->style;
@@ -5058,12 +5065,12 @@ paint_image(cairo_t *cr, const ns_box *b)
         double cx = b->x + b->margin.left + b->border.left + b->padding.left;
         double cy = b->y + b->margin.top  + b->border.top  + b->padding.top;
         if (!has_bg) {
-            cairo_set_source_rgb(cr, 0.92, 0.92, 0.92);
-            cairo_rectangle(cr, cx, cy, b->content_width, b->content_height);
-            cairo_fill_preserve(cr);
-            cairo_set_source_rgb(cr, 0.6, 0.6, 0.6);
-            cairo_set_line_width(cr, 1);
-            cairo_stroke(cr);
+            gfx_set_source_rgb(cr, 0.92, 0.92, 0.92);
+            gfx_rectangle(cr, cx, cy, b->content_width, b->content_height);
+            gfx_fill_preserve(cr);
+            gfx_set_source_rgb(cr, 0.6, 0.6, 0.6);
+            gfx_set_line_width(cr, 1);
+            gfx_stroke(cr);
         }
         const char *alt = b->dom ? ns_element_get_attr(b->dom, "alt") : NULL;
         if (alt && *alt && b->content_width > 24 && b->content_height > 16) {
@@ -5074,13 +5081,12 @@ paint_image(cairo_t *cr, const ns_box *b)
             ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
             int pw, ph;
             ns_pango_layout_get_pixel_size(layout, &pw, &ph);
-            cairo_set_source_rgb(cr, 0.3, 0.3, 0.3);
-            cairo_move_to(cr, cx + 4, cy + (b->content_height - ph) / 2);
-            ns_pango_cairo_show_layout(cr, layout);
+            gfx_set_source_rgb(cr, 0.3, 0.3, 0.3);
+            paint_show_layout(cr, cx + 4, cy + (b->content_height - ph) / 2, layout);
             g_object_unref(layout);
         }
     }
-    cairo_restore(cr);
+    gfx_restore(cr);
 }
 
 /* Formats seconds as m:ss or h:mm:ss, or "--:--" when unknown. */
@@ -5112,53 +5118,53 @@ paint_media_duration(const ns_box *b, const ns_media_controls_state *st)
 
 /* Draws a play triangle when paused, otherwise a pause glyph. */
 static void
-paint_media_play_icon(cairo_t *cr, double cx, double cy, double r,
+paint_media_play_icon(gfx_t *cr, double cx, double cy, double r,
                       gboolean paused)
 {
     if (paused) {
-        cairo_move_to(cr, cx - r * 0.55, cy - r * 0.75);
-        cairo_line_to(cr, cx + r * 0.80, cy);
-        cairo_line_to(cr, cx - r * 0.55, cy + r * 0.75);
-        cairo_close_path(cr);
-        cairo_fill(cr);
+        gfx_move_to(cr, cx - r * 0.55, cy - r * 0.75);
+        gfx_line_to(cr, cx + r * 0.80, cy);
+        gfx_line_to(cr, cx - r * 0.55, cy + r * 0.75);
+        gfx_close_path(cr);
+        gfx_fill(cr);
         return;
     }
-    cairo_rectangle(cr, cx - r * 0.65, cy - r * 0.70, r * 0.45, r * 1.40);
-    cairo_rectangle(cr, cx + r * 0.20, cy - r * 0.70, r * 0.45, r * 1.40);
-    cairo_fill(cr);
+    gfx_rectangle(cr, cx - r * 0.65, cy - r * 0.70, r * 0.45, r * 1.40);
+    gfx_rectangle(cr, cx + r * 0.20, cy - r * 0.70, r * 0.45, r * 1.40);
+    gfx_fill(cr);
 }
 
 /* Draws a speaker glyph with sound waves, or a cross when muted. */
 static void
-paint_media_mute_icon(cairo_t *cr, double cx, double cy, double r,
+paint_media_mute_icon(gfx_t *cr, double cx, double cy, double r,
                       gboolean muted)
 {
-    cairo_move_to(cr, cx - r * 0.85, cy - r * 0.30);
-    cairo_line_to(cr, cx - r * 0.45, cy - r * 0.30);
-    cairo_line_to(cr, cx + r * 0.05, cy - r * 0.75);
-    cairo_line_to(cr, cx + r * 0.05, cy + r * 0.75);
-    cairo_line_to(cr, cx - r * 0.45, cy + r * 0.30);
-    cairo_line_to(cr, cx - r * 0.85, cy + r * 0.30);
-    cairo_close_path(cr);
-    cairo_fill(cr);
-    cairo_set_line_width(cr, 1.5);
+    gfx_move_to(cr, cx - r * 0.85, cy - r * 0.30);
+    gfx_line_to(cr, cx - r * 0.45, cy - r * 0.30);
+    gfx_line_to(cr, cx + r * 0.05, cy - r * 0.75);
+    gfx_line_to(cr, cx + r * 0.05, cy + r * 0.75);
+    gfx_line_to(cr, cx - r * 0.45, cy + r * 0.30);
+    gfx_line_to(cr, cx - r * 0.85, cy + r * 0.30);
+    gfx_close_path(cr);
+    gfx_fill(cr);
+    gfx_set_line_width(cr, 1.5);
     if (muted) {
-        cairo_move_to(cr, cx + r * 0.35, cy - r * 0.35);
-        cairo_line_to(cr, cx + r * 0.95, cy + r * 0.35);
-        cairo_move_to(cr, cx + r * 0.95, cy - r * 0.35);
-        cairo_line_to(cr, cx + r * 0.35, cy + r * 0.35);
-        cairo_stroke(cr);
+        gfx_move_to(cr, cx + r * 0.35, cy - r * 0.35);
+        gfx_line_to(cr, cx + r * 0.95, cy + r * 0.35);
+        gfx_move_to(cr, cx + r * 0.95, cy - r * 0.35);
+        gfx_line_to(cr, cx + r * 0.35, cy + r * 0.35);
+        gfx_stroke(cr);
         return;
     }
-    cairo_arc(cr, cx + r * 0.05, cy, r * 0.55, -G_PI / 4, G_PI / 4);
-    cairo_stroke(cr);
-    cairo_arc(cr, cx + r * 0.05, cy, r * 0.90, -G_PI / 4, G_PI / 4);
-    cairo_stroke(cr);
+    gfx_arc(cr, cx + r * 0.05, cy, r * 0.55, -G_PI / 4, G_PI / 4);
+    gfx_stroke(cr);
+    gfx_arc(cr, cx + r * 0.05, cy, r * 0.90, -G_PI / 4, G_PI / 4);
+    gfx_stroke(cr);
 }
 
 /* Paints native media controls: play, seek bar, time and mute, overlaid or standalone. */
 static void
-paint_media_controls(cairo_t *cr, const ns_box *b, gboolean overlay)
+paint_media_controls(gfx_t *cr, const ns_box *b, gboolean overlay)
 {
     if (!b->dom) return;
     double cx = b->x + b->margin.left + b->border.left + b->padding.left;
@@ -5173,43 +5179,43 @@ paint_media_controls(cairo_t *cr, const ns_box *b, gboolean overlay)
     double fg_r = overlay ? 1.0 : 0.20, fg_g = overlay ? 1.0 : 0.23,
            fg_b = overlay ? 1.0 : 0.26;
 
-    cairo_save(cr);
+    gfx_save(cr);
     if (overlay) {
-        cairo_rectangle(cr, r.x, r.y, r.w, r.h);
-        cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.55);
-        cairo_fill(cr);
+        gfx_rectangle(cr, r.x, r.y, r.w, r.h);
+        gfx_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.55);
+        gfx_fill(cr);
     } else {
         corner_radii radii = {{4, 4, 4, 4}, {4, 4, 4, 4}};
         rounded_rect_path(cr, r.x, r.y, r.w, r.h, radii);
-        cairo_set_source_rgb(cr, 0.96, 0.97, 0.98);
-        cairo_fill_preserve(cr);
-        cairo_set_source_rgb(cr, 0.55, 0.58, 0.62);
-        cairo_set_line_width(cr, 1.0);
-        cairo_stroke(cr);
+        gfx_set_source_rgb(cr, 0.96, 0.97, 0.98);
+        gfx_fill_preserve(cr);
+        gfx_set_source_rgb(cr, 0.55, 0.58, 0.62);
+        gfx_set_line_width(cr, 1.0);
+        gfx_stroke(cr);
     }
 
     double mid = r.y + r.h / 2.0;
     double icon = MIN(r.h * 0.30, 9.0);
-    cairo_set_source_rgb(cr, fg_r, fg_g, fg_b);
+    gfx_set_source_rgb(cr, fg_r, fg_g, fg_b);
     paint_media_play_icon(cr, r.play_x + r.play_w / 2.0, mid, icon, st.paused);
 
     double frac = duration > 0.0 ? CLAMP(st.position / duration, 0.0, 1.0)
                                  : 0.0;
     double knob = r.seek_x0 + (r.seek_x1 - r.seek_x0) * frac;
-    cairo_set_line_width(cr, 3.0);
-    cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
-    cairo_set_source_rgba(cr, fg_r, fg_g, fg_b, 0.35);
-    cairo_move_to(cr, r.seek_x0, mid);
-    cairo_line_to(cr, r.seek_x1, mid);
-    cairo_stroke(cr);
-    cairo_set_source_rgb(cr, fg_r, fg_g, fg_b);
+    gfx_set_line_width(cr, 3.0);
+    gfx_set_line_cap(cr, GFX_LINE_CAP_ROUND);
+    gfx_set_source_rgba(cr, fg_r, fg_g, fg_b, 0.35);
+    gfx_move_to(cr, r.seek_x0, mid);
+    gfx_line_to(cr, r.seek_x1, mid);
+    gfx_stroke(cr);
+    gfx_set_source_rgb(cr, fg_r, fg_g, fg_b);
     if (knob > r.seek_x0) {
-        cairo_move_to(cr, r.seek_x0, mid);
-        cairo_line_to(cr, knob, mid);
-        cairo_stroke(cr);
+        gfx_move_to(cr, r.seek_x0, mid);
+        gfx_line_to(cr, knob, mid);
+        gfx_stroke(cr);
     }
-    cairo_arc(cr, knob, mid, 5.0, 0, 2 * G_PI);
-    cairo_fill(cr);
+    gfx_arc(cr, knob, mid, 5.0, 0, 2 * G_PI);
+    gfx_fill(cr);
 
     if (r.time_w > 0.0) {
         char cur[24], total[24], text[56];
@@ -5223,22 +5229,21 @@ paint_media_controls(cairo_t *cr, const ns_box *b, gboolean overlay)
         ns_pango_layout_set_text(layout, text, -1);
         int tw = 0, th = 0;
         ns_pango_layout_get_pixel_size(layout, &tw, &th);
-        cairo_move_to(cr, r.time_x + (r.time_w - tw) / 2.0, mid - th / 2.0);
-        ns_pango_cairo_show_layout(cr, layout);
+        paint_show_layout(cr, r.time_x + (r.time_w - tw) / 2.0, mid - th / 2.0, layout);
         ns_pango_font_description_free(fd);
         g_object_unref(layout);
     }
 
-    cairo_set_source_rgba(cr, fg_r, fg_g, fg_b, st.audible ? 1.0 : 0.35);
+    gfx_set_source_rgba(cr, fg_r, fg_g, fg_b, st.audible ? 1.0 : 0.35);
     paint_media_mute_icon(cr, r.mute_x + r.mute_w / 2.0, mid, icon,
                           st.muted || !st.audible);
-    cairo_restore(cr);
+    gfx_restore(cr);
 }
 
 /* Paints a <video> box: its poster, else a dark placeholder, and the
  * controls. Weststar decodes no video, so no frame is ever shown. */
 static void
-paint_video(cairo_t *cr, const ns_box *b)
+paint_video(gfx_t *cr, const ns_box *b)
 {
     if (b->media && b->media->video_audio_src && !b->media->video_src) {
         paint_media_controls(cr, b, FALSE);
@@ -5261,12 +5266,12 @@ paint_video(cairo_t *cr, const ns_box *b)
             ns_element_get_attr(b->dom, "muted") &&
             !ns_element_get_attr(b->dom, "controls");
         if (!ambient) {
-            cairo_save(cr);
-            cairo_set_source_rgb(cr, 0.10, 0.10, 0.10);
-            cairo_rectangle(cr, b->x, b->y,
+            gfx_save(cr);
+            gfx_set_source_rgb(cr, 0.10, 0.10, 0.10);
+            gfx_rectangle(cr, b->x, b->y,
                             b->content_width, b->content_height);
-            cairo_fill(cr);
-            cairo_restore(cr);
+            gfx_fill(cr);
+            gfx_restore(cr);
         }
     }
     paint_media_controls(cr, b, TRUE);
@@ -5584,17 +5589,19 @@ marker_custom_text(const ns_node *li, const ns_style *li_style,
 
 /* Draws a marker label right-aligned before the edge (left-aligned after it in RTL). */
 static void
-paint_marker_label(cairo_t *cr, const char *label, double edge_x,
+paint_marker_label(gfx_t *cr, const char *label, double edge_x,
                    gboolean rtl, double baseline_y, double font_size)
 {
     if (!label || !*label) return;
-    cairo_set_font_size(cr, font_size);
+    cairo_t *tcr = gfx_cairo_begin(cr);
+    cairo_set_font_size(tcr, font_size);
     cairo_text_extents_t ext;
-    cairo_text_extents(cr, label, &ext);
+    cairo_text_extents(tcr, label, &ext);
     double x = rtl ? edge_x + font_size * 0.35 - ext.x_bearing
                    : edge_x - font_size * 0.35 - ext.width - ext.x_bearing;
-    cairo_move_to(cr, x, baseline_y);
-    cairo_show_text(cr, label);
+    cairo_move_to(tcr, x, baseline_y);
+    cairo_show_text(tcr, label);
+    gfx_cairo_end(cr, tcr);
 }
 
 /* Formats n with lower-greek letters in bijective base 24. */
@@ -5720,7 +5727,7 @@ ns_paint_li_marker_text(const ns_node *li, const ns_style *li_style,
 
 /* Paints an outside list marker: image, custom content, ordinal, disclosure or bullet. */
 static void
-paint_marker(cairo_t *cr, const ns_box *b)
+paint_marker(gfx_t *cr, const ns_box *b)
 {
     const ns_style *s = b->style;
     if (!li_generates_marker(b->dom, s)) return;
@@ -5766,18 +5773,18 @@ paint_marker(cairo_t *cr, const ns_box *b)
         double dw = iw, dh = ih;
         double cap = font_size;
         if (dh > cap) { dw *= cap / dh; dh = cap; }
-        cairo_surface_t *surf = texture_surface_cached(marker_img->texture,
+        gfx_surface_t *surf = texture_surface_cached(marker_img->texture,
                                                        NULL);
         if (surf) {
             double dx = rtl ? edge_x + font_size * 0.35
                             : edge_x - font_size * 0.35 - dw;
             double dy = cy - dh + font_size * 0.15;
-            cairo_save(cr);
-            cairo_translate(cr, dx, dy);
-            cairo_scale(cr, dw / iw, dh / ih);
-            cairo_set_source_surface(cr, surf, 0, 0);
-            cairo_paint(cr);
-            cairo_restore(cr);
+            gfx_save(cr);
+            gfx_translate(cr, dx, dy);
+            gfx_scale(cr, dw / iw, dh / ih);
+            gfx_set_source_surface(cr, surf, 0, 0);
+            gfx_paint(cr);
+            gfx_restore(cr);
             return;
         }
     }
@@ -5803,32 +5810,32 @@ paint_marker(cairo_t *cr, const ns_box *b)
         double sz = font_size * 0.3;
         double ty = cy - font_size * 0.32;
         double dir = rtl ? -1 : 1;
-        cairo_new_path(cr);
+        gfx_new_path(cr);
         if (open) {
-            cairo_move_to(cr, cx - sz, ty - sz * 0.5);
-            cairo_line_to(cr, cx + sz, ty - sz * 0.5);
-            cairo_line_to(cr, cx, ty + sz * 0.7);
+            gfx_move_to(cr, cx - sz, ty - sz * 0.5);
+            gfx_line_to(cr, cx + sz, ty - sz * 0.5);
+            gfx_line_to(cr, cx, ty + sz * 0.7);
         } else {
-            cairo_move_to(cr, cx - dir * sz * 0.5, ty - sz);
-            cairo_line_to(cr, cx - dir * sz * 0.5, ty + sz);
-            cairo_line_to(cr, cx + dir * sz * 0.7, ty);
+            gfx_move_to(cr, cx - dir * sz * 0.5, ty - sz);
+            gfx_line_to(cr, cx - dir * sz * 0.5, ty + sz);
+            gfx_line_to(cr, cx + dir * sz * 0.7, ty);
         }
-        cairo_close_path(cr);
-        cairo_fill(cr);
+        gfx_close_path(cr);
+        gfx_fill(cr);
     } else if (style_kw && strcmp(style_kw, "square") == 0) {
         double sz = font_size * 0.32;
-        cairo_new_path(cr);
-        cairo_rectangle(cr, cx - sz/2, cy - font_size * 0.32 - sz/2, sz, sz);
-        cairo_fill(cr);
+        gfx_new_path(cr);
+        gfx_rectangle(cr, cx - sz/2, cy - font_size * 0.32 - sz/2, sz, sz);
+        gfx_fill(cr);
     } else if (style_kw && strcmp(style_kw, "circle") == 0) {
-        cairo_new_sub_path(cr);
-        cairo_arc(cr, cx, cy - font_size * 0.32, font_size * 0.18, 0, 2 * G_PI);
-        cairo_set_line_width(cr, 1.0);
-        cairo_stroke(cr);
+        gfx_new_sub_path(cr);
+        gfx_arc(cr, cx, cy - font_size * 0.32, font_size * 0.18, 0, 2 * G_PI);
+        gfx_set_line_width(cr, 1.0);
+        gfx_stroke(cr);
     } else {
-        cairo_new_sub_path(cr);
-        cairo_arc(cr, cx, cy - font_size * 0.32, font_size * 0.18, 0, 2 * G_PI);
-        cairo_fill(cr);
+        gfx_new_sub_path(cr);
+        gfx_arc(cr, cx, cy - font_size * 0.32, font_size * 0.18, 0, 2 * G_PI);
+        gfx_fill(cr);
     }
 }
 
@@ -6114,7 +6121,7 @@ deferred_queue_insert(GPtrArray *queue, guint from, deferred_capture *cap)
 
 /* Paints deferred positioned boxes in z-order at their captured device offsets. */
 static void
-paint_flush_deferred(cairo_t *cr, GPtrArray *list, const char *highlight)
+paint_flush_deferred(gfx_t *cr, GPtrArray *list, const char *highlight)
 {
     if (!list || list->len == 0) return;
     GPtrArray *queue = g_ptr_array_new_with_free_func(g_free);
@@ -6126,16 +6133,16 @@ paint_flush_deferred(cairo_t *cr, GPtrArray *list, const char *highlight)
     for (guint i = 0; i < queue->len; i++) {
         const deferred_capture *cap = g_ptr_array_index(queue, i);
         double cur_x = 0, cur_y = 0;
-        cairo_user_to_device(cr, &cur_x, &cur_y);
+        gfx_user_to_device(cr, &cur_x, &cur_y);
         double dx = cap->dev_x - cur_x;
         double dy = cap->dev_y - cur_y;
         if (isnan(dx) || isnan(dy)) dx = dy = 0;
-        cairo_save(cr);
-        if (dx != 0 || dy != 0) cairo_translate(cr, dx, dy);
+        gfx_save(cr);
+        if (dx != 0 || dy != 0) gfx_translate(cr, dx, dy);
         g_paint_flush_box = cap->box;
         if (g_dbg_paint_x >= 0 && cap->box->dom) {
             double gx0, gy0, gx1, gy1;
-            cairo_clip_extents(cr, &gx0, &gy0, &gx1, &gy1);
+            gfx_clip_extents(cr, &gx0, &gy0, &gx1, &gy1);
             g_printerr("[flush-one] <%s#%s y=%.0f h=%.0f> d=%.0f,%.0f "
                        "clip=%.0f,%.0f..%.0f,%.0f\n",
                        cap->box->dom->name ? cap->box->dom->name : "?",
@@ -6152,7 +6159,7 @@ paint_flush_deferred(cairo_t *cr, GPtrArray *list, const char *highlight)
         GPtrArray *fresh = g_paint_deferred_list;
         g_paint_deferred_list = saved_list;
         g_paint_defer_depth--;
-        cairo_restore(cr);
+        gfx_restore(cr);
         if (fresh) {
             while (fresh->len > 0)
                 deferred_queue_insert(queue, i + 1,
@@ -6168,16 +6175,16 @@ static double g_paint_anchor_dx, g_paint_anchor_dy;
 
 /* Restores cairo state and the saved anchor-positioning offsets. */
 static void
-paint_anchor_leave(cairo_t *cr, double saved_dx, double saved_dy)
+paint_anchor_leave(gfx_t *cr, double saved_dx, double saved_dy)
 {
-    cairo_restore(cr);
+    gfx_restore(cr);
     g_paint_anchor_dx = saved_dx;
     g_paint_anchor_dy = saved_dy;
 }
 
 /* Paint offset for fixed (viewport origin) or sticky positioning against the viewport. */
 static void
-compute_sticky_offset(const ns_box *b, cairo_t *cr,
+compute_sticky_offset(const ns_box *b, gfx_t *cr,
                       double *out_dx, double *out_dy)
 {
     *out_dx = 0;
@@ -6198,29 +6205,29 @@ compute_sticky_offset(const ns_box *b, cairo_t *cr,
 }
 
 /* Maps mix-blend-mode to the corresponding cairo operator; OVER by default. */
-static cairo_operator_t
+static gfx_operator_t
 blend_mode_operator(const ns_style *s)
 {
-    if (!s || !s->values[NS_CSS_MIX_BLEND_MODE]) return CAIRO_OPERATOR_OVER;
+    if (!s || !s->values[NS_CSS_MIX_BLEND_MODE]) return GFX_OPERATOR_OVER;
     const ns_css_value *v = s->values[NS_CSS_MIX_BLEND_MODE];
-    if (v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return CAIRO_OPERATOR_OVER;
+    if (v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return GFX_OPERATOR_OVER;
     const char *k = v->u.keyword;
-    if (strcmp(k, "multiply")    == 0) return CAIRO_OPERATOR_MULTIPLY;
-    if (strcmp(k, "screen")      == 0) return CAIRO_OPERATOR_SCREEN;
-    if (strcmp(k, "overlay")     == 0) return CAIRO_OPERATOR_OVERLAY;
-    if (strcmp(k, "darken")      == 0) return CAIRO_OPERATOR_DARKEN;
-    if (strcmp(k, "lighten")     == 0) return CAIRO_OPERATOR_LIGHTEN;
-    if (strcmp(k, "color-dodge") == 0) return CAIRO_OPERATOR_COLOR_DODGE;
-    if (strcmp(k, "color-burn")  == 0) return CAIRO_OPERATOR_COLOR_BURN;
-    if (strcmp(k, "hard-light")  == 0) return CAIRO_OPERATOR_HARD_LIGHT;
-    if (strcmp(k, "soft-light")  == 0) return CAIRO_OPERATOR_SOFT_LIGHT;
-    if (strcmp(k, "difference")  == 0) return CAIRO_OPERATOR_DIFFERENCE;
-    if (strcmp(k, "exclusion")   == 0) return CAIRO_OPERATOR_EXCLUSION;
-    if (strcmp(k, "hue")         == 0) return CAIRO_OPERATOR_HSL_HUE;
-    if (strcmp(k, "saturation")  == 0) return CAIRO_OPERATOR_HSL_SATURATION;
-    if (strcmp(k, "color")       == 0) return CAIRO_OPERATOR_HSL_COLOR;
-    if (strcmp(k, "luminosity")  == 0) return CAIRO_OPERATOR_HSL_LUMINOSITY;
-    return CAIRO_OPERATOR_OVER;
+    if (strcmp(k, "multiply")    == 0) return GFX_OPERATOR_MULTIPLY;
+    if (strcmp(k, "screen")      == 0) return GFX_OPERATOR_SCREEN;
+    if (strcmp(k, "overlay")     == 0) return GFX_OPERATOR_OVERLAY;
+    if (strcmp(k, "darken")      == 0) return GFX_OPERATOR_DARKEN;
+    if (strcmp(k, "lighten")     == 0) return GFX_OPERATOR_LIGHTEN;
+    if (strcmp(k, "color-dodge") == 0) return GFX_OPERATOR_COLOR_DODGE;
+    if (strcmp(k, "color-burn")  == 0) return GFX_OPERATOR_COLOR_BURN;
+    if (strcmp(k, "hard-light")  == 0) return GFX_OPERATOR_HARD_LIGHT;
+    if (strcmp(k, "soft-light")  == 0) return GFX_OPERATOR_SOFT_LIGHT;
+    if (strcmp(k, "difference")  == 0) return GFX_OPERATOR_DIFFERENCE;
+    if (strcmp(k, "exclusion")   == 0) return GFX_OPERATOR_EXCLUSION;
+    if (strcmp(k, "hue")         == 0) return GFX_OPERATOR_HSL_HUE;
+    if (strcmp(k, "saturation")  == 0) return GFX_OPERATOR_HSL_SATURATION;
+    if (strcmp(k, "color")       == 0) return GFX_OPERATOR_HSL_COLOR;
+    if (strcmp(k, "luminosity")  == 0) return GFX_OPERATOR_HSL_LUMINOSITY;
+    return GFX_OPERATOR_OVER;
 }
 
 static const ns_box *g_paint_skip_box;
@@ -6229,7 +6236,7 @@ static double g_paint_clip_y0, g_paint_clip_y1;
 static double g_paint_cull_margin = 400.0;
 
 /* Builds a linear or radial cairo pattern for a mask gradient; NULL for conic. */
-static cairo_pattern_t *
+static gfx_pattern_t *
 mask_gradient_pattern(const ns_css_gradient *gr,
                       double bx, double by, double bw, double bh)
 {
@@ -6253,31 +6260,31 @@ mask_gradient_pattern(const ns_css_gradient *gr,
         frac[i] = gr->stops[i].pos + gr->stops[i].pos_px / line_len;
     double start, period;
     paint_gradient_repeat_window(gr, frac, &start, &period);
-    cairo_pattern_t *pat;
+    gfx_pattern_t *pat;
     if (gr->radial) {
-        pat = cairo_pattern_create_radial(0, 0, start, 0, 0, start + period);
-        cairo_matrix_t m;
-        cairo_matrix_init_scale(&m, 1.0 / r_outer, 1.0 / r_outer_y);
-        cairo_matrix_translate(&m, -cx, -cy);
-        cairo_pattern_set_matrix(pat, &m);
+        pat = gfx_pattern_create_radial(0, 0, start, 0, 0, start + period);
+        gfx_matrix_t m;
+        gfx_matrix_init_scale(&m, 1.0 / r_outer, 1.0 / r_outer_y);
+        gfx_matrix_translate(&m, -cx, -cy);
+        gfx_pattern_set_matrix(pat, &m);
     } else {
         double x0 = cx - dxh, y0 = cy - dyh;
-        pat = cairo_pattern_create_linear(
+        pat = gfx_pattern_create_linear(
             x0 + 2.0 * dxh * start, y0 + 2.0 * dyh * start,
             x0 + 2.0 * dxh * (start + period),
             y0 + 2.0 * dyh * (start + period));
     }
     paint_gradient_add_stops(pat, gr, frac, period);
-    if (gr->repeating) cairo_pattern_set_extend(pat, CAIRO_EXTEND_REPEAT);
+    if (gr->repeating) gfx_pattern_set_extend(pat, GFX_EXTEND_REPEAT);
     return pat;
 }
 
 /* Caches clip and viewport extents for culling and resets anchor offsets for a paint pass. */
 static void
-paint_cache_clip(cairo_t *cr)
+paint_cache_clip(gfx_t *cr)
 {
     double x0, x1;
-    cairo_clip_extents(cr, &x0, &g_paint_clip_y0, &x1, &g_paint_clip_y1);
+    gfx_clip_extents(cr, &x0, &g_paint_clip_y0, &x1, &g_paint_clip_y1);
     double vx0 = x0, vy0 = g_paint_clip_y0, vx1 = x1, vy1 = g_paint_clip_y1;
     if (g_paint_have_device_vp)
         paint_viewport_user_extents(cr, &vx0, &vy0, &vx1, &vy1);
@@ -6302,7 +6309,7 @@ typedef struct ns_quad3 {
 } ns_quad3;
 
 typedef struct quad_tex_entry {
-    cairo_surface_t *surf;
+    gfx_surface_t *surf;
     int tw, th;
 } quad_tex_entry;
 
@@ -6312,7 +6319,7 @@ static void
 quad_tex_entry_free(gpointer p)
 {
     quad_tex_entry *e = p;
-    cairo_surface_destroy(e->surf);
+    gfx_surface_destroy(e->surf);
     g_free(e);
 }
 
@@ -6476,7 +6483,7 @@ collect_3d_quads(const ns_box *b, const ns_mat4 *pm, GArray *quads)
 
 /* Renders a box to a texture (cached when static) and maps it onto its projected 3D quad. */
 static void
-paint_quad3(cairo_t *cr, const ns_quad3 *q, const char *highlight)
+paint_quad3(gfx_t *cr, const ns_quad3 *q, const char *highlight)
 {
     if (q->bw < 0.5 || q->bh < 0.5) return;
     const double weps = 0.02;
@@ -6500,7 +6507,7 @@ paint_quad3(cairo_t *cr, const ns_quad3 *q, const char *highlight)
     if (behind == 4) return;
     gboolean clipped = behind > 0;
     double clx0, cly0, clx1, cly1;
-    cairo_clip_extents(cr, &clx0, &cly0, &clx1, &cly1);
+    gfx_clip_extents(cr, &clx0, &cly0, &clx1, &cly1);
     double minx = 0, maxx = 0, miny = 0, maxy = 0;
     if (!clipped) {
         double area2 = (px[1] - px[0]) * (py[3] - py[0]) -
@@ -6549,22 +6556,22 @@ paint_quad3(cairo_t *cr, const ns_quad3 *q, const char *highlight)
                               NS_CSS_ANIM_TARGET_BG_COLOR, anim_col))
             cacheable = FALSE;
     }
-    cairo_surface_t *tex = NULL;
+    gfx_surface_t *tex = NULL;
     if (cacheable && g_paint_3d_tex) {
         quad_tex_entry *e =
             g_hash_table_lookup(g_paint_3d_tex, (gpointer)q->box);
         if (e && e->tw == tw && e->th == th)
-            tex = cairo_surface_reference(e->surf);
+            tex = gfx_surface_reference(e->surf);
     }
     if (!tex) {
-        tex = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, tw, th);
-        if (cairo_surface_status(tex) != CAIRO_STATUS_SUCCESS) {
-            cairo_surface_destroy(tex);
+        tex = gfx_image_surface_create(GFX_FORMAT_ARGB32, tw, th);
+        if (gfx_surface_status(tex) != GFX_STATUS_SUCCESS) {
+            gfx_surface_destroy(tex);
             return;
         }
-        cairo_t *tcr = cairo_create(tex);
-        cairo_scale(tcr, k, k);
-        cairo_translate(tcr, -q->bx, -q->by);
+        gfx_t *tcr = gfx_create(tex);
+        gfx_scale(tcr, k, k);
+        gfx_translate(tcr, -q->bx, -q->by);
         const ns_box *saved_root = g_paint_tex_root;
         const ns_box *saved_flush = g_paint_flush_box;
         g_paint_tex_root = q->box;
@@ -6577,17 +6584,17 @@ paint_quad3(cairo_t *cr, const ns_quad3 *q, const char *highlight)
         g_paint_no_cull--;
         g_paint_tex_root = saved_root;
         g_paint_flush_box = saved_flush;
-        cairo_destroy(tcr);
+        gfx_destroy(tcr);
         const ns_style *st = q->box->style;
         const char *filter_kw = st && st->values[NS_CSS_FILTER] &&
             st->values[NS_CSS_FILTER]->kind == NS_CSS_V_KEYWORD
             ? st->values[NS_CSS_FILTER]->u.keyword : NULL;
         if (filter_kw && filter_has_bitmap_effect(filter_kw)) {
-            cairo_surface_flush(tex);
-            apply_image_filter(cairo_image_surface_get_data(tex),
-                               cairo_image_surface_get_stride(tex),
+            gfx_surface_flush(tex);
+            apply_image_filter(gfx_image_surface_get_data(tex),
+                               gfx_image_surface_get_stride(tex),
                                tw, th, filter_kw);
-            cairo_surface_mark_dirty(tex);
+            gfx_surface_mark_dirty(tex);
         }
         if (cacheable) {
             if (!g_paint_3d_tex)
@@ -6595,7 +6602,7 @@ paint_quad3(cairo_t *cr, const ns_quad3 *q, const char *highlight)
                     g_hash_table_new_full(g_direct_hash, g_direct_equal,
                                           NULL, quad_tex_entry_free);
             quad_tex_entry *e = g_new(quad_tex_entry, 1);
-            e->surf = cairo_surface_reference(tex);
+            e->surf = gfx_surface_reference(tex);
             e->tw = tw;
             e->th = th;
             g_hash_table_replace(g_paint_3d_tex, (gpointer)q->box, e);
@@ -6635,9 +6642,9 @@ paint_quad3(cairo_t *cr, const ns_quad3 *q, const char *highlight)
                 gy[j * np + i] = oy / ow;
             }
         }
-    cairo_pattern_t *pat = cairo_pattern_create_for_surface(tex);
-    cairo_pattern_set_extend(pat, CAIRO_EXTEND_PAD);
-    cairo_pattern_set_filter(pat, CAIRO_FILTER_GOOD);
+    gfx_pattern_t *pat = gfx_pattern_create_for_surface(tex);
+    gfx_pattern_set_extend(pat, GFX_EXTEND_PAD);
+    gfx_pattern_set_filter(pat, GFX_FILTER_GOOD);
     for (int j = 0; j < n; j++) {
         for (int i = 0; i < n; i++) {
             double cws[4] = { gw[j * np + i], gw[j * np + i + 1],
@@ -6705,8 +6712,8 @@ paint_quad3(cairo_t *cr, const ns_quad3 *q, const char *highlight)
             ccx /= nv;
             ccy /= nv;
             double pad = n > 1 ? 0.35 : 0.0;
-            cairo_save(cr);
-            cairo_new_path(cr);
+            gfx_save(cr);
+            gfx_new_path(cr);
             for (int v = 0; v < nv; v++) {
                 double dx2 = sx[v] - ccx, dy2 = sy[v] - ccy;
                 double dlen = sqrt(dx2 * dx2 + dy2 * dy2);
@@ -6715,26 +6722,26 @@ paint_quad3(cairo_t *cr, const ns_quad3 *q, const char *highlight)
                     ex += dx2 / dlen * pad;
                     ey += dy2 / dlen * pad;
                 }
-                if (v == 0) cairo_move_to(cr, ex, ey);
-                else        cairo_line_to(cr, ex, ey);
+                if (v == 0) gfx_move_to(cr, ex, ey);
+                else        gfx_line_to(cr, ex, ey);
             }
-            cairo_close_path(cr);
-            cairo_clip(cr);
-            cairo_matrix_t cm2;
-            cairo_matrix_init(&cm2, ma, mb, mc, md, me, mf);
-            cairo_transform(cr, &cm2);
-            cairo_matrix_t pm2;
-            cairo_matrix_init(&pm2, (double)tw / n, 0, 0, (double)th / n,
+            gfx_close_path(cr);
+            gfx_clip(cr);
+            gfx_matrix_t cm2;
+            gfx_matrix_init(&cm2, ma, mb, mc, md, me, mf);
+            gfx_transform(cr, &cm2);
+            gfx_matrix_t pm2;
+            gfx_matrix_init(&pm2, (double)tw / n, 0, 0, (double)th / n,
                               (double)tw * i / n, (double)th * j / n);
-            cairo_pattern_set_matrix(pat, &pm2);
-            cairo_set_source(cr, pat);
-            cairo_rectangle(cr, -0.5, -0.5, 2.0, 2.0);
-            cairo_fill(cr);
-            cairo_restore(cr);
+            gfx_pattern_set_matrix(pat, &pm2);
+            gfx_set_source(cr, pat);
+            gfx_rectangle(cr, -0.5, -0.5, 2.0, 2.0);
+            gfx_fill(cr);
+            gfx_restore(cr);
         }
     }
-    cairo_pattern_destroy(pat);
-    cairo_surface_destroy(tex);
+    gfx_pattern_destroy(pat);
+    gfx_surface_destroy(tex);
     g_free(gx);
 }
 
@@ -6946,7 +6953,7 @@ collect_root_quads(const ns_box *b)
 
 /* Paints a 3D rendering context: the root's own block, then its quads depth-sorted. */
 static void
-paint_3d_root(cairo_t *cr, const ns_box *b, const char *highlight)
+paint_3d_root(gfx_t *cr, const ns_box *b, const char *highlight)
 {
     if (box_establishes_3d(b) &&
         (b->kind == NS_BOX_BLOCK || b->kind == NS_BOX_TABLE ||
@@ -6982,11 +6989,11 @@ paint_3d_root(cairo_t *cr, const ns_box *b, const char *highlight)
     for (guint i = 0; i < quads->len; i++) {
         double w0 = 0, w1 = 0, w2 = 0, w3 = 0;
         if (g_dbg_paint_x >= 0)
-            cairo_clip_extents(cr, &w0, &w1, &w2, &w3);
+            gfx_clip_extents(cr, &w0, &w1, &w2, &w3);
         paint_quad3(cr, &g_array_index(quads, ns_quad3, i), highlight);
         if (g_dbg_paint_x >= 0) {
             double v0, v1, v2, v3;
-            cairo_clip_extents(cr, &v0, &v1, &v2, &v3);
+            gfx_clip_extents(cr, &v0, &v1, &v2, &v3);
             if (fabs(v0 - w0) > 0.5 || fabs(v1 - w1) > 0.5 ||
                 fabs(v2 - w2) > 0.5 || fabs(v3 - w3) > 0.5) {
                 const ns_quad3 *q = &g_array_index(quads, ns_quad3, i);
@@ -7008,7 +7015,7 @@ paint_3d_root(cairo_t *cr, const ns_box *b, const char *highlight)
 
 /* Debug aid (NS_DBG_PAINT_AT): logs NaN geometry and boxes under the probe point. */
 static void
-ns_dbg_paint_probe(cairo_t *cr, const ns_box *b)
+ns_dbg_paint_probe(gfx_t *cr, const ns_box *b)
 {
     if (g_dbg_paint_x == -2) {
         const char *s = g_getenv("NS_DBG_PAINT_AT");
@@ -7045,8 +7052,8 @@ ns_dbg_paint_probe(cairo_t *cr, const ns_box *b)
     }
     double x0 = b->x, y0 = b->y;
     double x1 = b->x + b->content_width, y1 = b->y + b->content_height;
-    cairo_user_to_device(cr, &x0, &y0);
-    cairo_user_to_device(cr, &x1, &y1);
+    gfx_user_to_device(cr, &x0, &y0);
+    gfx_user_to_device(cr, &x1, &y1);
     if (isnan(x0) && !isnan(b->x)) {
         GString *ch = g_string_new("[paint-CTM-NAN]");
         for (const ns_box *p2 = b; p2; p2 = p2->parent) {
@@ -7071,7 +7078,7 @@ ns_dbg_paint_probe(cairo_t *cr, const ns_box *b)
                    (int)bgv->u.color.r, (int)bgv->u.color.g,
                    (int)bgv->u.color.b, (int)bgv->u.color.a);
     double kx0, ky0, kx1, ky1;
-    cairo_clip_extents(cr, &kx0, &ky0, &kx1, &ky1);
+    gfx_clip_extents(cr, &kx0, &ky0, &kx1, &ky1);
     g_printerr("[paint-at] <%s> %.0f,%.0f %.0fx%.0f bg=%s clip=%.0f,%.0f..%.0f,%.0f\n",
                b->dom && b->dom->name ? b->dom->name : "?",
                x0, y0, x1 - x0, y1 - y0, bg, kx0, ky0, kx1, ky1);
@@ -7086,7 +7093,7 @@ box_keeps_negative_descendants(const ns_box *b)
     if (box_opacity(b) < 0.999 || box_establishes_3d(b) || box_has_filter(b))
         return TRUE;
     if (!s) return FALSE;
-    if (blend_mode_operator(s) != CAIRO_OPERATOR_OVER) return TRUE;
+    if (blend_mode_operator(s) != GFX_OPERATOR_OVER) return TRUE;
     if (ns_style_has_transform(s) ||
         s->values[NS_CSS_MASK_IMAGE] || s->values[NS_CSS_CLIP_PATH])
         return TRUE;
@@ -7282,19 +7289,19 @@ box_resting_ink_y(const ns_box *b, const ns_box *group, int *budget, int depth,
  * the group cairo pushes is that tall and not as tall as the whole clip.
  * TRUE if a clip was set (the caller restores). */
 static gboolean
-paint_group_clip(cairo_t *cr, const ns_box *b)
+paint_group_clip(gfx_t *cr, const ns_box *b)
 {
     int budget = NS_PAINT_GROUP_INK_BUDGET;
     double y0, y1;
     if (!box_resting_ink_y(b, b, &budget, 0, &y0, &y1)) return FALSE;
     if (!isfinite(y0) || !isfinite(y1) || !(y1 > y0)) return FALSE;
     double cx0, cy0, cx1, cy1;
-    cairo_clip_extents(cr, &cx0, &cy0, &cx1, &cy1);
+    gfx_clip_extents(cr, &cx0, &cy0, &cx1, &cy1);
     if (!isfinite(cx0) || !isfinite(cx1) || !(cx1 > cx0)) return FALSE;
-    cairo_save(cr);
-    cairo_rectangle(cr, cx0, y0 - NS_PAINT_GROUP_INK_MARGIN, cx1 - cx0,
+    gfx_save(cr);
+    gfx_rectangle(cr, cx0, y0 - NS_PAINT_GROUP_INK_MARGIN, cx1 - cx0,
                     y1 - y0 + 2 * NS_PAINT_GROUP_INK_MARGIN);
-    cairo_clip(cr);
+    gfx_clip(cr);
     return TRUE;
 }
 
@@ -7305,22 +7312,22 @@ typedef enum {
 } filter_layer_state;
 
 typedef struct filter_layer {
-    cairo_t         *outer;
-    cairo_t         *cr;
-    cairo_surface_t *surf;
+    gfx_t         *outer;
+    gfx_t         *cr;
+    gfx_surface_t *surf;
     double           x, y, k, sigma;
     const char      *filter;
 } filter_layer;
 
 /* Opens an offscreen layer over a filtered box's ink, at a lower scale for wide blurs. */
 static filter_layer_state
-filter_layer_begin(cairo_t *cr, const ns_box *b, const char *filter,
+filter_layer_begin(gfx_t *cr, const ns_box *b, const char *filter,
                    gboolean transformed, filter_layer *fl)
 {
     double sigma = filter_blur_sigma_px(filter);
     double spread = ceil(sigma * 3.0);
     double cx0, cy0, cx1, cy1;
-    cairo_clip_extents(cr, &cx0, &cy0, &cx1, &cy1);
+    gfx_clip_extents(cr, &cx0, &cy0, &cx1, &cy1);
     double x0 = cx0, y0 = cy0, x1 = cx1, y1 = cy1;
     if (!transformed) {
         double bx, by, bw, bh;
@@ -7353,7 +7360,7 @@ filter_layer_begin(cairo_t *cr, const ns_box *b, const char *filter,
         y1 < cy0 || y0 > cy1)
         return FILTER_LAYER_INVISIBLE;
     double ux = 1, uy = 0;
-    cairo_user_to_device_distance(cr, &ux, &uy);
+    gfx_user_to_device_distance(cr, &ux, &uy);
     double k = MAX(hypot(ux, uy), 0.05);
     if (sigma > 0) k = MIN(k, MAX(8.0 / sigma, 0.05));
     double maxdim = MAX(x1 - x0, y1 - y0);
@@ -7361,15 +7368,15 @@ filter_layer_begin(cairo_t *cr, const ns_box *b, const char *filter,
     int tw = (int)ceil((x1 - x0) * k);
     int th = (int)ceil((y1 - y0) * k);
     if (tw < 1 || th < 1) return FILTER_LAYER_INVISIBLE;
-    cairo_surface_t *surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+    gfx_surface_t *surf = gfx_image_surface_create(GFX_FORMAT_ARGB32,
                                                        tw, th);
-    if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
-        cairo_surface_destroy(surf);
+    if (gfx_surface_status(surf) != GFX_STATUS_SUCCESS) {
+        gfx_surface_destroy(surf);
         return FILTER_LAYER_NONE;
     }
-    cairo_t *tcr = cairo_create(surf);
-    cairo_scale(tcr, k, k);
-    cairo_translate(tcr, -x0, -y0);
+    gfx_t *tcr = gfx_create(surf);
+    gfx_scale(tcr, k, k);
+    gfx_translate(tcr, -x0, -y0);
     *fl = (filter_layer){
         .outer = cr, .cr = tcr, .surf = surf,
         .x = x0, .y = y0, .k = k, .sigma = sigma, .filter = filter,
@@ -7381,8 +7388,8 @@ filter_layer_begin(cairo_t *cr, const ns_box *b, const char *filter,
 static void
 filter_layer_discard(filter_layer *fl)
 {
-    cairo_destroy(fl->cr);
-    cairo_surface_destroy(fl->surf);
+    gfx_destroy(fl->cr);
+    gfx_surface_destroy(fl->surf);
     fl->cr = NULL;
     fl->surf = NULL;
 }
@@ -7391,31 +7398,31 @@ filter_layer_discard(filter_layer *fl)
 static void
 filter_layer_end(filter_layer *fl)
 {
-    cairo_destroy(fl->cr);
+    gfx_destroy(fl->cr);
     fl->cr = NULL;
-    cairo_surface_flush(fl->surf);
-    guchar *data = cairo_image_surface_get_data(fl->surf);
-    int stride = cairo_image_surface_get_stride(fl->surf);
-    int w = cairo_image_surface_get_width(fl->surf);
-    int h = cairo_image_surface_get_height(fl->surf);
+    gfx_surface_flush(fl->surf);
+    guchar *data = gfx_image_surface_get_data(fl->surf);
+    int stride = gfx_image_surface_get_stride(fl->surf);
+    int w = gfx_image_surface_get_width(fl->surf);
+    int h = gfx_image_surface_get_height(fl->surf);
     apply_filter_color_ops(data, stride, w, h, fl->filter);
     gaussian_blur_argb(data, stride, w, h, fl->sigma * fl->k);
-    cairo_surface_mark_dirty(fl->surf);
-    cairo_t *cr = fl->outer;
-    cairo_save(cr);
-    cairo_translate(cr, fl->x, fl->y);
-    cairo_scale(cr, 1.0 / fl->k, 1.0 / fl->k);
-    cairo_set_source_surface(cr, fl->surf, 0, 0);
-    cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
-    cairo_paint(cr);
-    cairo_restore(cr);
-    cairo_surface_destroy(fl->surf);
+    gfx_surface_mark_dirty(fl->surf);
+    gfx_t *cr = fl->outer;
+    gfx_save(cr);
+    gfx_translate(cr, fl->x, fl->y);
+    gfx_scale(cr, 1.0 / fl->k, 1.0 / fl->k);
+    gfx_set_source_surface(cr, fl->surf, 0, 0);
+    gfx_pattern_set_filter(gfx_get_source(cr), GFX_FILTER_GOOD);
+    gfx_paint(cr);
+    gfx_restore(cr);
+    gfx_surface_destroy(fl->surf);
     fl->surf = NULL;
 }
 
 /* Recursive painter: culling, stacking, transforms, opacity/blend groups, clips, scrollbars. */
 static void
-paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
+paint_walk(gfx_t *cr, const ns_box *b, const char *highlight)
 {
     if (!b) return;
     /* A hidden box skips only its own painting (background, borders,
@@ -7436,7 +7443,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         deferred_capture *cap = g_new0(deferred_capture, 1);
         cap->box = b;
         cap->seq = g_paint_capture_seq++;
-        cairo_user_to_device(cr, &cap->dev_x, &cap->dev_y);
+        gfx_user_to_device(cr, &cap->dev_x, &cap->dev_y);
         g_ptr_array_add(g_paint_deferred_list, cap);
         if (g_dbg_paint_x >= 0 && b->dom && b->dom->name)
             g_printerr("[paint-defer] <%s#%s> y=%.0f h=%.0f\n",
@@ -7456,15 +7463,15 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     }
     double dbg_e0 = 0, dbg_e1 = 0, dbg_e2 = 0, dbg_e3 = 0;
     if (g_dbg_paint_x >= 0)
-        cairo_clip_extents(cr, &dbg_e0, &dbg_e1, &dbg_e2, &dbg_e3);
+        gfx_clip_extents(cr, &dbg_e0, &dbg_e1, &dbg_e2, &dbg_e3);
     const ns_style *style = b->style;
     double op = box_opacity(b);
     if (op <= 0.0) return;
-    cairo_operator_t blend = blend_mode_operator(style);
+    gfx_operator_t blend = blend_mode_operator(style);
     const ns_css_value *mask_v = style ? style->values[NS_CSS_MASK_IMAGE] : NULL;
     gboolean mask_grad = mask_v && mask_v->kind == NS_CSS_V_GRADIENT &&
                          !mask_v->u.gradient.conic;
-    gboolean grouped = op < 0.999 || blend != CAIRO_OPERATOR_OVER || mask_grad;
+    gboolean grouped = op < 0.999 || blend != GFX_OPERATOR_OVER || mask_grad;
     double sticky_dx = 0, sticky_dy = 0;
     compute_sticky_offset(b, cr, &sticky_dx, &sticky_dy);
     if (isnan(sticky_dx) || isnan(sticky_dy)) {
@@ -7477,8 +7484,8 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     double saved_anchor_dx = g_paint_anchor_dx;
     double saved_anchor_dy = g_paint_anchor_dy;
     if (has_sticky) {
-        cairo_save(cr);
-        cairo_translate(cr, sticky_dx, sticky_dy);
+        gfx_save(cr);
+        gfx_translate(cr, sticky_dx, sticky_dy);
         g_paint_anchor_dx += sticky_dx;
         g_paint_anchor_dy += sticky_dy;
     }
@@ -7495,11 +7502,11 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
                (has_transform && ns_css_transform_is_3d(&eff_tf))) {
         double u0 = 0, u1 = 0, u2 = 0, u3 = 0;
         if (g_dbg_paint_x >= 0)
-            cairo_clip_extents(cr, &u0, &u1, &u2, &u3);
+            gfx_clip_extents(cr, &u0, &u1, &u2, &u3);
         paint_3d_root(cr, b, highlight);
         if (g_dbg_paint_x >= 0) {
             double z0, z1, z2, z3;
-            cairo_clip_extents(cr, &z0, &z1, &z2, &z3);
+            gfx_clip_extents(cr, &z0, &z1, &z2, &z3);
             if (fabs(z0 - u0) > 0.5 || fabs(z1 - u1) > 0.5 ||
                 fabs(z2 - u2) > 0.5 || fabs(z3 - u3) > 0.5)
                 g_printerr("[3droot-LEAK] <%s class=%.60s>\n",
@@ -7545,18 +7552,18 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     if (group_clipped) {
         double gx, gy, gw, gh;
         ns_box_border_rect(b, &gx, &gy, &gw, &gh);
-        cairo_save(cr);
-        cairo_rectangle(cr, gx, gy, gw, gh);
-        cairo_clip(cr);
+        gfx_save(cr);
+        gfx_rectangle(cr, gx, gy, gw, gh);
+        gfx_clip(cr);
     } else if (grouped && !has_transform && !has_sticky && !filter_kw) {
         group_clipped = paint_group_clip(cr, b);
     }
-    if (grouped) cairo_push_group(cr);
+    if (grouped) gfx_push_group(cr);
     if (fl.cr) cr = fl.cr;
-    cairo_matrix_t box_cm;
+    gfx_matrix_t box_cm;
     gboolean have_box_cm = FALSE;
     if (has_transform) {
-        cairo_save(cr);
+        gfx_save(cr);
         double bx, by, bw, bh;
         ns_box_border_rect(b, &bx, &by, &bw, &bh);
         double ox, oy, oz;
@@ -7564,8 +7571,8 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
                              &ox, &oy, &oz);
         ns_mat4 m;
         ns_css_transform_to_mat4(&eff_tf, bw, bh, &m);
-        cairo_matrix_t cm;
-        cairo_matrix_init(&cm, m.m[0], m.m[4], m.m[1], m.m[5],
+        gfx_matrix_t cm;
+        gfx_matrix_init(&cm, m.m[0], m.m[4], m.m[1], m.m[5],
                           m.m[3], m.m[7]);
         if (isnan(m.m[0]) || isnan(m.m[4]) || isnan(m.m[1]) ||
             isnan(m.m[5]) || isnan(m.m[3]) || isnan(m.m[7]) ||
@@ -7574,25 +7581,25 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
                 g_printerr("[paint-nan-guard] transform <%s>\n",
                            b->dom && b->dom->name ? b->dom->name : "?");
         } else if (fabs(m.m[0] * m.m[5] - m.m[1] * m.m[4]) < 1e-6) {
-            cairo_restore(cr);
+            gfx_restore(cr);
             if (fl.cr) {
                 g_paint_no_cull--;
                 cr = fl.outer;
                 filter_layer_discard(&fl);
             }
             if (grouped)
-                cairo_pattern_destroy(cairo_pop_group(cr));
+                gfx_pattern_destroy(gfx_pop_group(cr));
             if (has_sticky) paint_anchor_leave(cr, saved_anchor_dx, saved_anchor_dy);
             return;
         } else {
-            cairo_translate(cr, ox, oy);
-            cairo_transform(cr, &cm);
-            cairo_translate(cr, -ox, -oy);
-            cairo_matrix_t pre, post;
-            cairo_matrix_init_translate(&pre, -ox, -oy);
-            cairo_matrix_init_translate(&post, ox, oy);
-            cairo_matrix_multiply(&box_cm, &pre, &cm);
-            cairo_matrix_multiply(&box_cm, &box_cm, &post);
+            gfx_translate(cr, ox, oy);
+            gfx_transform(cr, &cm);
+            gfx_translate(cr, -ox, -oy);
+            gfx_matrix_t pre, post;
+            gfx_matrix_init_translate(&pre, -ox, -oy);
+            gfx_matrix_init_translate(&post, ox, oy);
+            gfx_matrix_multiply(&box_cm, &pre, &cm);
+            gfx_matrix_multiply(&box_cm, &box_cm, &post);
             have_box_cm = TRUE;
         }
     }
@@ -7607,15 +7614,15 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         if (fl.cr) {
             clip_after_filter = TRUE;
         } else {
-            cairo_save(cr);
+            gfx_save(cr);
             if (apply_box_content_clip(cr, b)) has_path_clip = TRUE;
-            else                                cairo_restore(cr);
+            else                                gfx_restore(cr);
         }
     }
     if (!box_offscreen && !self_hidden) {
         double s0 = 0, s1 = 0, s2 = 0, s3 = 0;
         if (g_dbg_paint_x >= 0)
-            cairo_clip_extents(cr, &s0, &s1, &s2, &s3);
+            gfx_clip_extents(cr, &s0, &s1, &s2, &s3);
         if (b->kind == NS_BOX_BLOCK || b->kind == NS_BOX_TABLE ||
             b->kind == NS_BOX_TABLE_CAPTION ||
             b->kind == NS_BOX_TABLE_ROW || b->kind == NS_BOX_TABLE_CELL ||
@@ -7624,7 +7631,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             paint_block(cr, b);
             if (g_dbg_paint_x >= 0) {
                 double t0, t1, t2, t3;
-                cairo_clip_extents(cr, &t0, &t1, &t2, &t3);
+                gfx_clip_extents(cr, &t0, &t1, &t2, &t3);
                 if (fabs(t0 - s0) > 0.5 || fabs(t1 - s1) > 0.5 ||
                     fabs(t2 - s2) > 0.5 || fabs(t3 - s3) > 0.5)
                     g_printerr("[block-LEAK] <%s class=%.60s>\n",
@@ -7642,7 +7649,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             paint_inline(cr, b, highlight);
             if (g_dbg_paint_x >= 0) {
                 double t0, t1, t2, t3;
-                cairo_clip_extents(cr, &t0, &t1, &t2, &t3);
+                gfx_clip_extents(cr, &t0, &t1, &t2, &t3);
                 if (fabs(t0 - s0) > 0.5 || fabs(t1 - s1) > 0.5 ||
                     fabs(t2 - s2) > 0.5 || fabs(t3 - s3) > 0.5)
                     g_printerr("[inline-LEAK] <%s> text=%.30s\n",
@@ -7660,25 +7667,22 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             paint_svg(cr, b);
     }
     if (!self_hidden && ns_node_is_tag(b->dom, NS_TAG_CANVAS) && g_paint_js) {
-        gfx_surface_t *gsurf = ns_js_canvas_surface(g_paint_js, b->dom);
-        /* The canvas draws with gfx; Cairo reads the same pixels. */
-        cairo_surface_t *surf = gsurf ? gfx_cairo_surface_wrap(gsurf) : NULL;
+        gfx_surface_t *surf = ns_js_canvas_surface(g_paint_js, b->dom);
         if (surf) {
-            int sw = cairo_image_surface_get_width(surf);
-            int sh = cairo_image_surface_get_height(surf);
+            int sw = gfx_image_surface_get_width(surf);
+            int sh = gfx_image_surface_get_height(surf);
             if (sw > 0 && sh > 0) {
                 double dx = b->x + b->margin.left + b->border.left + b->padding.left;
                 double dy = b->y + b->margin.top  + b->border.top  + b->padding.top;
                 double dw = b->content_width > 0 ? b->content_width : sw;
                 double dh = b->content_height > 0 ? b->content_height : sh;
-                cairo_save(cr);
-                cairo_translate(cr, dx, dy);
-                cairo_scale(cr, dw / sw, dh / sh);
-                cairo_set_source_surface(cr, surf, 0, 0);
-                cairo_paint(cr);
-                cairo_restore(cr);
+                gfx_save(cr);
+                gfx_translate(cr, dx, dy);
+                gfx_scale(cr, dw / sw, dh / sh);
+                gfx_set_source_surface(cr, surf, 0, 0);
+                gfx_paint(cr);
+                gfx_restore(cr);
             }
-            cairo_surface_destroy(surf);
         }
     }
 
@@ -7749,16 +7753,16 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
                                  pwv->kind == NS_CSS_V_CALC);
         }
         if ((pw > 0 || explicit_w) && (ph > 0 || explicit_h)) {
-            cairo_save(cr);
+            gfx_save(cr);
             corner_radii ov_radii = box_border_radii(b, pw, ph);
             if (!corner_radii_zero(ov_radii))
                 rounded_rect_path(cr, px, py, pw, ph, ov_radii);
             else
-                cairo_rectangle(cr, px, py, pw, ph);
-            cairo_clip(cr);
+                gfx_rectangle(cr, px, py, pw, ph);
+            gfx_clip(cr);
             if (g_dbg_paint_x >= 0) {
                 double ex0, ey0, ex1, ey1;
-                cairo_clip_extents(cr, &ex0, &ey0, &ex1, &ey1);
+                gfx_clip_extents(cr, &ex0, &ey0, &ex1, &ey1);
                 g_printerr("[paint-clip%s] <%s#%s> rect %.0f,%.0f %.0fx%.0f"
                            " -> clip %.0f,%.0f..%.0f,%.0f\n",
                            (ey1 - ey0 < 1 || ex1 - ex0 < 1) ? "-EMPTY" : "",
@@ -7770,7 +7774,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             }
             if ((b->scroll_x != 0 || b->scroll_y != 0) &&
                 !isnan(b->scroll_x) && !isnan(b->scroll_y))
-                cairo_translate(cr, -b->scroll_x, -b->scroll_y);
+                gfx_translate(cr, -b->scroll_x, -b->scroll_y);
         } else {
             clip_overflow = FALSE;
         }
@@ -7821,7 +7825,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         if (deferred_mine && !clip_overflow && !has_path_clip) {
             if (g_dbg_paint_x >= 0) {
                 double fx0, fy0, fx1, fy1;
-                cairo_clip_extents(cr, &fx0, &fy0, &fx1, &fy1);
+                gfx_clip_extents(cr, &fx0, &fy0, &fx1, &fy1);
                 g_printerr("[paint-flush] owner=<%s#%s> n=%u "
                            "clip=%.0f,%.0f..%.0f,%.0f\n",
                            b->dom && b->dom->name ? b->dom->name : "?",
@@ -7867,7 +7871,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         double pw = b->content_width + b->padding.left + b->padding.right;
         double ph = b->content_height + b->padding.top + b->padding.bottom;
         if (b->scroll_x != 0 || b->scroll_y != 0)
-            cairo_translate(cr, b->scroll_x, b->scroll_y);
+            gfx_translate(cr, b->scroll_x, b->scroll_y);
         if (b->scroll_max_y > 0 && ph > 16) {
             double track_w = sb_size;
             double track_x = px + pw - track_w - 1.0;
@@ -7879,14 +7883,14 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             if (thumb_h > track_h) thumb_h = track_h;
             double thumb_y = track_y +
                 (track_h - thumb_h) * (b->scroll_y / b->scroll_max_y);
-            cairo_save(cr);
-            cairo_set_source_rgba(cr, tk_r, tk_g, tk_b, tk_a);
-            cairo_rectangle(cr, track_x, track_y, track_w, track_h);
-            cairo_fill(cr);
-            cairo_set_source_rgba(cr, th_r, th_g, th_b, th_a);
-            cairo_rectangle(cr, track_x + 1, thumb_y, track_w - 2, thumb_h);
-            cairo_fill(cr);
-            cairo_restore(cr);
+            gfx_save(cr);
+            gfx_set_source_rgba(cr, tk_r, tk_g, tk_b, tk_a);
+            gfx_rectangle(cr, track_x, track_y, track_w, track_h);
+            gfx_fill(cr);
+            gfx_set_source_rgba(cr, th_r, th_g, th_b, th_a);
+            gfx_rectangle(cr, track_x + 1, thumb_y, track_w - 2, thumb_h);
+            gfx_fill(cr);
+            gfx_restore(cr);
         }
         if (b->scroll_max_x > 0 && pw > 16) {
             double track_h = sb_size;
@@ -7900,14 +7904,14 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             if (thumb_w > track_w) thumb_w = track_w;
             double thumb_x = track_x +
                 (track_w - thumb_w) * (b->scroll_x / b->scroll_max_x);
-            cairo_save(cr);
-            cairo_set_source_rgba(cr, tk_r, tk_g, tk_b, tk_a);
-            cairo_rectangle(cr, track_x, track_y, track_w, track_h);
-            cairo_fill(cr);
-            cairo_set_source_rgba(cr, th_r, th_g, th_b, th_a);
-            cairo_rectangle(cr, thumb_x, track_y + 1, thumb_w, track_h - 2);
-            cairo_fill(cr);
-            cairo_restore(cr);
+            gfx_save(cr);
+            gfx_set_source_rgba(cr, tk_r, tk_g, tk_b, tk_a);
+            gfx_rectangle(cr, track_x, track_y, track_w, track_h);
+            gfx_fill(cr);
+            gfx_set_source_rgba(cr, th_r, th_g, th_b, th_a);
+            gfx_rectangle(cr, thumb_x, track_y + 1, thumb_w, track_h - 2);
+            gfx_fill(cr);
+            gfx_restore(cr);
         }
     }
 
@@ -7925,15 +7929,15 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             if (rule_w > 0 && rdrawable) {
                 rgba rc = rgba_of(b->style->values[NS_CSS_COLUMN_RULE_COLOR],
                                   0.50, 0.50, 0.50, 1.0);
-                cairo_save(cr);
+                gfx_save(cr);
                 set_source_rgba(cr, rc);
-                cairo_set_line_width(cr, rule_w);
+                gfx_set_line_width(cr, rule_w);
                 if (strcmp(rstyle->u.keyword, "dashed") == 0) {
                     double dashes[] = { rule_w * 3, rule_w * 2 };
-                    cairo_set_dash(cr, dashes, 2, 0);
+                    gfx_set_dash(cr, dashes, 2, 0);
                 } else if (strcmp(rstyle->u.keyword, "dotted") == 0) {
                     double dashes[] = { rule_w, rule_w };
-                    cairo_set_dash(cr, dashes, 2, 0);
+                    gfx_set_dash(cr, dashes, 2, 0);
                 }
                 for (guint i = 0;
                      i + 1 < fragment_context->fragmentainers->len; i++) {
@@ -7947,11 +7951,11 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
                     double top = MIN(left->y, right->y);
                     double bottom = MAX(left->y + left->block_size,
                                         right->y + right->block_size);
-                    cairo_move_to(cr, rx, top);
-                    cairo_line_to(cr, rx, bottom);
-                    cairo_stroke(cr);
+                    gfx_move_to(cr, rx, top);
+                    gfx_line_to(cr, rx, bottom);
+                    gfx_stroke(cr);
                 }
-                cairo_restore(cr);
+                gfx_restore(cr);
             }
         }
     }
@@ -7977,14 +7981,14 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             deferred_mine = NULL;
         }
     }
-    if (clip_overflow) cairo_restore(cr);
+    if (clip_overflow) gfx_restore(cr);
     if (entries != entries_buf) g_free(entries);
 
-    if (has_path_clip) cairo_restore(cr);
+    if (has_path_clip) gfx_restore(cr);
     if (deferred_mine) {
         if (g_dbg_paint_x >= 0) {
             double fx0, fy0, fx1, fy1;
-            cairo_clip_extents(cr, &fx0, &fy0, &fx1, &fy1);
+            gfx_clip_extents(cr, &fx0, &fy0, &fx1, &fy1);
             g_printerr("[paint-flush-postclip] owner=<%s#%s> n=%u "
                        "clip=%.0f,%.0f..%.0f,%.0f\n",
                        b->dom && b->dom->name ? b->dom->name : "?",
@@ -8003,27 +8007,27 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         g_ptr_array_free(hoisted, TRUE);
     }
 
-    if (has_transform) cairo_restore(cr);
+    if (has_transform) gfx_restore(cr);
     if (fl.cr) {
         g_paint_no_cull--;
         cr = fl.outer;
         if (clip_after_filter) {
-            cairo_save(cr);
-            cairo_matrix_t outer_m;
-            cairo_get_matrix(cr, &outer_m);
-            if (have_box_cm) cairo_transform(cr, &box_cm);
+            gfx_save(cr);
+            gfx_matrix_t outer_m;
+            gfx_get_matrix(cr, &outer_m);
+            if (have_box_cm) gfx_transform(cr, &box_cm);
             apply_box_content_clip(cr, b);
-            cairo_set_matrix(cr, &outer_m);
+            gfx_set_matrix(cr, &outer_m);
         }
         filter_layer_end(&fl);
-        if (clip_after_filter) cairo_restore(cr);
+        if (clip_after_filter) gfx_restore(cr);
     }
 
     if (grouped) {
-        cairo_pop_group_to_source(cr);
-        cairo_operator_t saved_op = cairo_get_operator(cr);
-        if (blend != CAIRO_OPERATOR_OVER) cairo_set_operator(cr, blend);
-        cairo_pattern_t *mp = NULL;
+        gfx_pop_group_to_source(cr);
+        gfx_operator_t saved_op = gfx_get_operator(cr);
+        if (blend != GFX_OPERATOR_OVER) gfx_set_operator(cr, blend);
+        gfx_pattern_t *mp = NULL;
         if (mask_grad) {
             double bx = b->x + b->margin.left, by = b->y + b->margin.top;
             double bw = ns_box_border_width(b);
@@ -8031,19 +8035,19 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             mp = mask_gradient_pattern(&mask_v->u.gradient, bx, by, bw, bh);
         }
         if (mp) {
-            cairo_mask(cr, mp);
-            cairo_pattern_destroy(mp);
+            gfx_mask(cr, mp);
+            gfx_pattern_destroy(mp);
         } else {
-            cairo_paint_with_alpha(cr, op);
+            gfx_paint_with_alpha(cr, op);
         }
-        if (blend != CAIRO_OPERATOR_OVER) cairo_set_operator(cr, saved_op);
+        if (blend != GFX_OPERATOR_OVER) gfx_set_operator(cr, saved_op);
     }
-    if (group_clipped) cairo_restore(cr);
+    if (group_clipped) gfx_restore(cr);
 
     if (has_sticky) paint_anchor_leave(cr, saved_anchor_dx, saved_anchor_dy);
     if (g_dbg_paint_x >= 0) {
         double q0, q1, q2, q3;
-        cairo_clip_extents(cr, &q0, &q1, &q2, &q3);
+        gfx_clip_extents(cr, &q0, &q1, &q2, &q3);
         if (fabs(q0 - dbg_e0) > 0.5 || fabs(q1 - dbg_e1) > 0.5 ||
             fabs(q2 - dbg_e2) > 0.5 || fabs(q3 - dbg_e3) > 0.5)
             g_printerr("[clip-LEAK] <%s#%s class=%.70s kind=%d grp=%d "
@@ -8114,7 +8118,7 @@ top_layer_box(const ns_box *root)
 
 /* Paints the modal top-layer box over everything, with its ::backdrop fill. */
 static void
-paint_top_layer(cairo_t *cr, const ns_box *root, const char *highlight)
+paint_top_layer(gfx_t *cr, const ns_box *root, const char *highlight)
 {
     const ns_box *top = top_layer_box(root);
     if (!top) return;
@@ -8123,12 +8127,12 @@ paint_top_layer(cairo_t *cr, const ns_box *root, const char *highlight)
     if (bd && bd->values[NS_CSS_BACKGROUND_COLOR]) {
         rgba c = rgba_of(bd->values[NS_CSS_BACKGROUND_COLOR], 0, 0, 0, 0);
         double x1, y1, x2, y2;
-        cairo_clip_extents(cr, &x1, &y1, &x2, &y2);
-        cairo_save(cr);
+        gfx_clip_extents(cr, &x1, &y1, &x2, &y2);
+        gfx_save(cr);
         set_source_rgba(cr, c);
-        cairo_rectangle(cr, x1, y1, x2 - x1, y2 - y1);
-        cairo_fill(cr);
-        cairo_restore(cr);
+        gfx_rectangle(cr, x1, y1, x2 - x1, y2 - y1);
+        gfx_fill(cr);
+        gfx_restore(cr);
     }
     const ns_box *saved = g_paint_skip_box;
     const ns_box *saved_flush = g_paint_flush_box;
@@ -8144,7 +8148,7 @@ paint_top_layer(cairo_t *cr, const ns_box *root, const char *highlight)
  * repainted.  Like a native popup it escapes the clips and stacking of the
  * <select>'s ancestors, which hit testing mirrors in ns_box_hit_dom. */
 static void
-paint_open_dropdowns(cairo_t *cr, const char *highlight)
+paint_open_dropdowns(gfx_t *cr, const char *highlight)
 {
     GArray *list = g_paint_dropdowns;
     g_paint_dropdowns = NULL;
@@ -8153,12 +8157,12 @@ paint_open_dropdowns(cairo_t *cr, const char *highlight)
     g_paint_dropdown_pass = TRUE;
     for (guint i = 0; i < list->len; i++) {
         const paint_dropdown *d = &g_array_index(list, paint_dropdown, i);
-        cairo_save(cr);
-        cairo_set_matrix(cr, &d->ctm);
-        cairo_rectangle(cr, d->x, d->y, d->w, d->h);
-        cairo_clip(cr);
+        gfx_save(cr);
+        gfx_set_matrix(cr, &d->ctm);
+        gfx_rectangle(cr, d->x, d->y, d->w, d->h);
+        gfx_clip(cr);
         paint_inline(cr, d->box, highlight);
-        cairo_restore(cr);
+        gfx_restore(cr);
     }
     g_paint_dropdown_pass = FALSE;
     g_array_free(list, TRUE);
@@ -8166,7 +8170,7 @@ paint_open_dropdowns(cairo_t *cr, const char *highlight)
 
 /* Starts recording open drop-down lists painted on cr. */
 static void
-paint_open_dropdowns_begin(cairo_t *cr)
+paint_open_dropdowns_begin(gfx_t *cr)
 {
     if (g_paint_dropdowns) g_array_free(g_paint_dropdowns, TRUE);
     g_paint_dropdowns = g_array_new(FALSE, FALSE, sizeof(paint_dropdown));
@@ -8175,15 +8179,15 @@ paint_open_dropdowns_begin(cairo_t *cr)
 
 /* Paints a box tree: canvas background, main tree, then the top layer. */
 void
-ns_paint(cairo_t *cr, const ns_box *root, const char *highlight_query)
+ns_paint(gfx_t *cr, const ns_box *root, const char *highlight_query)
 {
     ns_paint_list_ordinals_begin();
     rgba bg = { 254.0 / 255, 254.0 / 255, 254.0 / 255, 1 };
     canvas_background_of(root, &bg);
-    cairo_save(cr);
+    gfx_save(cr);
     set_source_rgba(cr, bg);
-    cairo_paint(cr);
-    cairo_restore(cr);
+    gfx_paint(cr);
+    gfx_restore(cr);
     paint_cache_clip(cr);
     paint_open_dropdowns_begin(cr);
     g_paint_skip_box = top_layer_box(root);
@@ -8198,17 +8202,17 @@ ns_paint(cairo_t *cr, const ns_box *root, const char *highlight_query)
 
 /* Like ns_paint, but also highlights the given text selection. */
 void
-ns_paint_with_selection(cairo_t *cr, const ns_box *root,
+ns_paint_with_selection(gfx_t *cr, const ns_box *root,
                         const char *highlight_query,
                         const struct ns_selection *sel)
 {
     ns_paint_list_ordinals_begin();
     rgba bg = { 254.0 / 255, 254.0 / 255, 254.0 / 255, 1 };
     canvas_background_of(root, &bg);
-    cairo_save(cr);
+    gfx_save(cr);
     set_source_rgba(cr, bg);
-    cairo_paint(cr);
-    cairo_restore(cr);
+    gfx_paint(cr);
+    gfx_restore(cr);
     paint_cache_clip(cr);
     g_paint_sel_runs = ns_selection_ranges(root, sel);
     paint_open_dropdowns_begin(cr);

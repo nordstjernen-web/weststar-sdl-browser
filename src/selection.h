@@ -6,7 +6,7 @@
 #ifndef NS_SELECTION_H
 #define NS_SELECTION_H
 
-#include <cairo.h>
+#include "gfx.h"
 #include <glib.h>
 
 #include "layout.h"

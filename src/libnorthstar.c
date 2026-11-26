@@ -7,7 +7,7 @@
 #include "libnorthstar.h"
 #include "mainctx.h"
 
-#include <cairo.h>
+#include "gfx.h"
 #include <gio/gio.h>
 #include <glib.h>
 #include <math.h>
@@ -2483,22 +2483,22 @@ ns_browser_scroll_blit_bands(ns_browser *browser, GArray *out_bands)
 
 /* Paints one clipped device rect of the page at the scroll offset and scale. */
 static void
-browser_paint_rect(ns_browser *browser, cairo_surface_t *surf, int scroll_x,
+browser_paint_rect(ns_browser *browser, gfx_surface_t *surf, int scroll_x,
                    int scroll_y, double scale, int x, int y, int w, int h)
 {
-    cairo_t *cr = cairo_create(surf);
-    cairo_set_tolerance(cr, scale > 0 ? 0.5 / scale : 0.5);
-    cairo_set_antialias(cr, CAIRO_ANTIALIAS_FAST);
-    cairo_rectangle(cr, x, y, w, h);
-    cairo_clip(cr);
-    cairo_scale(cr, scale, scale);
-    cairo_translate(cr, -(double)scroll_x, -(double)scroll_y);
+    gfx_t *cr = gfx_create(surf);
+    gfx_set_tolerance(cr, scale > 0 ? 0.5 / scale : 0.5);
+    gfx_set_antialias(cr, GFX_ANTIALIAS_FAST);
+    gfx_rectangle(cr, x, y, w, h);
+    gfx_clip(cr);
+    gfx_scale(cr, scale, scale);
+    gfx_translate(cr, -(double)scroll_x, -(double)scroll_y);
     if (ns_selection_has_range(&browser->selection))
         ns_paint_with_selection(cr, browser->layout, browser->search_query,
                                 &browser->selection);
     else
         ns_paint(cr, browser->layout, browser->search_query);
-    cairo_destroy(cr);
+    gfx_destroy(cr);
 }
 
 /* Renders the viewport (or given rects) into a caller ARGB32 buffer with padding. */
@@ -2518,14 +2518,14 @@ ns_browser_render_argb32_rects(ns_browser *browser, int scroll_x, int scroll_y,
     ns_box_set_hit_viewport(browser->cur_scroll_x, browser->cur_scroll_y);
     browser_ensure_images(browser);
 
-    cairo_surface_t *surf =
-        cairo_image_surface_create_for_data(out, CAIRO_FORMAT_ARGB32,
+    gfx_surface_t *surf =
+        gfx_image_surface_create_for_data(out, GFX_FORMAT_ARGB32,
                                             width, height + 2 * pad, stride);
-    if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
-        cairo_surface_destroy(surf);
+    if (gfx_surface_status(surf) != GFX_STATUS_SUCCESS) {
+        gfx_surface_destroy(surf);
         return -1;
     }
-    cairo_surface_set_device_offset(surf, 0, pad);
+    gfx_surface_set_device_offset(surf, 0, pad);
     ns_paint_set_device_viewport(0, 0, width, height);
     ns_paint_set_js(browser->js);
     ns_paint_set_anim(browser->anim);
@@ -2550,7 +2550,7 @@ ns_browser_render_argb32_rects(ns_browser *browser, int scroll_x, int scroll_y,
     ns_paint_set_js(NULL);
     ns_paint_clear_device_viewport();
 
-    cairo_surface_flush(surf);
+    gfx_surface_flush(surf);
     /* Frame dumps are a tooling aid: never in the interactive browser,
      * where any process that can set the environment could make it write
      * every page it shows to disk. */
@@ -2561,12 +2561,12 @@ ns_browser_render_argb32_rects(ns_browser *browser, int scroll_x, int scroll_y,
         if (frame_no % 30 == 0) {
             char *path = g_strdup_printf("%s/frame-%05d.png",
                                          dump_dir, frame_no);
-            cairo_surface_write_to_png(surf, path);
+            gfx_surface_write_to_png(surf, path);
             g_free(path);
         }
         frame_no++;
     }
-    cairo_surface_destroy(surf);
+    gfx_surface_destroy(surf);
     return 0;
 }
 

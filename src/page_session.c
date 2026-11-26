@@ -12,7 +12,7 @@
 #include "paint.h"
 #include "trace.h"
 
-#include <cairo.h>
+#include "gfx.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -441,7 +441,7 @@ session_damage_mode(void)
 
 /* Adds a CSS-pixel rect, scaled outward to device pixels and clipped, to a region. */
 static void
-region_add_css_rect(cairo_region_t *region, double x, double y, double w,
+region_add_css_rect(gfx_region_t *region, double x, double y, double w,
                     double h, double scale, int vw, int vh)
 {
     double x0 = floor(x * scale), y0 = floor(y * scale);
@@ -451,9 +451,9 @@ region_add_css_rect(cairo_region_t *region, double x, double y, double w,
     x1 = MIN(x1, vw);
     y1 = MIN(y1, vh);
     if (!(x1 > x0) || !(y1 > y0)) return;
-    cairo_rectangle_int_t r = { (int)x0, (int)y0, (int)(x1 - x0),
+    gfx_rectangle_int_t r = { (int)x0, (int)y0, (int)(x1 - x0),
                                 (int)(y1 - y0) };
-    cairo_region_union_rectangle(region, &r);
+    gfx_region_union_rectangle(region, &r);
 }
 
 /* Returns the start of the visible area inside an edge-padded framebuffer. */
@@ -484,7 +484,7 @@ session_blit(ns_page_session *s, int dx, int dy, int vw, int vh)
 /* Reuses pixels on integer-pixel scrolls, adding exposed strips and fixed bands to damage. */
 static gboolean
 session_scroll_blit(ns_page_session *s, long sx, long sy, int vw, int vh,
-                    double scale, cairo_region_t *region)
+                    double scale, gfx_region_t *region)
 {
     double ddx = (double)(sx - s->frame_sx) * scale;
     double ddy = (double)(sy - s->frame_sy) * scale;
@@ -498,13 +498,13 @@ session_scroll_blit(ns_page_session *s, long sx, long sy, int vw, int vh,
         return FALSE;
     }
     session_blit(s, dx, dy, vw, vh);
-    cairo_rectangle_int_t exposed[2] = {
+    gfx_rectangle_int_t exposed[2] = {
         { dx > 0 ? vw - dx : 0, 0, abs(dx), vh },
         { 0, dy > 0 ? vh - dy : 0, vw, abs(dy) },
     };
     for (int i = 0; i < 2; i++)
         if (exposed[i].width > 0 && exposed[i].height > 0)
-            cairo_region_union_rectangle(region, &exposed[i]);
+            gfx_region_union_rectangle(region, &exposed[i]);
     for (guint i = 0; i < bands->len; i++) {
         const ns_damage_rect *b = &g_array_index(bands, ns_damage_rect, i);
         region_add_css_rect(region, b->x, b->y, b->w, b->h, scale, vw, vh);
@@ -516,35 +516,35 @@ session_scroll_blit(ns_page_session *s, long sx, long sy, int vw, int vh,
 }
 
 /* Builds the device-pixel repaint region; NULL means a full repaint is needed. */
-static cairo_region_t *
+static gfx_region_t *
 session_damage_region(ns_page_session *s, GArray *damage, long sx, long sy,
                       int vw, int vh, double scale)
 {
-    cairo_region_t *region = cairo_region_create();
+    gfx_region_t *region = gfx_region_create();
     if ((sx != s->frame_sx || sy != s->frame_sy) &&
         !session_scroll_blit(s, sx, sy, vw, vh, scale, region)) {
-        cairo_region_destroy(region);
+        gfx_region_destroy(region);
         return NULL;
     }
     for (guint i = 0; i < damage->len; i++) {
         const ns_damage_rect *d = &g_array_index(damage, ns_damage_rect, i);
         region_add_css_rect(region, d->x, d->y, d->w, d->h, scale, vw, vh);
     }
-    if (cairo_region_num_rectangles(region) > NS_DAMAGE_MAX_RECTS) {
-        cairo_rectangle_int_t box;
-        cairo_region_get_extents(region, &box);
-        cairo_region_destroy(region);
-        region = cairo_region_create_rectangle(&box);
+    if (gfx_region_num_rectangles(region) > NS_DAMAGE_MAX_RECTS) {
+        gfx_rectangle_int_t box;
+        gfx_region_get_extents(region, &box);
+        gfx_region_destroy(region);
+        region = gfx_region_create_rectangle(&box);
     }
     double area = 0;
-    int n = cairo_region_num_rectangles(region);
+    int n = gfx_region_num_rectangles(region);
     for (int i = 0; i < n; i++) {
-        cairo_rectangle_int_t r;
-        cairo_region_get_rectangle(region, i, &r);
+        gfx_rectangle_int_t r;
+        gfx_region_get_rectangle(region, i, &r);
         area += (double)r.width * r.height;
     }
     if (area > NS_DAMAGE_MAX_FRACTION * vw * vh) {
-        cairo_region_destroy(region);
+        gfx_region_destroy(region);
         return NULL;
     }
     return region;
@@ -621,13 +621,13 @@ session_verify_region(ns_page_session *s, long sx, long sy, int vw, int vh,
 static int
 rect_row_cmp(const void *pa, const void *pb)
 {
-    const cairo_rectangle_int_t *a = pa, *b = pb;
+    const gfx_rectangle_int_t *a = pa, *b = pb;
     return a->y < b->y ? -1 : a->y > b->y;
 }
 
 /* Paints a row group once into scratch and copies just its damage rects into the frame. */
 static int
-session_paint_rows(ns_page_session *s, const cairo_rectangle_int_t *rects,
+session_paint_rows(ns_page_session *s, const gfx_rectangle_int_t *rects,
                    int n, int y0, int y1, long sx, long sy, int vw, int vh,
                    double scale)
 {
@@ -654,15 +654,15 @@ session_paint_rows(ns_page_session *s, const cairo_rectangle_int_t *rects,
 
 /* Repaints a damage region in row groups of nearby rects, verifying when enabled. */
 static int
-session_paint_region(ns_page_session *s, cairo_region_t *region, long sx,
+session_paint_region(ns_page_session *s, gfx_region_t *region, long sx,
                      long sy, int vw, int vh, double scale)
 {
-    int n = cairo_region_num_rectangles(region);
+    int n = gfx_region_num_rectangles(region);
     if (n == 0) return 0;
     if (!session_fit(&s->scratch_fb, &s->scratch_cap, vw, vh)) return -1;
-    cairo_rectangle_int_t *rects = g_new(cairo_rectangle_int_t, n);
+    gfx_rectangle_int_t *rects = g_new(gfx_rectangle_int_t, n);
     for (int i = 0; i < n; i++)
-        cairo_region_get_rectangle(region, i, &rects[i]);
+        gfx_region_get_rectangle(region, i, &rects[i]);
     qsort(rects, (size_t)n, sizeof *rects, rect_row_cmp);
     int rc = 0;
     for (int first = 0; first < n && rc == 0;) {
@@ -685,15 +685,15 @@ session_paint_region(ns_page_session *s, cairo_region_t *region, long sx,
 
 /* Copies region rectangles into the frame as x, y, w, h integer quadruples. */
 static void
-session_frame_damage(ns_page_frame *out, cairo_region_t *region)
+session_frame_damage(ns_page_frame *out, gfx_region_t *region)
 {
-    int n = cairo_region_num_rectangles(region);
+    int n = gfx_region_num_rectangles(region);
     if (n <= 0) return;
     out->damage = malloc(sizeof(int) * 4u * (size_t)n);
     if (!out->damage) return;
     for (int i = 0; i < n; i++) {
-        cairo_rectangle_int_t r;
-        cairo_region_get_rectangle(region, i, &r);
+        gfx_rectangle_int_t r;
+        gfx_region_get_rectangle(region, i, &r);
         out->damage[4 * i] = r.x;
         out->damage[4 * i + 1] = r.y;
         out->damage[4 * i + 2] = r.width;
@@ -770,15 +770,15 @@ ns_page_session_render(ns_page_session *s, int width, int height,
                     scale == s->frame_scale;
     GArray *damage = g_array_new(FALSE, FALSE, sizeof(ns_damage_rect));
     int damage_full = ns_browser_take_damage(s->cur, (int)sx, (int)sy, damage);
-    cairo_region_t *region = NULL;
+    gfx_region_t *region = NULL;
     if (!unchanged && !damage_full && session_damage_mode() > 0 &&
         s->frame_valid && vw == s->frame_w && vh == s->frame_h &&
         scale == s->frame_scale)
         region = session_damage_region(s, damage, sx, sy, vw, vh, scale);
     g_array_free(damage, TRUE);
     gboolean scrolled = sx != s->frame_sx || sy != s->frame_sy;
-    if (region && cairo_region_is_empty(region) && !scrolled) {
-        cairo_region_destroy(region);
+    if (region && gfx_region_is_empty(region) && !scrolled) {
+        gfx_region_destroy(region);
         region = NULL;
         unchanged = 1;
     }
@@ -795,7 +795,7 @@ ns_page_session_render(ns_page_session *s, int width, int height,
         }
         ns_trace_complete("frame", region ? "paint (damage)" : "paint",
                           phase_start, NULL);
-        if (region) cairo_region_destroy(region);
+        if (region) gfx_region_destroy(region);
         if (painted == 0) {
             out->base_gen = s->frame_gen;
             s->frame_gen++;

@@ -6,6 +6,7 @@ weststar_gfx_sources = files(
   'gfx-path.c',
   'gfx-pattern.c',
   'gfx-raster.c',
+  'gfx-region.c',
   'gfx-stroke.c',
   'gfx-surface.c',
 )

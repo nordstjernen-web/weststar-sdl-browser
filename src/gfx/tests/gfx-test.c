@@ -277,6 +277,43 @@ test_queries(void)
     cairo_surface_destroy(cs);
 }
 
+/* A region covers exactly the pixels of the rectangles added, once each. */
+static void
+test_region(void)
+{
+    enum { RW = 64, RH = 64 };
+    static unsigned char want[RH][RW], got[RH][RW];
+    memset(want, 0, sizeof want);
+    memset(got, 0, sizeof got);
+    gfx_region_t *r = gfx_region_create();
+    uint32_t seed = 7;
+    for (int i = 0; i < 40; i++) {
+        seed = seed * 1103515245u + 12345u;
+        int x = (int)(seed >> 8) % 50, y = (int)(seed >> 16) % 50;
+        int w = 1 + (int)(seed >> 4) % 20, h = 1 + (int)(seed >> 20) % 20;
+        gfx_rectangle_int_t rect = { x, y, w, h };
+        gfx_region_union_rectangle(r, &rect);
+        for (int yy = y; yy < y + h && yy < RH; yy++)
+            for (int xx = x; xx < x + w && xx < RW; xx++)
+                want[yy][xx] = 1;
+    }
+    int overlap = 0;
+    for (int i = 0; i < gfx_region_num_rectangles(r); i++) {
+        gfx_rectangle_int_t q;
+        gfx_region_get_rectangle(r, i, &q);
+        for (int yy = q.y; yy < q.y + q.height; yy++)
+            for (int xx = q.x; xx < q.x + q.width; xx++)
+                if (got[yy][xx]++)
+                    overlap = 1;
+    }
+    check(!overlap, "region rectangles do not overlap");
+    check(memcmp(want, got, sizeof want) == 0, "region covers the union");
+    gfx_rectangle_int_t ext;
+    gfx_region_get_extents(r, &ext);
+    check(ext.width > 0 && !gfx_region_is_empty(r), "region extents");
+    gfx_region_destroy(r);
+}
+
 static gfx_status_t
 count_bytes(void *closure, const unsigned char *data, unsigned int len)
 {
@@ -315,6 +352,7 @@ main(void)
             failures++;
     }
     test_queries();
+    test_region();
     test_png();
     if (failures)
         printf("%d failure(s)\n", failures);

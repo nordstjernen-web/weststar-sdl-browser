@@ -8,8 +8,7 @@
 #include "engine.h"
 
 #include <glib/gstdio.h>
-#include <cairo-pdf.h>
-#include <cairo.h>
+#include "gfx.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -1615,56 +1614,56 @@ engine_take_preopened(const char *path)
     return f;
 }
 
-/* cairo write callback that fwrites to the FILE* closure. */
-static cairo_status_t
+/* PNG write callback that fwrites to the FILE* closure. */
+static gfx_status_t
 engine_write_to_file(void *closure, const unsigned char *data,
                      unsigned int length)
 {
     return fwrite(data, 1, length, closure) == length
-        ? CAIRO_STATUS_SUCCESS : CAIRO_STATUS_WRITE_ERROR;
+        ? GFX_STATUS_SUCCESS : GFX_STATUS_WRITE_ERROR;
 }
 
-/* Paints the layout to a PNG capped at cairo's 30000 px limit; returns 0 or 2. */
+/* Paints the layout to a PNG of at most 30000 px a side; returns 0 or 2. */
 int
 ns_engine_write_png(const ns_box *root, const char *path)
 {
     if (!root || !path) return 2;
-    const int kCairoMax = 30000;
+    const int kMaxPx = 30000;
     double cw = root->content_width;
     if (!(cw > 0)) cw = 1024;
-    if (cw > kCairoMax) cw = kCairoMax;
+    if (cw > kMaxPx) cw = kMaxPx;
     int w = (int)cw;
     double max_bottom = ns_box_max_bottom(root, root->content_height);
     if (!(max_bottom > 0)) max_bottom = 0;
-    if (max_bottom > (double)kCairoMax) max_bottom = kCairoMax;
+    if (max_bottom > (double)kMaxPx) max_bottom = kMaxPx;
     int h = (int)max_bottom + 32;
     if (h <= 0) h = 768;
-    if (w > kCairoMax) w = kCairoMax;
-    if (h > kCairoMax) {
+    if (w > kMaxPx) w = kMaxPx;
+    if (h > kMaxPx) {
         fprintf(stderr,
-            "engine: page is %d px tall; PNG capped at %d (cairo limit)\n",
-            h, kCairoMax);
-        h = kCairoMax;
+            "engine: page is %d px tall; PNG capped at %d px\n",
+            h, kMaxPx);
+        h = kMaxPx;
     }
-    cairo_surface_t *surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
-    if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
-        cairo_surface_destroy(surf);
+    gfx_surface_t *surf = gfx_image_surface_create(GFX_FORMAT_ARGB32, w, h);
+    if (gfx_surface_status(surf) != GFX_STATUS_SUCCESS) {
+        gfx_surface_destroy(surf);
         fprintf(stderr, "engine: failed to create PNG surface\n");
         return 2;
     }
-    cairo_t *cr = cairo_create(surf);
+    gfx_t *cr = gfx_create(surf);
     ns_paint(cr, root, NULL);
-    cairo_destroy(cr);
+    gfx_destroy(cr);
     FILE *f = engine_take_preopened(path);
-    cairo_status_t st = f
-        ? cairo_surface_write_to_png_stream(surf, engine_write_to_file, f)
-        : cairo_surface_write_to_png(surf, path);
-    if (f && fclose(f) != 0 && st == CAIRO_STATUS_SUCCESS)
-        st = CAIRO_STATUS_WRITE_ERROR;
-    cairo_surface_destroy(surf);
-    if (st != CAIRO_STATUS_SUCCESS) {
+    gfx_status_t st = f
+        ? gfx_surface_write_to_png_stream(surf, engine_write_to_file, f)
+        : gfx_surface_write_to_png(surf, path);
+    if (f && fclose(f) != 0 && st == GFX_STATUS_SUCCESS)
+        st = GFX_STATUS_WRITE_ERROR;
+    gfx_surface_destroy(surf);
+    if (st != GFX_STATUS_SUCCESS) {
         fprintf(stderr, "engine: PNG write failed: %s\n",
-                cairo_status_to_string(st));
+                gfx_status_to_string(st));
         return 2;
     }
     return 0;

@@ -5,7 +5,7 @@
  */
 
 #include "headless.h"
-#include <cairo.h>
+#include "gfx.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -267,11 +267,11 @@ rdrv_follow_nav(ns_page_session *s, char *href, int vw, int vh, int settle_ms,
 }
 
 /* Cairo PNG write callback appending bytes to a GByteArray. */
-static cairo_status_t
+static gfx_status_t
 rdrv_png_sink(void *closure, const unsigned char *data, unsigned int length)
 {
     g_byte_array_append((GByteArray *)closure, data, length);
-    return CAIRO_STATUS_SUCCESS;
+    return GFX_STATUS_SUCCESS;
 }
 
 /* Renders one session frame and returns any pending navigation URL; caller frees. */
@@ -424,12 +424,12 @@ rdrv_run_actions(ns_page_session *s, const char *spec, int vw, int vh,
                                 : -2;
             if (shot_rc == 0) {
                 if (fr.ok && fr.pixels && fr.width > 0 && fr.height > 0) {
-                    cairo_surface_t *surf = cairo_image_surface_create_for_data(
-                        (unsigned char *)fr.pixels, CAIRO_FORMAT_ARGB32,
+                    gfx_surface_t *surf = gfx_image_surface_create_for_data(
+                        (unsigned char *)fr.pixels, GFX_FORMAT_ARGB32,
                         fr.width, fr.height, fr.stride);
-                    if (cairo_surface_status(surf) == CAIRO_STATUS_SUCCESS) {
+                    if (gfx_surface_status(surf) == GFX_STATUS_SUCCESS) {
                         GByteArray *buf = g_byte_array_new();
-                        cairo_surface_write_to_png_stream(surf,
+                        gfx_surface_write_to_png_stream(surf,
                                                           rdrv_png_sink, buf);
                         char *b64 = g_base64_encode(buf->data, buf->len);
                         fprintf(stdout, "shot-b64:%s:%s\n", path, b64);
@@ -437,7 +437,7 @@ rdrv_run_actions(ns_page_session *s, const char *spec, int vw, int vh,
                         g_free(b64);
                         g_byte_array_free(buf, TRUE);
                     }
-                    cairo_surface_destroy(surf);
+                    gfx_surface_destroy(surf);
                     fprintf(stderr, "[headless] shot %dx%d emitted\n",
                             fr.width, fr.height);
                 }

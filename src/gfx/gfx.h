@@ -161,6 +161,7 @@ typedef struct {
 } gfx_path_t;
 
 typedef struct gfx_surface gfx_surface_t;
+typedef struct gfx_region  gfx_region_t;
 typedef struct gfx_pattern gfx_pattern_t;
 typedef struct gfx         gfx_t;
 
@@ -276,6 +277,7 @@ gfx_t         *gfx_create(gfx_surface_t *target);
 gfx_t         *gfx_reference(gfx_t *g);
 void           gfx_destroy(gfx_t *g);
 gfx_status_t   gfx_status(const gfx_t *g);
+const char    *gfx_status_to_string(gfx_status_t status);
 gfx_surface_t *gfx_get_target(gfx_t *g);
 gfx_surface_t *gfx_get_group_target(gfx_t *g);
 
@@ -380,6 +382,20 @@ void gfx_clip_extents(gfx_t *g, double *x1, double *y1, double *x2,
  * empty. *is_rect is set when the clip is exactly that box. */
 gfx_bool_t gfx_clip_pixel_box(gfx_t *g, gfx_rectangle_int_t *box,
                               gfx_bool_t *is_rect);
+
+/* ---- regions: sets of pixels, as non-overlapping rectangles ------------ */
+
+gfx_region_t *gfx_region_create(void);
+gfx_region_t *gfx_region_create_rectangle(const gfx_rectangle_int_t *rect);
+void          gfx_region_destroy(gfx_region_t *r);
+void          gfx_region_union_rectangle(gfx_region_t *r,
+                                         const gfx_rectangle_int_t *rect);
+int           gfx_region_num_rectangles(const gfx_region_t *r);
+void          gfx_region_get_rectangle(const gfx_region_t *r, int i,
+                                       gfx_rectangle_int_t *out);
+void          gfx_region_get_extents(const gfx_region_t *r,
+                                     gfx_rectangle_int_t *out);
+gfx_bool_t    gfx_region_is_empty(const gfx_region_t *r);
 
 #ifdef __cplusplus
 }
