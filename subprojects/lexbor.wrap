@@ -1,0 +1,7 @@
+[wrap-git]
+# master after v3.0.1 (no newer release), pinned to its commit for its
+# memory-safety fixes.
+url = https://github.com/lexbor/lexbor.git
+revision = adfd1f74804d13697cc6016dc989f5d5a2c5aa8e
+depth = 1
+patch_directory = lexbor

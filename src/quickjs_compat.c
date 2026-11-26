@@ -1,0 +1,633 @@
+/* Northstar Web Browser — shims that give quickjs-ng and the original QuickJS one API.
+ * Adds V8-style Error.stack and native toString, plus source-less script compilation.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+#include "quickjs_compat.h"
+
+#include <glib.h>
+#include <string.h>
+
+/* Assigns a process-wide class id (from 192) to *pclass_id once, thread-safely. */
+JSClassID ns_new_class_id(JSClassID *pclass_id)
+{
+    static gint next_id = 192;
+    gint id = g_atomic_int_get((gint *)pclass_id);
+    if (id == 0) {
+        gint fresh = g_atomic_int_add(&next_id, 1);
+        if (!g_atomic_int_compare_and_exchange((gint *)pclass_id, 0, fresh))
+            id = g_atomic_int_get((gint *)pclass_id);
+        else
+            id = fresh;
+    }
+    return (JSClassID)id;
+}
+
+JSContext *JS_GetCallerRealm(JSContext *ctx)
+{
+    return ctx;
+}
+
+JSContext *JS_GetFunctionRealm(JSContext *ctx, JSValueConst func_obj)
+{
+    (void)func_obj;
+    return ctx;
+}
+
+#ifdef NS_QUICKJS_ORIGINAL
+/* The original engine has no way to repoint an ArrayBuffer: always -1, and
+ * the caller detaches the buffer instead.  quickjs-ng gets the real
+ * function from quickjs-ng-repoint-arraybuffer.patch. */
+int JS_RepointArrayBuffer(JSContext *ctx, JSValueConst obj, uint8_t *data,
+                          size_t byte_length)
+{
+    (void)ctx;
+    (void)obj;
+    (void)data;
+    (void)byte_length;
+    return -1;
+}
+
+/* No access to the global lexical object on the original engine. */
+void JS_ResetGlobalLexicals(JSContext *ctx)
+{
+    (void)ctx;
+}
+#endif
+
+/* Error.prototype.stack setter: defines or sets an own stack property on the receiver. */
+static JSValue ns_quickjs_error_stack_set(JSContext *ctx, JSValueConst this_val,
+                                          int argc, JSValueConst *argv,
+                                          int magic, JSValueConst *func_data)
+{
+    (void)magic;
+    if (!JS_IsObject(this_val))
+        return JS_ThrowTypeError(ctx, "Error.prototype.stack setter called on a non-object");
+    if (JS_IsStrictEqual(ctx, this_val, func_data[0]))
+        return JS_ThrowTypeError(ctx, "Error.prototype.stack setter called on the home object");
+    JSValueConst value = argc > 0 ? argv[0] : JS_UNDEFINED;
+    JSAtom stack = JS_NewAtom(ctx, "stack");
+    JSPropertyDescriptor desc;
+    int own = JS_GetOwnProperty(ctx, &desc, this_val, stack);
+    int ret = -1;
+    if (own == 0) {
+        ret = JS_DefinePropertyValue(ctx, this_val, stack, JS_DupValue(ctx, value),
+                                     JS_PROP_C_W_E | JS_PROP_THROW);
+    } else if (own > 0) {
+        JS_FreeValue(ctx, desc.value);
+        JS_FreeValue(ctx, desc.getter);
+        JS_FreeValue(ctx, desc.setter);
+        ret = JS_SetProperty(ctx, this_val, stack, JS_DupValue(ctx, value));
+    }
+    JS_FreeAtom(ctx, stack);
+    return ret < 0 ? JS_EXCEPTION : JS_UNDEFINED;
+}
+
+/* Returns an error property as a new string, or a copy of fallback; swallows exceptions. */
+static char *ns_quickjs_error_field(JSContext *ctx, JSValueConst error,
+                                    const char *field, const char *fallback)
+{
+    JSValue v = JS_GetPropertyStr(ctx, error, field);
+    char *out = NULL;
+    if (!JS_IsException(v) && !JS_IsUndefined(v)) {
+        const char *s = JS_ToCString(ctx, v);
+        if (s) {
+            out = g_strdup(s);
+            JS_FreeCString(ctx, s);
+        }
+    }
+    if (JS_HasException(ctx))
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, v);
+    return out ? out : g_strdup(fallback);
+}
+
+/* Rewrites a QuickJS stack frame toward V8 style, dropping <anonymous>/<input> noise. */
+static void ns_quickjs_append_v8_frame(GString *out, const char *line, size_t len)
+{
+    static const char *const unnamed[] = { "    at <anonymous> (", "    at <eval> (" };
+    GString *frame = g_string_new_len(line, (gssize)len);
+    for (size_t i = 0; i < G_N_ELEMENTS(unnamed); i++) {
+        size_t prefix = strlen(unnamed[i]);
+        if (frame->len > prefix && g_str_has_prefix(frame->str, unnamed[i]) &&
+            frame->str[frame->len - 1] == ')') {
+            g_string_truncate(frame, frame->len - 1);
+            g_string_erase(frame, 7, (gssize)(prefix - 7));
+            break;
+        }
+    }
+    if (g_str_has_prefix(frame->str, "    at <input>:"))
+        g_string_erase(frame, 7, 7);
+    else {
+        char *eval_location = strstr(frame->str, " (<input>:");
+        if (eval_location)
+            g_string_erase(frame, (gssize)(eval_location - frame->str) + 2, 7);
+    }
+    g_string_append_len(out, frame->str, (gssize)frame->len);
+    g_string_free(frame, TRUE);
+}
+
+/* Error.stack getter that prepends "Name: message" and V8-style frames when missing. */
+static JSValue ns_quickjs_error_stack_get(JSContext *ctx, JSValueConst this_val,
+                                          int argc, JSValueConst *argv,
+                                          int magic, JSValueConst *func_data)
+{
+    (void)argc;
+    (void)argv;
+    (void)magic;
+    JSValue frames = JS_Call(ctx, func_data[0], this_val, 0, NULL);
+    if (!JS_IsString(frames))
+        return frames;
+    size_t len = 0;
+    const char *s = JS_ToCStringLen(ctx, &len, frames);
+    if (!s)
+        return frames;
+    if (len == 0 || g_str_has_prefix(s, "    at ")) {
+        char *name = ns_quickjs_error_field(ctx, this_val, "name", "Error");
+        char *message = ns_quickjs_error_field(ctx, this_val, "message", "");
+        GString *stack = g_string_new(NULL);
+        if (!*name)
+            g_string_append(stack, message);
+        else if (!*message)
+            g_string_append(stack, name);
+        else
+            g_string_append_printf(stack, "%s: %s", name, message);
+        for (const char *line = s; line < s + len; ) {
+            const char *eol = memchr(line, '\n', (size_t)(s + len - line));
+            size_t line_len = eol ? (size_t)(eol - line) : (size_t)(s + len - line);
+            if (line_len > 0) {
+                g_string_append_c(stack, '\n');
+                ns_quickjs_append_v8_frame(stack, line, line_len);
+            }
+            line = eol ? eol + 1 : s + len;
+        }
+        JS_FreeValue(ctx, frames);
+        frames = JS_NewStringLen(ctx, stack->str, stack->len);
+        g_string_free(stack, TRUE);
+        g_free(message);
+        g_free(name);
+    }
+    JS_FreeCString(ctx, s);
+    return frames;
+}
+
+/* Wraps Error.prototype.stack accessors with V8-compatible getter and setter. */
+static void ns_quickjs_accept_any_error_stack(JSContext *ctx)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue error = JS_GetPropertyStr(ctx, global, "Error");
+    JSValue proto = JS_GetPropertyStr(ctx, error, "prototype");
+    JSAtom stack = JS_NewAtom(ctx, "stack");
+    JSPropertyDescriptor desc;
+    if (JS_IsObject(proto) && JS_GetOwnProperty(ctx, &desc, proto, stack) > 0) {
+        if ((desc.flags & JS_PROP_GETSET) && JS_IsFunction(ctx, desc.setter) &&
+            JS_IsFunction(ctx, desc.getter)) {
+            JSValue getter = JS_NewCFunctionData(ctx, ns_quickjs_error_stack_get,
+                                                 0, 0, 1, (JSValueConst *)&desc.getter);
+            JS_DefinePropertyValueStr(ctx, getter, "name",
+                                      JS_NewString(ctx, "get stack"),
+                                      JS_PROP_CONFIGURABLE);
+            JSValue setter = JS_NewCFunctionData(ctx, ns_quickjs_error_stack_set,
+                                                 1, 0, 1, (JSValueConst *)&proto);
+            JS_DefinePropertyValueStr(ctx, setter, "name",
+                                      JS_NewString(ctx, "set stack"),
+                                      JS_PROP_CONFIGURABLE);
+            JS_DefineProperty(ctx, proto, stack, JS_UNDEFINED, getter, setter,
+                              JS_PROP_HAS_GET | JS_PROP_HAS_SET);
+            JS_FreeValue(ctx, getter);
+            JS_FreeValue(ctx, setter);
+        }
+        JS_FreeValue(ctx, desc.value);
+        JS_FreeValue(ctx, desc.getter);
+        JS_FreeValue(ctx, desc.setter);
+    }
+    if (JS_HasException(ctx))
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeAtom(ctx, stack);
+    JS_FreeValue(ctx, proto);
+    JS_FreeValue(ctx, error);
+    JS_FreeValue(ctx, global);
+}
+
+#define NS_QUICKJS_NATIVE_BODY "() {\n    [native code]\n}"
+
+/* Function.prototype.toString wrapper printing native bodies as "() { [native code] }". */
+static JSValue ns_quickjs_function_to_string(JSContext *ctx, JSValueConst this_val,
+                                             int argc, JSValueConst *argv,
+                                             int magic, JSValueConst *func_data)
+{
+    (void)argc;
+    (void)argv;
+    (void)magic;
+    JSValue text = JS_Call(ctx, func_data[0], this_val, 0, NULL);
+    if (!JS_IsString(text))
+        return text;
+    size_t len = 0;
+    const char *s = JS_ToCStringLen(ctx, &len, text);
+    if (!s)
+        return text;
+    size_t body = sizeof(NS_QUICKJS_NATIVE_BODY) - 1;
+    if (len >= body && memcmp(s + len - body, NS_QUICKJS_NATIVE_BODY, body) == 0) {
+        GString *flat = g_str_has_prefix(s, "function bound ")
+            ? g_string_new("function ")
+            : g_string_new_len(s, (gssize)(len - body));
+        g_string_append(flat, "() { [native code] }");
+        JS_FreeValue(ctx, text);
+        text = JS_NewStringLen(ctx, flat->str, flat->len);
+        g_string_free(flat, TRUE);
+    }
+    JS_FreeCString(ctx, s);
+    return text;
+}
+
+/* Installs the toString wrapper and removes engine-specific fileName/line/column props. */
+static void ns_quickjs_print_natives_on_one_line(JSContext *ctx)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue function = JS_GetPropertyStr(ctx, global, "Function");
+    JSValue proto = JS_GetPropertyStr(ctx, function, "prototype");
+    JS_FreeValue(ctx, function);
+    JS_FreeValue(ctx, global);
+    JSValue original = JS_GetPropertyStr(ctx, proto, "toString");
+    if (JS_IsFunction(ctx, original)) {
+        JSValue fn = JS_NewCFunctionData(ctx, ns_quickjs_function_to_string,
+                                         0, 0, 1, (JSValueConst *)&original);
+        JS_DefinePropertyValueStr(ctx, fn, "name", JS_NewString(ctx, "toString"),
+                                  JS_PROP_CONFIGURABLE);
+        JS_DefinePropertyValueStr(ctx, proto, "toString", fn,
+                                  JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    }
+    static const char *const engine_extras[] = { "fileName", "lineNumber", "columnNumber" };
+    for (size_t i = 0; i < G_N_ELEMENTS(engine_extras); i++) {
+        JSAtom extra = JS_NewAtom(ctx, engine_extras[i]);
+        JS_DeleteProperty(ctx, proto, extra, 0);
+        JS_FreeAtom(ctx, extra);
+    }
+    if (JS_HasException(ctx))
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, original);
+    JS_FreeValue(ctx, proto);
+}
+
+#ifdef NS_QUICKJS_ORIGINAL
+static void ns_quickjs_learn_class_ids_once(JSContext *ctx);
+#endif
+
+/* Creates a JS context with the browser's Error.stack and toString compatibility shims. */
+JSContext *ns_quickjs_new_context(JSRuntime *rt)
+{
+    JSContext *ctx = (JS_NewContext)(rt);
+    if (!ctx) return NULL;
+#ifdef NS_QUICKJS_ORIGINAL
+    ns_quickjs_learn_class_ids_once(ctx);
+#endif
+    ns_quickjs_accept_any_error_stack(ctx);
+    ns_quickjs_print_natives_on_one_line(ctx);
+    return ctx;
+}
+
+/* Compiles a global script to bytecode with its source text stripped. */
+JSValue ns_js_compile_without_source(JSContext *ctx, const char *input, size_t input_len,
+                                     const char *filename)
+{
+    int flags = JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY;
+#ifdef NS_QUICKJS_ORIGINAL
+    JSRuntime *rt = JS_GetRuntime(ctx);
+    int strip = JS_GetStripInfo(rt);
+    JS_SetStripInfo(rt, strip | JS_STRIP_SOURCE);
+    JSValue fn = JS_Eval(ctx, input, input_len, filename, flags);
+    JS_SetStripInfo(rt, strip);
+    return fn;
+#else
+    JSValue fn = JS_Eval(ctx, input, input_len, filename, flags);
+    if (JS_IsException(fn))
+        return fn;
+    size_t size = 0;
+    uint8_t *bytes = JS_WriteObject(ctx, &size, fn,
+                                    JS_WRITE_OBJ_BYTECODE | JS_WRITE_OBJ_STRIP_SOURCE);
+    JS_FreeValue(ctx, fn);
+    if (!bytes)
+        return JS_EXCEPTION;
+    fn = JS_ReadObject(ctx, bytes, size, JS_READ_OBJ_BYTECODE);
+    js_free(ctx, bytes);
+    return fn;
+#endif
+}
+
+/* Compiles a script without retaining source, then evaluates it. */
+JSValue ns_js_eval_without_source(JSContext *ctx, const char *input, size_t input_len,
+                                  const char *filename)
+{
+    JSValue fn = ns_js_compile_without_source(ctx, input, input_len, filename);
+    if (JS_IsException(fn))
+        return fn;
+    return JS_EvalFunction(ctx, fn);
+}
+
+#ifdef NS_QUICKJS_ORIGINAL
+
+#include <stdarg.h>
+#include <string.h>
+
+typedef struct ns_quickjs_class_ids {
+    JSClassID array;
+    JSClassID error;
+    JSClassID data_view;
+} ns_quickjs_class_ids;
+
+typedef struct ns_quickjs_array_buffer_owner {
+    JSReallocArrayBufferDataFunc *realloc_func;
+    void *opaque;
+} ns_quickjs_array_buffer_owner;
+
+static ns_quickjs_class_ids ns_quickjs_classes;
+
+/* Returns a value's class id and frees the value (and any pending exception). */
+static JSClassID ns_quickjs_class_of(JSContext *ctx, JSValue val)
+{
+    JSClassID id = JS_GetClassID(val);
+    if (JS_IsException(val))
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, val);
+    return id;
+}
+
+/* Discovers original-QuickJS class ids for Array, Error and DataView. */
+static void ns_quickjs_learn_class_ids(JSContext *ctx)
+{
+    ns_quickjs_class_ids *ids = &ns_quickjs_classes;
+    ids->array = ns_quickjs_class_of(ctx, JS_NewArray(ctx));
+    ids->error = ns_quickjs_class_of(ctx, JS_NewError(ctx));
+    static const char dv_src[] = "new DataView(new ArrayBuffer(1))";
+    ids->data_view = ns_quickjs_class_of(ctx,
+        JS_Eval(ctx, dv_src, sizeof(dv_src) - 1, "<class-ids>",
+                JS_EVAL_TYPE_GLOBAL));
+}
+
+/* Runs ns_quickjs_learn_class_ids once per process. */
+static void ns_quickjs_learn_class_ids_once(JSContext *ctx)
+{
+    static gsize learned;
+    if (g_once_init_enter(&learned)) {
+        ns_quickjs_learn_class_ids(ctx);
+        g_once_init_leave(&learned, 1);
+    }
+}
+
+static bool ns_quickjs_has_class(JSValueConst val, JSClassID class_id)
+{
+    return class_id != JS_INVALID_CLASS_ID && JS_GetClassID(val) == class_id;
+}
+
+bool ns_quickjs_is_array(JSValueConst val)
+{
+    return ns_quickjs_has_class(val, ns_quickjs_classes.array);
+}
+
+bool ns_quickjs_is_error(JSValueConst val)
+{
+    return ns_quickjs_has_class(val, ns_quickjs_classes.error);
+}
+
+bool JS_IsDataView(JSValueConst obj)
+{
+    return ns_quickjs_has_class(obj, ns_quickjs_classes.data_view);
+}
+
+/* ArrayBuffer free hook that releases data through the owner's realloc function. */
+static void ns_quickjs_array_buffer_free(JSRuntime *rt, void *opaque, void *ptr)
+{
+    ns_quickjs_array_buffer_owner *owner = opaque;
+    owner->realloc_func(rt, owner->opaque, ptr, 0);
+    g_free(owner);
+}
+
+/* quickjs-ng style external ArrayBuffer over original QuickJS; resizable is unsupported. */
+JSValue ns_quickjs_new_array_buffer(JSContext *ctx, uint8_t *buf, size_t len,
+                                    size_t max_len,
+                                    JSReallocArrayBufferDataFunc *realloc_func,
+                                    void *opaque, bool is_shared)
+{
+    if (max_len != 0)
+        return JS_ThrowRangeError(ctx, "resizable external ArrayBuffer is not supported");
+    if (!realloc_func)
+        return (JS_NewArrayBuffer)(ctx, buf, len, NULL, opaque, is_shared);
+    ns_quickjs_array_buffer_owner *owner = g_new(ns_quickjs_array_buffer_owner, 1);
+    owner->realloc_func = realloc_func;
+    owner->opaque = opaque;
+    JSValue buffer = (JS_NewArrayBuffer)(ctx, buf, len, ns_quickjs_array_buffer_free,
+                                         owner, is_shared);
+    if (JS_IsException(buffer))
+        g_free(owner);
+    return buffer;
+}
+
+/* Calls JS_NewTypedArray, padding argv to three arguments as original QuickJS needs. */
+JSValue ns_quickjs_new_typed_array(JSContext *ctx, int argc, JSValueConst *argv,
+                                   JSTypedArrayEnum type)
+{
+    JSValueConst padded[3] = { JS_UNDEFINED, JS_UNDEFINED, JS_UNDEFINED };
+    if (argc >= 3)
+        return (JS_NewTypedArray)(ctx, argc, argv, type);
+    for (int i = 0; i < argc; i++)
+        padded[i] = argv[i];
+    return (JS_NewTypedArray)(ctx, 3, padded, type);
+}
+
+const char *JS_GetVersion(void)
+{
+    return NS_QUICKJS_VERSION;
+}
+
+/* Returns a Uint8Array's data pointer and length; throws TypeError on wrong type or bounds. */
+uint8_t *JS_GetUint8Array(JSContext *ctx, size_t *psize, JSValueConst obj)
+{
+    *psize = 0;
+    if (JS_GetTypedArrayType(obj) != JS_TYPED_ARRAY_UINT8) {
+        JS_ThrowTypeError(ctx, "not a Uint8Array");
+        return NULL;
+    }
+    size_t offset = 0, length = 0, buffer_size = 0;
+    JSValue buffer = JS_GetTypedArrayBuffer(ctx, obj, &offset, &length, NULL);
+    if (JS_IsException(buffer))
+        return NULL;
+    uint8_t *data = JS_GetArrayBuffer(ctx, &buffer_size, buffer);
+    JS_FreeValue(ctx, buffer);
+    if (!data)
+        return NULL;
+    if (offset > buffer_size || length > buffer_size - offset) {
+        JS_ThrowTypeError(ctx, "out-of-bound access");
+        return NULL;
+    }
+    *psize = length;
+    return data + offset;
+}
+
+
+/* Throws a DOMException with a printf-formatted message, falling back to an Error. */
+JSValue JS_ThrowDOMException(JSContext *ctx, const char *name, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    char *message = g_strdup_vprintf(fmt, ap);
+    va_end(ap);
+
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, "DOMException");
+    JS_FreeValue(ctx, global);
+    JSValue error;
+    if (JS_IsConstructor(ctx, ctor)) {
+        JSValue args[2] = { JS_NewString(ctx, message), JS_NewString(ctx, name) };
+        error = JS_CallConstructor(ctx, ctor, 2, args);
+        JS_FreeValue(ctx, args[0]);
+        JS_FreeValue(ctx, args[1]);
+    } else {
+        error = JS_NewError(ctx);
+        if (!JS_IsException(error)) {
+            JS_DefinePropertyValueStr(ctx, error, "name", JS_NewString(ctx, name),
+                                      JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+            JS_DefinePropertyValueStr(ctx, error, "message", JS_NewString(ctx, message),
+                                      JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+        }
+    }
+    JS_FreeValue(ctx, ctor);
+    g_free(message);
+    if (JS_IsException(error))
+        return JS_EXCEPTION;
+    return JS_Throw(ctx, error);
+}
+
+/* Evaluates with a starting line number by prepending newlines (skipped for hashbang). */
+JSValue JS_EvalThis2(JSContext *ctx, JSValueConst this_obj, const char *input,
+                     size_t input_len, JSEvalOptions *options)
+{
+    const char *filename = options->filename ? options->filename : "<unnamed>";
+    size_t lines = options->line_num > 1 ? (size_t)options->line_num - 1 : 0;
+    gboolean hashbang = input_len >= 2 && input[0] == '#' && input[1] == '!';
+    if (lines == 0 || hashbang || input_len > G_MAXSIZE - lines - 1)
+        return JS_EvalThis(ctx, this_obj, input, input_len, filename,
+                           options->eval_flags);
+    char *shifted = g_try_malloc(lines + input_len + 1);
+    if (!shifted)
+        return JS_ThrowOutOfMemory(ctx);
+    memset(shifted, '\n', lines);
+    memcpy(shifted + lines, input, input_len);
+    shifted[lines + input_len] = '\0';
+    JSValue result = JS_EvalThis(ctx, this_obj, shifted, lines + input_len, filename,
+                                 options->eval_flags);
+    g_free(shifted);
+    return result;
+}
+
+#endif
+
+/* Sets data/len to [offset, offset+length) of an ArrayBuffer if in bounds; else leaves them. */
+static gboolean
+ns_view_bytes(JSContext *ctx, JSValueConst buffer, uint64_t offset,
+              uint64_t length, const uint8_t **data, size_t *len)
+{
+    size_t total = 0;
+    uint8_t *base = JS_GetArrayBuffer(ctx, &total, buffer);
+    if (!base) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return TRUE;
+    }
+    if (offset <= total && length <= total - offset) {
+        *data = base + offset;
+        *len = (size_t)length;
+    }
+    return TRUE;
+}
+
+/* Resolves a BufferSource (ArrayBuffer, typed array or DataView) to its
+ * bytes; the one place that does so, so every caller gets the same bounds
+ * checks.  Returns FALSE when v is not a BufferSource; TRUE with *data NULL
+ * when it is one whose bytes are gone (detached, or a view out of range).
+ * *hold receives a reference that keeps the backing ArrayBuffer alive; the
+ * caller frees it with JS_FreeValue once it no longer reads *data
+ * (JS_UNDEFINED when v itself keeps the bytes alive).  A DataView's
+ * accessors can be replaced by the page, so this may run page script:
+ * callers resolve the bytes before taking pointers into their own state. */
+bool
+ns_js_buffer_source_bytes(JSContext *ctx, JSValueConst v, const uint8_t **data,
+                          size_t *len, JSValue *hold)
+{
+    *data = NULL;
+    *len = 0;
+    *hold = JS_UNDEFINED;
+    if (!JS_IsObject(v)) return FALSE;
+    if (JS_GetTypedArrayType(v) >= 0) {
+        size_t offset = 0, length = 0;
+        JSValue buf = JS_GetTypedArrayBuffer(ctx, v, &offset, &length, NULL);
+        if (JS_IsException(buf)) {
+            JS_FreeValue(ctx, JS_GetException(ctx));
+            return TRUE;
+        }
+        ns_view_bytes(ctx, buf, offset, length, data, len);
+        JS_FreeValue(ctx, buf);
+        return TRUE;
+    }
+    size_t total = 0;
+    uint8_t *base = JS_GetArrayBuffer(ctx, &total, v);
+    if (base) {
+        *data = base;
+        *len = total;
+        return TRUE;
+    }
+    JS_FreeValue(ctx, JS_GetException(ctx));
+    if (JS_IsArrayBuffer(v)) return TRUE;
+    /* DataView: only a genuine one, never an object that merely claims to
+     * be a view.  Its buffer/byteOffset/byteLength accessors can still be
+     * replaced by the page, so the buffer they return is held for the
+     * caller (it may be a fresh object nothing else references) and the
+     * range is checked against that buffer's real size. */
+    if (!JS_IsDataView(v)) return FALSE;
+    JSValue buf = JS_GetPropertyStr(ctx, v, "buffer");
+    JSValue off_v = JS_GetPropertyStr(ctx, v, "byteOffset");
+    JSValue len_v = JS_GetPropertyStr(ctx, v, "byteLength");
+    uint64_t offset = 0, length = 0;
+    if (JS_ToIndex(ctx, &offset, off_v) == 0 &&
+        JS_ToIndex(ctx, &length, len_v) == 0)
+        ns_view_bytes(ctx, buf, offset, length, data, len);
+    else
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, len_v);
+    JS_FreeValue(ctx, off_v);
+    if (*data)
+        *hold = buf;
+    else
+        JS_FreeValue(ctx, buf);
+    return TRUE;
+}
+
+char *
+ns_js_get_string_prop(JSContext *ctx, JSValueConst obj, const char *key)
+{
+    if (!JS_IsObject(obj)) return NULL;
+    JSValue v = JS_GetPropertyStr(ctx, obj, key);
+    char *out = NULL;
+    if (JS_IsString(v)) {
+        const char *s = JS_ToCString(ctx, v);
+        if (s) {
+            out = g_strdup(s);
+            JS_FreeCString(ctx, s);
+        }
+    }
+    JS_FreeValue(ctx, v);
+    return out;
+}
+
+int
+ns_js_get_int_prop(JSContext *ctx, JSValueConst obj, const char *key, int dflt)
+{
+    if (!JS_IsObject(obj)) return dflt;
+    JSValue v = JS_GetPropertyStr(ctx, obj, key);
+    int out = dflt;
+    if (!JS_IsUndefined(v) && !JS_IsNull(v)) {
+        int32_t t;
+        if (JS_ToInt32(ctx, &t, v) == 0) out = t;
+    }
+    JS_FreeValue(ctx, v);
+    return out;
+}

@@ -1,0 +1,85 @@
+# Build artifacts
+/build/
+/dist/
+/data/screenshots/*.png
+/obj-*/
+*.o
+*.a
+*.lo
+*.la
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.pdb
+*.exp
+*.lib
+*.ilk
+*.idb
+*.pch
+*.gch
+*.d
+
+# Meson / Ninja
+/builddir/
+/builddir-release/
+/builddir-debug/
+/builddir-verify/
+/builddir-i386/
+/release-build/
+/build-*/
+
+.ninja_deps
+.ninja_log
+build.ninja
+compile_commands.json
+
+# Meson auto-downloaded subprojects (wrap files only are committed).
+# lexbor, quickjs-ng, quickjs, pdfjs-dist, WAMR and Wuffs are fetched at setup
+# from their upstream releases.
+/subprojects/packagecache/
+/subprojects/lexbor/
+/subprojects/quickjs-ng/
+/subprojects/quickjs/
+/subprojects/pdfjs-dist-*/
+/subprojects/wasm-micro-runtime-*/
+/subprojects/wuffs-*/
+
+# Editor / OS
+*~
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/c_cpp_properties.json
+*.sublime-*
+
+# Logs / scratch / tool output
+/render-tests-out/
+wptreport.json
+*.log
+/.scratch/
+/.cache/
+/local-build.log
+
+# Local dev artifacts (Windows/MSYS2 box)
+/.tmp/
+/.ccache/
+
+# AI coding-assistant files are not accepted (see README.md, "No AI policy")
+/.claude/
+/.agents/
+/CLAUDE.md
+/AGENTS.md
+perf.data
+
+# Python bytecode
+__pycache__/
+*.pyc

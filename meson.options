@@ -1,0 +1,26 @@
+option('build_date', type: 'string', value: '',
+       description: 'Build date stamp shown in the About dialog (defaults to the configure-time date).')
+option('wasm', type: 'feature', value: 'auto',
+       description: 'Build the WebAssembly JS API over the vendored WAMR interpreter (on by default on x86-64 and 64-bit Arm, the CPUs its call stubs cover; disable on platforms WAMR does not support, e.g. NetBSD).')
+option('av1', type: 'feature', value: 'auto',
+       description: 'Decode AV1 <video> through libdav1d (on by default when dav1d is present): the codec YouTube streams to browsers that support it.')
+option('vp9', type: 'feature', value: 'auto',
+       description: 'Decode VP9 <video> through libvpx (on by default when libvpx is present).')
+option('h264', type: 'feature', value: 'auto',
+       description: 'Decode H.264 (AVC) <video> through OpenH264 (on by default when openh264 is present): the codec of HLS streams such as PeerTube and Twitch. Only Cisco-built OpenH264 binaries are covered by the H.264 patent license Cisco pays for; distribution builds from source are not.')
+option('gstreamer', type: 'feature', value: 'auto',
+       description: 'Decode <video> through GStreamer decoder plugins (on by default on Linux when GStreamer is present, where it is the default video backend; set NS_VIDEO_DECODER=native at run time to use the built-in AV1/VP9/H.264 backends instead).')
+option('mediafoundation', type: 'feature', value: 'auto',
+       description: 'Decode <video> through Windows Media Foundation (on by default on Windows, where it is the default video backend: the system H.264 decoder and the AV1/VP9 Video Extensions; set NS_VIDEO_DECODER=native at run time to use the built-in AV1/VP9/H.264 backends instead).')
+option('avif', type: 'feature', value: 'auto',
+       description: 'Decode AVIF images through libavif (on by default when libavif is present). AVIF is a rare format on the web and libavif pulls in a full AV1 decoder; disable to drop it.')
+option('audio', type: 'feature', value: 'auto',
+       description: 'Enable in-process audio playback (SDL3 output + minimp3/pl_mpeg decode). Auto-detects SDL3 3.2 or newer; disable to build without SDL.')
+option('js_engine', type: 'combo', choices: ['quickjs-ng', 'quickjs'], value: 'quickjs-ng',
+       description: 'JavaScript engine: quickjs-ng (default) or the original QuickJS by Fabrice Bellard, each built from its pinned subproject.')
+option('pdfjs', type: 'feature', value: 'auto',
+       description: 'Show PDF documents in a viewer built on PDF.js, run as sandboxed script inside the engine and embedded at build time. Auto: built when PDF.js is available. Enabled: required, the build fails without it. Disabled: left out, and a PDF shows a notice with a link to the file. PDF.js comes from pdfjs_dir when that is set, else from the release pinned in subprojects/pdfjs-dist.wrap, which is fetched and never committed.')
+option('pdfjs_dir', type: 'string', value: '',
+       description: 'Directory of an installed PDF.js to embed instead of the pinned release, such as /usr/share/pdf.js. Both the pdfjs-dist layout (build/pdf.min.mjs, wasm/) and the generic viewer layout (build/pdf.mjs, web/wasm/) are accepted. Must hold PDF.js 6.5 or a later 6.x; anything else fails the build.')
+option('webgl', type: 'feature', value: 'auto',
+       description: 'Build WebGL 1 / 2 (canvas.getContext("webgl"), "webgl2") over an offscreen OpenGL context through libepoxy, with every shader validated by the Khronos glslang front end before it reaches the GPU driver. Auto: built when libepoxy and glslang are present. Enabled: required, the build fails without them. Disabled: left out, and getContext("webgl") returns null.')

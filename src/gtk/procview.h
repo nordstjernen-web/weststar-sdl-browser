@@ -1,0 +1,84 @@
+/* Northstar Web Browser — NsProcView, the GTK page widget: navigation, zoom, find, print.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+#ifndef NORTHSTAR_GTK_PROCVIEW_H
+#define NORTHSTAR_GTK_PROCVIEW_H
+
+#include <gtk/gtk.h>
+
+G_BEGIN_DECLS
+
+typedef struct NsProcView NsProcView;
+
+const char *ns_app_self_exe(void);
+
+void ns_popover_menu_fit(GtkWidget *popover);
+
+typedef enum {
+    NS_PROC_EVT_TITLE,
+    NS_PROC_EVT_URL,
+    NS_PROC_EVT_STATUS,
+    NS_PROC_EVT_HISTORY,
+    NS_PROC_EVT_LOADING,
+    NS_PROC_EVT_DOWNLOAD,
+    NS_PROC_EVT_ZOOM
+} NsProcEvent;
+
+typedef void (*NsProcNotify)(NsProcView *view, NsProcEvent evt,
+                             const char *text, gpointer user_data);
+
+NsProcView *ns_proc_view_new(void);
+GtkWidget  *ns_proc_view_widget(NsProcView *view);
+void        ns_proc_view_set_notify(NsProcView *view, NsProcNotify cb,
+                                    gpointer user_data);
+
+void        ns_proc_view_set_private(NsProcView *view, gboolean private_mode);
+gboolean    ns_proc_view_is_private(NsProcView *view);
+
+void ns_proc_view_load(NsProcView *view, const char *url);
+void ns_proc_view_back(NsProcView *view);
+void ns_proc_view_forward(NsProcView *view);
+void ns_proc_view_reload(NsProcView *view);
+void ns_proc_view_stop(NsProcView *view);
+void ns_proc_view_toggle_console(NsProcView *view);
+
+/* The developer tools tabs, in notebook order. */
+typedef enum {
+    NS_DEVTOOLS_CONSOLE = 0,
+    NS_DEVTOOLS_NETWORK,
+    NS_DEVTOOLS_PERFORMANCE,
+    NS_DEVTOOLS_LAYOUT,
+    NS_DEVTOOLS_ELEMENTS
+} NsDevtoolsTab;
+
+void ns_proc_view_show_devtools_tab(NsProcView *view, NsDevtoolsTab tab);
+
+gboolean    ns_proc_view_can_back(NsProcView *view);
+gboolean    ns_proc_view_can_forward(NsProcView *view);
+const char *ns_proc_view_url(NsProcView *view);
+const char *ns_proc_view_title(NsProcView *view);
+gboolean    ns_proc_view_is_loading(NsProcView *view);
+
+int         ns_proc_view_security(NsProcView *view);
+const char *ns_proc_view_remote_ip(NsProcView *view);
+
+void   ns_proc_view_print(NsProcView *view);
+void   ns_proc_view_save_page(NsProcView *view);
+void   ns_proc_view_save_image(NsProcView *view);
+
+void   ns_proc_view_zoom_in(NsProcView *view);
+void   ns_proc_view_zoom_out(NsProcView *view);
+void   ns_proc_view_zoom_reset(NsProcView *view);
+
+int    ns_proc_view_zoom_percent(NsProcView *view);
+void   ns_proc_view_focus(NsProcView *view);
+void   ns_proc_view_find_open(NsProcView *view);
+
+gboolean ns_proc_view_find_close(NsProcView *view);
+
+
+G_END_DECLS
+
+#endif

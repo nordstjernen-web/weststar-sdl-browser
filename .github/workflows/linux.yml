@@ -1,0 +1,198 @@
+name: linux
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  workflow_dispatch:
+
+concurrency:
+  group: linux-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NS_SAFE_BROWSING_API_KEY: ${{ secrets.NS_SAFE_BROWSING_API_KEY }}
+
+jobs:
+  build:
+    name: gcc on ubuntu-${{ matrix.ubuntu }}
+    runs-on: ubuntu-${{ matrix.ubuntu }}
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: ['26.04']
+
+    env:
+      DEBIAN_FRONTEND: noninteractive
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install build dependencies
+        # A stalled package mirror used to hang this step until the job's
+        # 30-minute limit. Give each download a timeout, bound each attempt,
+        # and try again before failing.
+        timeout-minutes: 15
+        run: |
+          apt_get() {
+            sudo timeout -k 10 "$1" apt-get \
+              -o Acquire::Retries=3 \
+              -o Acquire::http::Timeout=30 \
+              -o Acquire::https::Timeout=30 \
+              -o DPkg::Lock::Timeout=120 \
+              "${@:2}"
+          }
+          for attempt in 1 2 3; do
+            if apt_get 120 update && apt_get 240 install -y \
+                ccache gcc pkg-config meson ninja-build \
+                libgtk-4-dev libcurl4-openssl-dev libssl-dev \
+                libharfbuzz-dev libfribidi-dev libcairo2-dev \
+                libfontconfig-dev libfreetype-dev \
+                libpsl-dev libsqlite3-dev \
+                libavif-dev libsdl3-dev libseccomp-dev libenchant-2-dev \
+                libopusfile-dev libvorbis-dev libepoxy-dev glslang-dev \
+                libegl1 libgl1-mesa-dri ca-certificates; then
+              exit 0
+            fi
+            echo "::warning::apt-get attempt $attempt failed or timed out"
+            sudo dpkg --configure -a || true
+            sleep 10
+          done
+          exit 1
+
+      - name: Restore ccache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ccache
+          key: ccache-linux-${{ matrix.ubuntu }}-gcc-${{ github.sha }}
+          restore-keys: |
+            ccache-linux-${{ matrix.ubuntu }}-gcc-
+
+      - name: Configure ccache
+        run: |
+          ccache --max-size=400M
+          ccache --zero-stats
+
+      - name: Select compiler
+        run: |
+          echo "CC=ccache gcc" >> $GITHUB_ENV
+
+      - name: Show toolchain versions
+        run: |
+          gcc --version | head -1
+          ccache --version | head -1
+          meson --version
+          ninja --version
+          pkg-config --modversion gtk4
+          pkg-config --modversion libcurl
+
+      - name: Build
+        id: build
+        shell: bash
+        run: |
+          set -o pipefail
+          # Pull requests build without LTO (several times faster to link);
+          # pushes to main keep the release configuration with LTO.
+          lto=true; [ "$GITHUB_EVENT_NAME" = pull_request ] && lto=false
+          meson setup builddir --werror -Db_lto=$lto
+          meson compile -C builddir 2>&1 | tee build.log
+
+      - name: ccache stats
+        if: always()
+        run: ccache --show-stats
+
+      - name: Smoke test (binary present and executable)
+        run: |
+          test -x builddir/src/gtk/northstar
+          file builddir/src/gtk/northstar
+          ldd builddir/src/gtk/northstar | head -20
+
+      - name: Headless smoke (about:start)
+        run: |
+          set -o pipefail
+          ./builddir/src/gtk/northstar --headless --dump=text about:start > about.txt
+          head -3 about.txt
+          grep -q 'Search duckduckgo.com' about.txt
+
+      - name: Headless PDF viewer smoke (compressed content, streamed text)
+        shell: bash
+        run: |
+          set -o pipefail
+          # Compressed page content shows only if the worker can inflate
+          # it; the last marker only if every text chunk is streamed.
+          ./builddir/src/gtk/northstar --headless --dump=text --settle-ms=8000 \
+            data/fixtures/compressed-text.pdf > pdf.txt
+          grep -q NSPDF-START pdf.txt
+          grep -q NSPDF-END pdf.txt
+
+      - name: Headless JavaScript smoke (engine named, scripts run on it)
+        shell: bash
+        run: |
+          set -o pipefail
+          ./builddir/src/gtk/northstar --headless --dump=dom about:northstar > about-js.txt
+          grep -qF '"JavaScript (quickjs-ng)"' about-js.txt
+          ./builddir/src/gtk/northstar --headless --dump=text --settle-ms=300 \
+            'data:text/html,<p id="a">before</p><script>var a=document.getElementById("a");var n=0;[1,1].sort(function(){n++;return 0});a.textContent="js-dom-ok "+(6*7)+" "+(2n**65n)+" "+structuredClone([1,[2]])[1][0]+" enc="+new TextEncoder().encode("h\u00e9").length+" sortcmp="+n;Promise.resolve().then(function(){a.textContent+=" js-microtask-ok"});setTimeout(function(){a.textContent+=" js-timer-ok"},50);</script>' \
+            > js-page.txt
+          cat js-page.txt
+          grep -q 'js-dom-ok 42 36893488147419103232 2 enc=3 sortcmp=1' js-page.txt
+          grep -q 'js-microtask-ok' js-page.txt
+          grep -q 'js-timer-ok' js-page.txt
+
+      - name: Headless WebGL smoke (Mesa software rendering, under the sandbox)
+        shell: bash
+        run: |
+          set -o pipefail
+          # The runner has no GPU: Mesa's llvmpipe draws. The page reads its
+          # own pixels back, so this covers context creation, the shader
+          # validator, a draw and readback, for WebGL 1 and 2.
+          ./builddir/src/gtk/northstar --headless --dump=text --settle-ms=500 \
+            data/fixtures/webgl.html > webgl.txt
+          cat webgl.txt
+          grep -qx 'webgl1 left=255,128,0,255' webgl.txt
+          grep -qx 'webgl1 right=0,0,255,255' webgl.txt
+          grep -qx 'webgl1 rejects-while=true' webgl.txt
+          grep -qx 'webgl1 error=0' webgl.txt
+          grep -qx 'webgl2 es300=true' webgl.txt
+          grep -qx 'webgl2 error=0' webgl.txt
+          # Off for the run: no context, by either name.
+          NS_NO_WEBGL=1 ./builddir/src/gtk/northstar --headless --dump=text \
+            --settle-ms=300 data/fixtures/webgl.html > webgl-off.txt
+          grep -qx 'webgl1 unavailable' webgl-off.txt
+          grep -qx 'webgl2 unavailable' webgl-off.txt
+
+      - name: Headless baseline smoke (./scripts/dev.sh smoke)
+        run: ./scripts/dev.sh smoke
+
+      - name: Upload build log
+        if: always() && hashFiles('build.log') != ''
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: build-log-${{ matrix.ubuntu }}-gcc
+          path: build.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload northstar binary
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: northstar-linux-${{ matrix.ubuntu }}-gcc
+          path: builddir/src/gtk/northstar
+          if-no-files-found: error
+          retention-days: 14

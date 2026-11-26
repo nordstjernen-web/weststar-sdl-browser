@@ -1,0 +1,19 @@
+/* Northstar Web Browser — optional spell checking API: word lookup by language.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+#ifndef NS_SPELLCHECK_H
+#define NS_SPELLCHECK_H
+
+#include <glib.h>
+
+G_BEGIN_DECLS
+
+void      ns_spell_init(void);
+gboolean  ns_spell_available(void);
+gboolean  ns_spell_word_ok(const char *word, gssize len, const char *lang);
+
+G_END_DECLS
+
+#endif

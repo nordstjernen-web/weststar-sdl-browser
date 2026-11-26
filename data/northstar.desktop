@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Northstar Web Browser
+GenericName=Web Browser
+Comment=A small, hand-written web browser
+Exec=northstar -- %U
+Icon=northstar
+Terminal=false
+StartupWMClass=org.northstar.WebBrowser
+Categories=Network;WebBrowser;
+MimeType=text/html;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;
+StartupNotify=true

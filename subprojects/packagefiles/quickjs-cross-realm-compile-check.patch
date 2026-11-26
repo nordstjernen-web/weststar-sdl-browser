@@ -1,0 +1,107 @@
+diff --git a/quickjs.c b/quickjs.c
+index e5f18d5..65b7cb5 100644
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -38521,6 +38521,8 @@ static JSValue JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
+     return ret;
+ }
+ 
++static int (*js_eval_string_check)(JSContext *ctx);
++
+ static JSValue JS_EvalObject(JSContext *ctx, JSValueConst this_obj,
+                              JSValueConst val, int flags, int scope_idx)
+ {
+@@ -38530,6 +38532,8 @@ static JSValue JS_EvalObject(JSContext *ctx, JSValueConst this_obj,
+ 
+     if (!JS_IsString(val))
+         return JS_DupValue(ctx, val);
++    if (js_eval_string_check && !js_eval_string_check(ctx))
++        return JS_ThrowTypeError(ctx, "refused to evaluate a string as JavaScript");
+     str = JS_ToCStringLen(ctx, &len, val);
+     if (!str)
+         return JS_EXCEPTION;
+@@ -41070,9 +41074,75 @@ JSValue JS_NewCConstructor(JSContext *ctx, int class_id, const char *name,
+     return JS_EXCEPTION;
+ }
+ 
++/* Embedder veto on compiling source text through an eval or Function
++ * constructor that belongs to a different realm than the calling code.
++ * Realms that share objects (e.g. browser frames) would otherwise let code
++ * in one realm run arbitrary code in the other via
++ * someObject.constructor.constructor("..."). */
++static int (*js_cross_realm_compile_check)(JSContext *target, JSContext *caller);
++
++void JS_SetCrossRealmCompileCheck(int (*cb)(JSContext *target, JSContext *caller))
++{
++    js_cross_realm_compile_check = cb;
++}
++
++/* Embedder veto on evaluating a string as code (eval, Function and
++ * friends), e.g. for Content-Security-Policy without 'unsafe-eval'. */
++static int (*js_eval_string_check)(JSContext *ctx);
++
++void JS_SetEvalStringCheck(int (*cb)(JSContext *ctx))
++{
++    js_eval_string_check = cb;
++}
++
++/* Realm of the innermost JS function on the stack, skipping native frames
++ * such as Function.prototype.call or Reflect.construct. NULL when no JS
++ * code is running (e.g. a promise job calling a native handler). */
++static JSContext *js_caller_realm(JSRuntime *rt)
++{
++    JSStackFrame *sf;
++    for (sf = rt->current_stack_frame; sf; sf = sf->prev_frame) {
++        JSObject *p;
++        if (JS_VALUE_GET_TAG(sf->cur_func) != JS_TAG_OBJECT)
++            continue;
++        p = JS_VALUE_GET_OBJ(sf->cur_func);
++        switch (p->class_id) {
++        case JS_CLASS_BYTECODE_FUNCTION:
++        case JS_CLASS_GENERATOR_FUNCTION:
++        case JS_CLASS_ASYNC_FUNCTION:
++        case JS_CLASS_ASYNC_GENERATOR_FUNCTION:
++            return p->u.func.function_bytecode->realm;
++        default:
++            break;
++        }
++    }
++    return NULL;
++}
++
++/* The realm of the JS code that called the running native function, or
++ * NULL when no JS frame is on the stack. */
++JSContext *JS_GetCallerRealmOrNull(JSContext *ctx)
++{
++    return js_caller_realm(ctx->rt);
++}
++
++static int js_cross_realm_compile_denied(JSContext *ctx)
++{
++    JSContext *caller;
++    if (!js_cross_realm_compile_check)
++        return 0;
++    caller = js_caller_realm(ctx->rt);
++    if (caller == ctx || js_cross_realm_compile_check(ctx, caller))
++        return 0;
++    JS_ThrowTypeError(ctx, "code generation from another realm is not allowed");
++    return 1;
++}
++
+ static JSValue js_global_eval(JSContext *ctx, JSValueConst this_val,
+                               int argc, JSValueConst *argv)
+ {
++    if (js_cross_realm_compile_denied(ctx))
++        return JS_EXCEPTION;
+     return JS_EvalObject(ctx, ctx->global_obj, argv[0], JS_EVAL_TYPE_INDIRECT, -1);
+ }
+ 
+@@ -42271,6 +42341,8 @@ static JSValue js_function_constructor(JSContext *ctx, JSValueConst new_target,
+     JSValue s, proto, obj = JS_UNDEFINED;
+     StringBuffer b_s, *b = &b_s;
+ 
++    if (js_cross_realm_compile_denied(ctx))
++        return JS_EXCEPTION;
+     string_buffer_init(ctx, b, 0);
+     string_buffer_putc8(b, '(');
+ 
