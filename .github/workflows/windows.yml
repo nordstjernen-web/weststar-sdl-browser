@@ -27,6 +27,11 @@ jobs:
     name: msys2/ucrt64 on windows-${{ matrix.windows }}
     runs-on: windows-${{ matrix.windows }}
     timeout-minutes: 60
+    env:
+      # The runner's user is an administrator. Without this the browser
+      # relaunches itself unelevated or, failing that, asks in a message
+      # box nobody can answer, and the job hangs.
+      NS_ALLOW_ROOT: '1'
 
     strategy:
       fail-fast: false
