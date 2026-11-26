@@ -34,6 +34,9 @@ test(
     files('tests/gfx-test.c'),
     dependencies: [weststar_gfx_dep],
     include_directories: include_directories('tests'),
+    # As for the browser: no -pie on Windows, where clang rejects it as
+    # unused at link time (src/sdl/meson.build).
+    pie: host_machine.system() != 'windows',
     build_by_default: true,
   ),
   suite: 'gfx',
