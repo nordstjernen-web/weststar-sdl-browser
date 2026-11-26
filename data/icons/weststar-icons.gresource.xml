@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/org/weststar/SdlBrowser/icons/scalable/apps">
+    <file alias="weststar.svg">hicolor/scalable/apps/weststar.svg</file>
+    <file alias="weststar-back.svg">hicolor/scalable/apps/weststar-back.svg</file>
+    <file alias="weststar-forward.svg">hicolor/scalable/apps/weststar-forward.svg</file>
+    <file alias="weststar-home.svg">hicolor/scalable/apps/weststar-home.svg</file>
+    <file alias="weststar-reload.svg">hicolor/scalable/apps/weststar-reload.svg</file>
+    <file alias="weststar-stop.svg">hicolor/scalable/apps/weststar-stop.svg</file>
+    <file alias="weststar-print.svg">hicolor/scalable/apps/weststar-print.svg</file>
+    <file alias="weststar-downloads.svg">hicolor/scalable/apps/weststar-downloads.svg</file>
+    <file alias="weststar-bookmarks.svg">hicolor/scalable/apps/weststar-bookmarks.svg</file>
+    <file alias="weststar-bookmarks-saved.svg">hicolor/scalable/apps/weststar-bookmarks-saved.svg</file>
+    <file alias="weststar-console.svg">hicolor/scalable/apps/weststar-console.svg</file>
+    <file alias="weststar-settings.svg">hicolor/scalable/apps/weststar-settings.svg</file>
+    <file alias="weststar-about.svg">hicolor/scalable/apps/weststar-about.svg</file>
+    <file alias="weststar-stage-connect.svg">hicolor/scalable/apps/weststar-stage-connect.svg</file>
+    <file alias="weststar-stage-fetch.svg">hicolor/scalable/apps/weststar-stage-fetch.svg</file>
+    <file alias="weststar-stage-parse.svg">hicolor/scalable/apps/weststar-stage-parse.svg</file>
+    <file alias="weststar-stage-script.svg">hicolor/scalable/apps/weststar-stage-script.svg</file>
+    <file alias="weststar-stage-render.svg">hicolor/scalable/apps/weststar-stage-render.svg</file>
+    <file alias="weststar-stage-done.svg">hicolor/scalable/apps/weststar-stage-done.svg</file>
+  </gresource>
+</gresources>

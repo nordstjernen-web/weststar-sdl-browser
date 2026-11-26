@@ -1,14 +1,14 @@
 # Third-party software notices
 
-Northstar Web Browser links to (and in some cases statically includes) the
-following open-source libraries. Their copyright notices and license
+Weststar SDL Browser, a fork of Northstar Web Browser, links to (and in
+some cases statically includes) the following open-source libraries. Their copyright notices and license
 texts are reproduced below. For libraries shipped dynamically in the
 release bundles, you are entitled by the LGPL terms to replace them
 with modified versions; the binary will continue to function with any
 ABI-compatible replacement.
 
-The Northstar Web Browser source code itself is licensed under the GNU General
-Public License, version 3 or later; see `LICENSE`.
+The Weststar SDL Browser source code itself, like Northstar's, is licensed
+under the GNU General Public License, version 3 or later; see `LICENSE`.
 
 ---
 
@@ -161,6 +161,21 @@ public domain worldwide. See:
 
   <https://creativecommons.org/publicdomain/zero/1.0/>
 
+### Nuklear — MIT License or public domain (Unlicense)
+
+> Immediate-mode GUI library that lays out and handles input for the window
+> chrome. Vendored unmodified as the `nuklear` meson subproject
+> (`subprojects/nuklear/nuklear.h`, upstream commit `c8bfb4d`).
+> <https://github.com/Immediate-Mode-UI/Nuklear>
+>
+> Copyright (c) 2017 Micha Mettke
+
+Available under either the MIT License (see the quickjs-ng section above
+for the full text) or the Unlicense, at the user's choice. Nuklear embeds
+stb_textedit, stb_truetype and stb_rect_pack by Sean Barrett (public domain
+or MIT) and the ProggyClean font by Tristan Grimmer (MIT); Weststar builds
+it without font baking, so neither the font nor stb_truetype is compiled in.
+
 ### pl_mpeg — MIT License
 
 > MPEG-1 Part 2 video decoder for `<video>` and MPEG-1 Audio Layer II
@@ -251,12 +266,10 @@ may not be removed from any source distribution.
 Licensed under the GNU Lesser General Public License version 2.1. See the
 LGPL section below for terms and obligations.
 
-### GTK 4, GLib, Pango, gdk-pixbuf — GNU LGPL 2.1 or later
+### GLib — GNU LGPL 2.1 or later
 
-> UI toolkit and core utilities.
-> <https://www.gtk.org>, <https://gitlab.gnome.org/GNOME/glib>,
-> <https://gitlab.gnome.org/GNOME/pango>,
-> <https://gitlab.gnome.org/GNOME/gdk-pixbuf>
+> Core utilities, the main loops and threads.
+> <https://gitlab.gnome.org/GNOME/glib>
 >
 > Copyright the GNU Project and contributors.
 
@@ -266,24 +279,23 @@ license text is available at:
 
   <https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html>
 
-Per LGPL section 6, since Northstar Web Browser links to these libraries
-dynamically, you are entitled to modify them and re-link Northstar Web Browser
-against the modified copies. On the Windows bundle the libraries are
-shipped alongside the executable as ordinary DLLs that you can replace;
-on Linux distributions they are loaded from the system package manager.
+Per LGPL section 6, since Weststar SDL Browser links to these libraries
+dynamically, you are entitled to modify them and re-link it against the
+modified copies; on Linux distributions they are loaded from the system
+package manager.
 
 ### SDL3 — zlib License
 
-> Cross-platform audio output (WASAPI / CoreAudio / PipeWire / PulseAudio /
-> ALSA) for in-process audio playback.
+> The window, input, clipboard, file dialogs and rendering of the
+> browser window, and cross-platform audio output (WASAPI / CoreAudio /
+> PipeWire / PulseAudio / ALSA) for in-process audio playback.
 > <https://www.libsdl.org>
 >
 > Copyright (c) 1997-2026 Sam Lantinga and the SDL contributors.
 
 Licensed under the zlib License. See the zlib section above for the
-full text (same license). Linked into the browser when SDL3 is present
-at build time (meson `audio` feature); the Windows bundle ships
-`SDL3.dll`.
+full text (same license). Always linked; the meson `audio` feature only
+decides whether audio playback is built.
 
 ### Cairo — LGPL-2.1 or MPL-1.1
 
@@ -315,16 +327,9 @@ are met. See:
 ### Optional dynamic dependencies
 
 These are linked only when present on the build host, or reached
-transitively through a library Northstar Web Browser does link. When a build bundles
+transitively through a library Weststar SDL Browser does link. When a build bundles
 them, their notices apply:
 
-- **libepoxy** — MIT License, © 2013-2014 Intel Corporation. OpenGL
-  function-pointer management, used by GTK's GL renderer and, when WebGL
-  is built (meson `webgl` feature), linked directly for `src/webgl.c`.
-- **glslang** — BSD 3-Clause, BSD 2-Clause, MIT and Apache 2.0 (with
-  GPL-compatible terms for the bundled preprocessor), © The Khronos Group
-  and contributors. The GLSL front end that validates every WebGL shader
-  (`src/glsl_validate.c`); linked only when WebGL is built.
 - **Fontconfig** — MIT-style license, © Keith Packard and contributors.
 - **FreeType** — FreeType License (BSD-style with credit clause) or GNU
   GPL 2.0, at your option, © The FreeType Project.

@@ -142,7 +142,7 @@ ns_floors = {
   'harfbuzz': '>=8.3',
   'fribidi': '>=1.0.6',
   'fontconfig': '>=2.15',
-  'gtk4': host_system == 'windows' ? '>=4.22.1' : '>=4.14',
+  'sdl3': '>=3.2.0',
   'libcurl': '>=8.5',
 }
 ns_unmet_floors = []
@@ -165,14 +165,10 @@ gobject = dependency('gobject-2.0', version: ns_floors['gobject-2.0'])
 gio     = dependency('gio-2.0', version: ns_floors['gio-2.0'])
 cairo   = dependency('cairo', version: ns_floors['cairo'])
 
-gtk4 = dependency('gtk4', version: ns_floors['gtk4'])
-if host_system == 'windows'
-  message('GTK @0@ — Windows requires the MSYS2 stock GTK (>= 4.22.1).'.format(gtk4.version()))
-elif gtk4.version().version_compare('>=4.22')
-  message('GTK @0@ — preferred (>= 4.22).'.format(gtk4.version()))
-else
-  warning('GTK @0@ meets the 4.14 minimum, but Northstar Web Browser prefers >= 4.22 for the newer GSK renderers.'.format(gtk4.version()))
-endif
+# SDL3 opens the window, takes input and plays audio. The chrome is drawn
+# with Nuklear, vendored in subprojects/nuklear.
+sdl3_dep = dependency('sdl3', version: ns_floors['sdl3'])
+libnuklear = dependency('nuklear', fallback: ['nuklear', 'nuklear_dep'])
 libcurl = dependency('libcurl', version: ns_floors['libcurl'])
 if libcurl.version().version_compare('<8.11')
   warning('libcurl @0@ predates stable WebSocket support (curl 8.11): WebSocket will be unavailable at runtime unless this libcurl was built with the ws/wss protocols.'.format(libcurl.version()))
@@ -308,7 +304,7 @@ endif
 # vorbisfile and opusfile are the high-level decode APIs over libvorbis and
 # libopus + libogg, used by the in-process SDL3 audio mixer to decode
 # Ogg/Vorbis and Ogg/Opus natively.
-sdl3_dep = dependency('sdl3', version: '>=3.2.0', required: get_option('audio'))
+have_audio = get_option('audio').allowed()
 libvorbisfile = dependency('vorbisfile', required: false)
 libopusfile = dependency('opusfile', required: false)
 libenchant = dependency('enchant-2', required: false)
@@ -339,9 +335,9 @@ ns_feature_macros = {
   'NS_HAVE_PDFJS=1': have_pdfjs,
   'NS_HAVE_VORBISFILE=1': libvorbisfile.found(),
   'NS_HAVE_OPUSFILE=1': libopusfile.found(),
-  'NS_AUDIO_PLAYBACK=1': sdl3_dep.found(),
-  'NS_AUDIO_NATIVE_VORBIS=1': sdl3_dep.found() and libvorbisfile.found(),
-  'NS_AUDIO_NATIVE_OPUS=1': sdl3_dep.found() and libopusfile.found(),
+  'NS_AUDIO_PLAYBACK=1': have_audio,
+  'NS_AUDIO_NATIVE_VORBIS=1': have_audio and libvorbisfile.found(),
+  'NS_AUDIO_NATIVE_OPUS=1': have_audio and libopusfile.found(),
   'NS_HAVE_ENCHANT=1': have_enchant,
   'NS_HAVE_SECCOMP=1': have_seccomp,
   'NS_HAVE_BROTLI_DEC=1': libbrotlidec.found(),
@@ -437,7 +433,8 @@ summary({
   'WebAssembly (WAMR)': have_wasm,
   'PDF viewer (PDF.js)': pdfjs_source,
   'AVIF images (libavif)': have_avif,
-  'Audio playback (SDL3)': sdl3_dep.found(),
+  'Audio playback (SDL3)': have_audio,
+  'SDL': sdl3_dep.version(),
   'JavaScript engine': js_engine + ' ' + libquickjs.version(),
 }, section: 'Features')
 

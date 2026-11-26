@@ -160,9 +160,9 @@ northstar_engine_sources = files(
   'xml.c',
 )
 
-# GTK-free helpers used by the desktop executable but not the engine UI:
+# Toolkit-free helpers used by the desktop executable but not the engine UI:
 # the headless render driver and the crash watchdog. Kept in src/ as common
-# code; the GTK frontend itself lives in src/gtk/.
+# code; the SDL frontend itself lives in src/sdl/.
 northstar_app_sources = files(
   'headless.c',
   'watchdog.c',
@@ -176,8 +176,8 @@ northstar_win_resources = []
 if host_system == 'windows'
   windows = import('windows')
   northstar_win_resources = windows.compile_resources(
-    'northstar.rc',
-    depend_files: files('../data/icons/northstar.ico'),
+    'weststar.rc',
+    depend_files: files('../data/icons/weststar.ico'),
   )
 endif
 
@@ -244,7 +244,7 @@ endif
 northstar_audio_sources = files('audio/stub.c')
 northstar_audio_deps = []
 northstar_audio_libs = []
-if sdl3_dep.found()
+if have_audio
   northstar_audio_sources = files('audio/audio.c')
   northstar_audio_deps = [sdl3_dep, libplmpeg, libvorbisfile, libopusfile,
                           libm]
@@ -255,7 +255,7 @@ if sdl3_dep.found()
     c_args: cc.get_supported_arguments(['-w']),
   )
 else
-  message('SDL3 not found — in-process audio playback disabled')
+  message('in-process audio playback disabled (-Daudio=disabled)')
 endif
 
-subdir('gtk')
+subdir('sdl')

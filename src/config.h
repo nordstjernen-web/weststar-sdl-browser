@@ -46,7 +46,7 @@ typedef struct ns_config {
     char  *https_proxy;
     char  *no_proxy;
     char  *doh_url;
-    char  *gsk_renderer;
+    char  *render_driver;
     ns_referer_policy      referer_policy;
     ns_cookie_policy       cookie_policy;
     ns_color_scheme_pref   color_scheme;

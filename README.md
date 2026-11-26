@@ -18,7 +18,7 @@ This is the start of the port. The work is done in stages, each merged to
 |-------|------|-------|
 | 1 | Import Northstar without history, rebrand | done |
 | 2 | Remove WebGL, WebGPU and `<video>` | done |
-| 3 | Replace the GTK shell with an SDL3 shell | in progress |
+| 3 | Replace the GTK shell with an SDL3 shell, chrome drawn with Nuklear | done |
 | 4 | Replace Cairo with an in-tree rasterizer drawing into SDL surfaces | planned |
 
 See [docs/porting-to-sdl.md](docs/porting-to-sdl.md) for the plan, what
@@ -30,7 +30,10 @@ What is deliberately **not** in Weststar for now:
 - **`<video>`**, Media Source Extensions and camera capture. A `<video>`
   shows a dark box with its controls; `<audio>` still plays through SDL3's
   audio device.
-- The GTK-only chrome: developer-tools window, print dialog, file dialogs.
+- Parts of Northstar's GTK chrome not ported yet: the developer-tools
+  window, printing (`--headless --export=pdf:` still works), address-bar
+  suggestions and the downloads list (downloads report in the status
+  bubble).
 
 ## Building
 
@@ -38,18 +41,35 @@ Weststar builds with meson and ninja. On Debian/Ubuntu:
 
 ```sh
 sudo apt install build-essential pkg-config meson ninja-build \
-    libcurl4-openssl-dev libssl-dev libharfbuzz-dev libfribidi-dev \
-    libcairo2-dev libfontconfig-dev libfreetype-dev libpsl-dev \
-    libsqlite3-dev libseccomp-dev libsdl3-dev zlib1g-dev
+    libsdl3-dev libcurl4-openssl-dev libssl-dev libharfbuzz-dev \
+    libfribidi-dev libcairo2-dev libfontconfig-dev libfreetype-dev \
+    libpsl-dev libsqlite3-dev libseccomp-dev libglib2.0-dev zlib1g-dev
 meson setup builddir
 meson compile -C builddir
 ./builddir/src/sdl/weststar https://example.org
 ```
 
-SDL3 3.2 or newer is required. Distributions without an SDL3 package
-(Ubuntu 24.04, Debian 12) can build it from the
+SDL3 3.2 or newer is required; GTK is not. Distributions without an SDL3
+package (Ubuntu 24.04, Debian 12) can build it from the
 [SDL release tarball](https://github.com/libsdl-org/SDL/releases) with
-CMake and install it to `/usr/local`.
+CMake; [docs/building.md](docs/building.md) has the commands.
+
+## The window
+
+The SDL shell (`src/sdl/`) opens one SDL window per browser window. The
+page is rendered on the engine thread and uploaded to an SDL texture,
+only the damaged rectangles when the engine reports them. The chrome is
+built every frame with [Nuklear](https://github.com/Immediate-Mode-UI/Nuklear),
+an immediate-mode GUI library: back, forward, reload/stop, home, the
+address bar, a bookmark star and a menu; a find bar (Ctrl+F), a context
+menu, and a status bubble for hovered links and messages. Nuklear's draw
+commands are rendered with the engine's own text stack, so the chrome
+shows any script the page can.
+
+Keyboard: Ctrl+L / F6 address bar, Ctrl+F find, F3 / Ctrl+G next match,
+Alt+Left / Alt+Right back and forward, F5 / Ctrl+R reload, Ctrl+D
+bookmark, Ctrl+N new window, Ctrl+W close, Ctrl+Q quit, Ctrl+= / Ctrl+- /
+Ctrl+0 zoom, F11 full screen.
 
 Headless mode is unchanged from Northstar and needs no display:
 

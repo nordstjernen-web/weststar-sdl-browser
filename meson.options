@@ -5,7 +5,7 @@ option('wasm', type: 'feature', value: 'auto',
 option('avif', type: 'feature', value: 'auto',
        description: 'Decode AVIF images through libavif (on by default when libavif is present). AVIF is a rare format on the web and libavif pulls in a full AV1 decoder; disable to drop it.')
 option('audio', type: 'feature', value: 'auto',
-       description: 'Enable in-process audio playback (SDL3 output + minimp3/pl_mpeg decode). Auto-detects SDL3 3.2 or newer; disable to build without SDL.')
+       description: 'Enable in-process audio playback (SDL3 output + minimp3/pl_mpeg decode). Disable to build without audio; SDL3 itself is always required for the window.')
 option('js_engine', type: 'combo', choices: ['quickjs-ng', 'quickjs'], value: 'quickjs-ng',
        description: 'JavaScript engine: quickjs-ng (default) or the original QuickJS by Fabrice Bellard, each built from its pinned subproject.')
 option('pdfjs', type: 'feature', value: 'auto',

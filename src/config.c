@@ -159,7 +159,7 @@ static const cfg_field cfg_fields[] = {
     FS(https_proxy,           ""),
     FS(no_proxy,              ""),
     FS(doh_url,               ""),
-    FS(gsk_renderer,          "auto"),
+    FS(render_driver,         "auto"),
     FE(referer_policy,        CFG_REFERER,      NS_REFERER_STRICT_ORIGIN_WHEN_CROSS),
     FE(cookie_policy,         CFG_COOKIE,       NS_COOKIE_FIRST_PARTY),
     FE(color_scheme,          CFG_COLOR_SCHEME,    NS_COLOR_SCHEME_PREF_AUTO),
@@ -277,7 +277,7 @@ static const struct { const char *env; const char *key; } env_value[] = {
     { "NS_HTTPS_PROXY", "https_proxy" },
     { "NS_NO_PROXY",    "no_proxy"    },
     { "NS_DOH_URL",     "doh_url"     },
-    { "NS_GSK_RENDERER","gsk_renderer"},
+    { "NS_RENDER_DRIVER","render_driver"},
     { "NS_JS_EVAL_BUDGET_MS", "js_eval_budget_ms" },
 };
 
@@ -330,7 +330,7 @@ ns_config_init(void)
         return;
     apply_default(&g_cfg);
     g_cfg_path = g_build_filename(g_get_user_config_dir(),
-                                  NS_APP_DIR_NAME, "northstar.conf",
+                                  NS_APP_DIR_NAME, NS_EXE_NAME ".conf",
                                   NULL);
     load_file(&g_cfg, g_cfg_path);
     apply_env(&g_cfg);
@@ -348,7 +348,7 @@ ns_config_shutdown(void)
     g_free(g_cfg.https_proxy);
     g_free(g_cfg.no_proxy);
     g_free(g_cfg.doh_url);
-    g_free(g_cfg.gsk_renderer);
+    g_free(g_cfg.render_driver);
     memset(&g_cfg, 0, sizeof(g_cfg));
     g_clear_pointer(&g_cfg_path, g_free);
 }
@@ -494,7 +494,7 @@ ns_config_save(GError **error)
 
     const ns_config *c = &g_cfg;
     GString *s = g_string_new(NULL);
-    g_string_append(s, "# northstar configuration\n");
+    g_string_append(s, "# " NS_EXE_NAME " configuration\n");
     for (gsize i = 0; i < G_N_ELEMENTS(cfg_fields); i++) {
         const char *key = cfg_fields[i].key;
         const char *file_value = g_env_overridden
@@ -526,9 +526,9 @@ ns_config_dump(void)
         g_string_append_printf(s, "accept_language       = (auto: %s)\n",
                                ns_net_default_accept_language());
     g_string_append_printf(s, "search_engine         = %s\n", c->search_engine);
-    g_string_append_printf(s, "gsk_renderer          = %s\n",
-                           c->gsk_renderer && *c->gsk_renderer
-                               ? c->gsk_renderer : "auto");
+    g_string_append_printf(s, "render_driver         = %s\n",
+                           c->render_driver && *c->render_driver
+                               ? c->render_driver : "auto");
     {
         char *hp  = ns_net_proxy_mask(c->http_proxy);
         char *hsp = ns_net_proxy_mask(c->https_proxy);

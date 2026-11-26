@@ -1,10 +1,12 @@
 /* Weststar SDL Browser — process entry point: environment setup, sandbox, then GUI or headless.
- * Locates bundled data (Windows/macOS), picks the GSK renderer and filters GLib logging.
+ * Locates bundled data (Windows/macOS), picks the SDL render driver and filters GLib logging.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#include <gtk/gtk.h>
+#include <SDL3/SDL.h>
+#include <glib.h>
+#include <glib/gstdio.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,8 +45,7 @@
 #include "history.h"
 #include "i18n.h"
 #include "net.h"
-#include "procview.h"
-#include "procwindow.h"
+#include "window.h"
 #include "ext.h"
 #include "security.h"
 #include "threaddump.h"
@@ -113,7 +114,7 @@ init_self_exe(const char *argv0)
     }
 }
 
-/* GLib log writer: drops known-harmless GTK noise and mirrors messages into the debug log. */
+/* GLib log writer: drops known-harmless noise and mirrors messages into the debug log. */
 static GLogWriterOutput
 ns_log_writer(GLogLevelFlags log_level,
               const GLogField *fields, gsize n_fields,
@@ -185,9 +186,9 @@ ns_win32_use_fontconfig_backend(const char *dir)
 #endif
 }
 
-/* Points GTK, pixbuf loaders and CA bundle env vars at data next to the exe (Windows). */
+/* Points fontconfig and the CA bundle env vars at data next to the exe (Windows). */
 static void
-ns_win32_anchor_gtk_data(void)
+ns_win32_anchor_data(void)
 {
     if (!g_self_exe) {
         ns_win32_use_fontconfig_backend(NULL);
@@ -200,19 +201,9 @@ ns_win32_anchor_gtk_data(void)
     }
     ns_win32_use_fontconfig_backend(dir);
     char *share_dir = g_build_filename(dir, "share", NULL);
-    if (g_file_test(share_dir, G_FILE_TEST_IS_DIR)) {
-        if (!g_getenv("GTK_DATA_PREFIX")) g_setenv("GTK_DATA_PREFIX", dir, TRUE);
-        if (!g_getenv("GTK_EXE_PREFIX"))  g_setenv("GTK_EXE_PREFIX",  dir, TRUE);
-        if (!g_getenv("XDG_DATA_DIRS"))   g_setenv("XDG_DATA_DIRS", share_dir, TRUE);
-    }
+    if (g_file_test(share_dir, G_FILE_TEST_IS_DIR) && !g_getenv("XDG_DATA_DIRS"))
+        g_setenv("XDG_DATA_DIRS", share_dir, TRUE);
     g_free(share_dir);
-    if (!g_getenv("GDK_PIXBUF_MODULE_FILE")) {
-        char *loaders = g_build_filename(dir,
-            "lib", "gdk-pixbuf-2.0", "2.10.0", "loaders.cache", NULL);
-        if (g_file_test(loaders, G_FILE_TEST_EXISTS))
-            g_setenv("GDK_PIXBUF_MODULE_FILE", loaders, TRUE);
-        g_free(loaders);
-    }
     {
         char *ca = g_build_filename(dir,
             "etc", "ssl", "certs", "ca-bundle.crt", NULL);
@@ -274,9 +265,9 @@ ns_win32_attach_parent_console(void)
 #endif
 
 #ifdef __APPLE__
-/* Points GSettings, pixbuf loaders and CA bundle env vars into the .app Resources. */
+/* Points the CA bundle env vars into the .app Resources. */
 static void
-ns_macos_anchor_gtk_data(void)
+ns_macos_anchor_data(void)
 {
     if (!g_self_exe) return;
     char *macos_dir = g_path_get_dirname(g_self_exe);
@@ -286,25 +277,6 @@ ns_macos_anchor_gtk_data(void)
     if (!contents) return;
     char *res = g_build_filename(contents, "Resources", NULL);
     g_free(contents);
-
-    char *schemas = g_build_filename(res, "share", "glib-2.0", "schemas", NULL);
-    if (g_file_test(schemas, G_FILE_TEST_IS_DIR) &&
-        !g_getenv("GSETTINGS_SCHEMA_DIR"))
-        g_setenv("GSETTINGS_SCHEMA_DIR", schemas, TRUE);
-    g_free(schemas);
-
-    char *loaders = g_build_filename(res, "lib", "gdk-pixbuf-2.0",
-                                     "2.10.0", "loaders", NULL);
-    char *cache = g_build_filename(res, "lib", "gdk-pixbuf-2.0",
-                                   "2.10.0", "loaders.cache", NULL);
-    if (g_file_test(cache, G_FILE_TEST_EXISTS)) {
-        if (!g_getenv("GDK_PIXBUF_MODULE_FILE"))
-            g_setenv("GDK_PIXBUF_MODULE_FILE", cache, TRUE);
-        if (!g_getenv("GDK_PIXBUF_MODULEDIR"))
-            g_setenv("GDK_PIXBUF_MODULEDIR", loaders, TRUE);
-    }
-    g_free(cache);
-    g_free(loaders);
 
     char *ca = g_build_filename(res, "etc", "ssl", "certs",
                                 "ca-bundle.crt", NULL);
@@ -338,34 +310,37 @@ ns_linux_has_gpu_render_node(void)
 }
 #endif
 
-/* Sets GSK_RENDERER from preference unless set; auto falls back to cairo without a GPU. */
+/* Chooses SDL's render driver from the preference, unless SDL_RENDER_DRIVER
+ * is set; "auto" draws in software on a Linux machine without a GPU. */
 static void
-ns_apply_gsk_renderer(const char *pref)
+ns_apply_render_driver(const char *pref)
 {
-    if (g_getenv("GSK_RENDERER")) return;
+    if (g_getenv("SDL_RENDER_DRIVER")) return;
     if (!pref || !*pref ||
         g_ascii_strcasecmp(pref, "auto")    == 0 ||
         g_ascii_strcasecmp(pref, "default") == 0 ||
         g_ascii_strcasecmp(pref, "system")  == 0) {
 #ifdef __linux__
         if (!ns_linux_has_gpu_render_node()) {
-            g_setenv("GSK_RENDERER", "cairo", TRUE);
-            g_message("no GPU detected; using the software (cairo) renderer");
+            SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
+            g_message("no GPU detected; using the software renderer");
         }
 #endif
         return;
     }
     static const char *const known[] = {
-        "gl", "ngl", "opengl", "vulkan", "cairo", "help",
+        "software", "opengl", "opengles2", "vulkan", "gpu", "direct3d11",
+        "direct3d12", "metal",
     };
     for (gsize i = 0; i < G_N_ELEMENTS(known); i++) {
         if (g_ascii_strcasecmp(pref, known[i]) == 0) {
-            g_setenv("GSK_RENDERER", known[i], TRUE);
+            SDL_SetHint(SDL_HINT_RENDER_DRIVER, known[i]);
             return;
         }
     }
-    g_warning("ignoring unknown gsk_renderer '%s' "
-              "(expected one of: auto, gl, ngl, vulkan, cairo)", pref);
+    g_warning("ignoring unknown render_driver '%s' (expected one of: auto, "
+              "software, opengl, opengles2, vulkan, gpu, direct3d11, "
+              "direct3d12, metal)", pref);
 }
 
 /* TRUE unless the arguments request a headless or tool mode, i.e. the GUI should run. */
@@ -488,13 +463,13 @@ ns_run_headless(ns_headless_opts *hopts)
 
 /* Runs the GUI app on the start URL (local paths become file: URLs) and returns its status. */
 static int
-ns_run_proc_gui(const char *url, const char *gsk_renderer_override,
+ns_run_proc_gui(const char *url, const char *render_driver_override,
                 const char *session_path, gboolean recover,
                 gboolean private_mode)
 {
     const ns_config *cfg = ns_config_get();
-    ns_apply_gsk_renderer(gsk_renderer_override ? gsk_renderer_override
-                          : (cfg ? cfg->gsk_renderer : NULL));
+    ns_apply_render_driver(render_driver_override ? render_driver_override
+                           : (cfg ? cfg->render_driver : NULL));
     const char *start = url;
     if (!start || !*start)
         start = (cfg && cfg->home_url && *cfg->home_url) ? cfg->home_url
@@ -508,7 +483,7 @@ ns_run_proc_gui(const char *url, const char *gsk_renderer_override,
         g_free(abs_path);
         if (file_url) start = file_url;
     }
-    int status = ns_procapp_run(start, session_path, recover, private_mode);
+    int status = ns_sdl_app_run(start, session_path, recover, private_mode);
     g_free(file_url);
     g_free(g_self_exe);
     g_self_exe = NULL;
@@ -601,13 +576,13 @@ main(int argc, char **argv)
     g_log_set_writer_func(ns_log_writer, NULL, NULL);
 #ifdef G_OS_WIN32
     ns_win32_set_app_id();
-    ns_win32_anchor_gtk_data();
+    ns_win32_anchor_data();
 #endif
 #ifdef __APPLE__
-    ns_macos_anchor_gtk_data();
+    ns_macos_anchor_data();
 #endif
 
-    const char *gsk_renderer_override = NULL;
+    const char *render_driver_override = NULL;
     gboolean private_window = FALSE;
     ns_headless_opts hopts = {
         .url = NULL,
@@ -626,8 +601,8 @@ main(int argc, char **argv)
                 g_setenv("NS_HTTP_PROXY", pxy, TRUE);
                 g_setenv("NS_HTTPS_PROXY", pxy, TRUE);
             }
-        } else if (g_str_has_prefix(argv[i], "--gsk-renderer=")) {
-            gsk_renderer_override = argv[i] + 15;
+        } else if (g_str_has_prefix(argv[i], "--render-driver=")) {
+            render_driver_override = argv[i] + 16;
         } else if (g_strcmp0(argv[i], "--private") == 0) {
             private_window = TRUE;
         } else if (g_strcmp0(argv[i], "--ignore-certificate-errors") == 0) {
@@ -640,7 +615,7 @@ main(int argc, char **argv)
                 const char *hs = end + 1;
                 gint64 h = g_ascii_strtoll(hs, &end, 10);
                 if (end != hs && *end == '\0' && h > 0 && h < 100000)
-                    ns_procapp_set_window_size((int)w, (int)h);
+                    ns_sdl_app_set_window_size((int)w, (int)h);
             }
         } else if (g_strcmp0(argv[i], "--print-config") == 0) {
             char *dump = ns_config_dump();
@@ -756,15 +731,12 @@ main(int argc, char **argv)
         }
         const char *session = ns_watchdog_child_session_arg(argc, argv);
         gboolean recover = ns_watchdog_child_is_recovery();
-        int gui_rc = ns_run_proc_gui(hopts.url, gsk_renderer_override, session,
+        int gui_rc = ns_run_proc_gui(hopts.url, render_driver_override, session,
                                      recover, private_window);
         ns_trace_close();
         return gui_rc;
     }
 
-    ns_apply_gsk_renderer(gsk_renderer_override ? gsk_renderer_override
-                          : (ns_config_get() ? ns_config_get()->gsk_renderer
-                                             : NULL));
     int headless_rc = ns_run_headless(&hopts);
     ns_trace_close();
     if (!ns_net_idle()) {

@@ -1,180 +1,66 @@
-# Building and running Northstar Web Browser
+# Building and running Weststar SDL Browser
 
-Northstar Web Browser builds with **meson + ninja** and a C compiler (GCC or Clang).
-The primary target is Linux; macOS and Windows are also supported. The
-project is C only: no C++ compiler is needed, though WebGL links the C++
-runtime that glslang (a C++ library with a C interface) depends on.
+Weststar builds with **meson + ninja** and a C compiler (GCC or Clang).
+It is C only. Linux is the platform the SDL port is developed and tested
+on; SDL3 itself runs on macOS, Windows and the BSDs, but Weststar has not
+been built there yet (see [porting-to-sdl.md](porting-to-sdl.md)).
 
 ## Linux dependencies
 
-Debian / Ubuntu:
+Debian 13 / Ubuntu 25.04 or newer:
 
 ```sh
 sudo apt install build-essential git pkg-config meson ninja-build \
-    libgtk-4-dev libcurl4-openssl-dev libssl-dev \
+    libsdl3-dev libcurl4-openssl-dev libssl-dev \
     libharfbuzz-dev libfribidi-dev libcairo2-dev libfontconfig-dev \
-    libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev libsdl3-dev \
-    zlib1g-dev
+    libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev \
+    libglib2.0-dev zlib1g-dev
 ```
 
-Fedora / RHEL:
+Fedora:
 
 ```sh
-sudo dnf install gcc git pkgconf meson ninja-build gtk4-devel \
-    libcurl-devel openssl-devel harfbuzz-devel \
-    fribidi-devel cairo-devel fontconfig-devel freetype-devel \
-    libpsl-devel sqlite-devel libseccomp-devel SDL3-devel zlib-devel
+sudo dnf install gcc git pkgconf meson ninja-build SDL3-devel \
+    libcurl-devel openssl-devel harfbuzz-devel fribidi-devel \
+    cairo-devel fontconfig-devel freetype-devel libpsl-devel \
+    sqlite-devel libseccomp-devel glib2-devel zlib-devel
 ```
 
-openSUSE:
-
-```sh
-sudo zypper install gcc git pkgconf meson ninja gtk4-devel \
-    libcurl-devel libopenssl-develel harfbuzz-devel \
-    fribidi-devel cairo-devel fontconfig-devel freetype2-devel \
-    libpsl-devel sqlite3-devel libseccomp-devel SDL3-devel zlib-devel
-```
-
-`libseccomp` is required on Linux — `meson setup` fails without it. On
-macOS and Windows it is unused and the syscall filter is a no-op.
+`libseccomp` is required on Linux — `meson setup` fails without it.
 
 The text stack has version floors set by web-text-lib: GLib ≥ 2.80,
-HarfBuzz ≥ 8.3, fontconfig ≥ 2.15, Cairo ≥ 1.18 and FriBidi ≥ 1.0.6.
-GTK must be ≥ 4.14 (≥ 4.22.1 on Windows; elsewhere the build warns below
-4.22, which it prefers for the newer GSK renderers) and libcurl ≥ 8.5.
-These are what Ubuntu 24.04 ships;
-Debian 13 and Fedora 40 meet them too. Older releases — Ubuntu 22.04 and
-20.04, Debian 12 — cannot build Northstar Web Browser from their own packages: their
-GTK 4 is too old or absent, alongside the text-stack libraries.
-`meson setup` checks every floor before configuring web-text-lib and
-lists each library that is missing or too old in a single error.
-web-text-lib is linked into the same process as GTK, so it cannot fall back to building
-GLib or Cairo from source; on an older release, build inside an Ubuntu
-24.04 (or newer) container instead.
+HarfBuzz ≥ 8.3, fontconfig ≥ 2.15, Cairo ≥ 1.18 and FriBidi ≥ 1.0.6;
+SDL3 must be ≥ 3.2 and libcurl ≥ 8.5. `meson setup` checks every floor
+and lists each library that is missing or too old in a single error.
 With a libcurl older than 8.11 the build warns that WebSocket is
 unavailable unless that libcurl was built with WebSocket support.
 
-**Optional, auto-detected:** `libavif-dev` (AVIF images — it pulls in a
-full AV1 decoder for a format that is rare on the web, so
-`-Davif=disabled` drops it), `libenchant-2-dev` (+ a dictionary such as
-`hunspell-en-us`) for on-screen spell-checking, `libopusfile-dev` /
-`libvorbis-dev` (which carries `vorbisfile`) for native Ogg Opus/Vorbis
-decode in the in-process mixer, `libepoxy-dev` and `glslang-dev`
-(`libepoxy-devel` / `glslang-devel` on Fedora and openSUSE) for WebGL,
-`libthai-dev` for Thai word breaking, and `libbrotli-dev` and
-`libzstd-dev` for Brotli and zstd `Content-Encoding`. The build works
-without them.
+GTK is not needed. The window chrome is drawn with
+[Nuklear](https://github.com/Immediate-Mode-UI/Nuklear), vendored in
+`subprojects/nuklear/`.
 
-### Installing SDL3
+**Optional, auto-detected:** `libavif-dev` (AVIF images),
+`libenchant-2-dev` (+ a dictionary such as `hunspell-en-us`) for
+on-screen spell-checking, `libopusfile-dev` / `libvorbis-dev` for native
+Ogg Opus/Vorbis decode in the audio mixer, `libthai-dev` for Thai word
+breaking, and `libbrotli-dev` and `libzstd-dev` for Brotli and zstd
+`Content-Encoding`. The build works without them.
 
-On distributions without SDL3 package available, such as Ubuntu 24 and
-Debian 12, it is possible to build without it and have no audio output;
-or, you can build it from source and install manually.
+### Installing SDL3 from source
 
-- Go to the [SDL3 releases page](https://github.com/libsdl-org/SDL/releases), download and extract source code
-- Compile the libraries using CMake
+Ubuntu 24.04 and Debian 12 have no SDL3 package. Build the release
+tarball with CMake and install it to `/usr/local`:
 
 ```sh
-cmake -S . -B build
-cmake --build build
-sudo cmake --install build --prefix /usr/local
+sudo apt install cmake libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+    libxi-dev libxfixes-dev libxss-dev libwayland-dev libxkbcommon-dev \
+    libegl-dev libgl-dev libpulse-dev libasound2-dev
+curl -LO https://github.com/libsdl-org/SDL/releases/download/release-3.2.26/SDL3-3.2.26.tar.gz
+tar xzf SDL3-3.2.26.tar.gz
+cmake -S SDL3-3.2.26 -B sdl3-build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
+sudo ninja -C sdl3-build install
 ```
-
-- You might need [SDL3: Build Dependencies](https://wiki.libsdl.org/SDL3/README-linux#build-dependencies)
-- Make the built libraries known to the system
-
-```sh
-sudo ldconfig
-ldconfig -p
-```
-
-This updates the cache for dynamic linker `ld`, and prints the current list
-of known libraries. You should see `libSDL3.so` or similar.
-
-## macOS dependencies
-
-With Homebrew:
-
-```sh
-brew install meson ninja pkg-config gtk4 curl openssl@3 libpsl \
-    sqlite sdl3 zlib
-```
-
-Export `PKG_CONFIG_PATH="$(brew --prefix curl)/lib/pkgconfig:$(brew --prefix openssl@3)/lib/pkgconfig"`
-before configuring. The macOS build uses the same setup and compile commands
-shown below. The optional libraries are the `libavif`, `opusfile`,
-`libvorbis`, `enchant`, `libepoxy` and `glslang` formulae.
-
-With MacPorts (verified on macOS 27.0.1, Apple Silicon, Xcode 27 /
-Apple clang 21):
-
-```sh
-sudo port install meson ninja pkgconfig gtk4 +quartz curl openssl3 \
-    libpsl sqlite3 sdl3 zlib
-```
-
-`+quartz` builds GTK with the native macOS backend; the default `+x11`
-variant needs XQuartz to run. MacPorts' `pkg-config` already
-searches `/opt/local`, so no `PKG_CONFIG_PATH` is needed. The optional
-libraries are the `libavif`, `opusfile`, `libvorbis`, `enchant2` and
-`libthai` ports.
-
-## Windows dependencies
-
-Install MSYS2, then install the `mingw-w64-ucrt-x86_64-*` packages
-listed by `.github/workflows/windows.yml` into its UCRT64 environment.
-MSYS2 no longer publishes GTK 4 for the older MINGW64 environment. Run
-Meson from the UCRT64 shell so its compiler and `pkg-config` resolve the
-MinGW libraries. `scripts/_msys_build.sh` does that from any shell: it
-sets up the UCRT64 environment (or MINGW64, on a machine where only that
-one has GTK 4 installed), defaults `CC` to `clang`, configures
-`builddir` on first use and compiles. The binary is
-`builddir/src/sdl/weststar.exe`.
-
-```sh
-C:/msys64/usr/bin/bash.exe -lc "bash /c/path/to/northstar/scripts/_msys_build.sh"
-```
-
-A few traps:
-
-- A running `northstar.exe` locks the link target, and the link fails with
-  "Permission denied". Close it (`taskkill /IM northstar.exe /F`) before
-  rebuilding.
-- After a source file of a static library is renamed — the WAMR
-  interpreter moved from `wasm_interp_classic.c` to `wasm_interp_fast.c` —
-  an existing build directory can fail at `gcc-ar ... libwamr.a: No such
-  file or directory`. Delete the stale `libwamr.a` under
-  `builddir/subprojects/` and rebuild.
-- LTO with clang needs `llvm-ar` (`mingw-w64-ucrt-x86_64-llvm-tools`);
-  `meson setup` stops without it unless configured with `-Db_lto=false`.
-- The Windows CI job builds with clang and `--werror`, the Linux job with
-  GCC and `--werror`. Clang 23, now in MSYS2, adds
-  `-Wunused-but-set-global`, so a global that is written but never read
-  fails CI.
-
-`scripts/pack-windows.sh` builds a release tree in `builddir-release` and
-bundles it with its DLLs and GTK runtime data as a portable zip in
-`dist/`. `scripts/pack-windows-installer.sh` wraps that bundle into a
-per-user NSIS `setup.exe` (no Administrator rights; `makensis` from
-`mingw-w64-ucrt-x86_64-nsis`). `scripts/pack-msix.sh` stages it as an unsigned
-Microsoft Store MSIX; it needs `rsvg-convert` (`mingw-w64-ucrt-x86_64-librsvg`)
-and `makeappx.exe` from the Windows SDK, or `makemsix`.
-
-### Visual Studio
-
-Open `northstar.sln` in Visual Studio. The project is an NMake wrapper around
-the existing Meson/MSYS2 build, not an MSVC port: **Build**, **Rebuild** and
-**Clean** run the corresponding operations with MSYS2, and **Start** launches
-`builddir/src/sdl/weststar.exe` with `about:start`. The project expects MSYS2
-at `C:\msys64` and the Windows dependencies described above. Update
-`scripts/vs-build.ps1` if MSYS2 is installed elsewhere. The Visual Studio
-Debug and Release configurations both use the existing `builddir` Meson
-configuration; they do not select different compiler or optimization modes.
-
-The C files are listed for browsing in Solution Explorer. In particular,
-`src/appmain.c` contains the browser's `main()`; Visual Studio's MSVC debugger
-does not provide full source-level debugging support for this MinGW-built
-executable.
 
 ## Visual Studio Code
 
@@ -240,7 +126,7 @@ muon -C builddir samu
 ./builddir/src/sdl/weststar
 ```
 
-Options are given as with meson (`-Dwebgl=disabled`, `-Db_lto=false`);
+Options are given as with meson (`-Daudio=disabled`, `-Db_lto=false`);
 meson's `--werror` is `-Dwerror=true`. `muon -C builddir install` installs,
 and `-d <dir>` installs into a staging directory.
 
@@ -268,7 +154,7 @@ Where muon 0.7.1 differs from meson:
   compilation" for each.
 - A muon built with its libpkgconf backend can miss every system library
   on Debian and Ubuntu, because that backend does not search the
-  multiarch `pkg-config` directory: `muon setup` then reports GLib, GTK
+  multiarch `pkg-config` directory: `muon setup` then reports GLib, SDL3
   and the rest as not found although `pkg-config` finds them. Configure
   with `-Dmuon.pkgconfig=exec`, or build muon with `-Dlibpkgconf=disabled`.
 - `muon install` has no `--skip-subprojects`; muon's meson command-line
@@ -354,7 +240,6 @@ once (`apt install ccache` / `dnf install ccache`). Optionally use the
 | `js_engine` | `quickjs-ng` | JavaScript engine: `quickjs-ng`, or `quickjs` for Fabrice Bellard's original QuickJS. See [quickjs.md](quickjs.md). |
 | `audio` | `auto` | Enable in-process audio playback (needs SDL3 3.2 or newer). |
 | `avif` | `auto` | Decode AVIF through libavif. Disabling drops a full AV1 decoder; AVIF images then fail to decode. |
-| `webgl` | `auto` | WebGL 1 / 2 over an offscreen OpenGL context (libepoxy), with every shader validated by glslang first. `auto` builds it when both libraries are present; `enabled` requires them; `disabled` leaves it out, and `getContext("webgl")` returns `null`. See [webgl.md](webgl.md). |
 | `pdfjs` | `auto` | The PDF viewer, built on PDF.js and embedded at build time. `auto` builds it when PDF.js is available; `enabled` makes PDF.js a required dependency, so the build fails without it; `disabled` leaves the viewer out, and a PDF shows a link to the file. |
 | `pdfjs_dir` | *(empty)* | Directory of an installed PDF.js to use instead of the pinned release, such as Arch's `/usr/share/pdf.js`. See below. |
 | `build_date` | *(configure date)* | Build-date stamp shown in the About dialog. |
@@ -399,10 +284,9 @@ supported range moves.
 
 ## Command line
 
-`northstar [options] [URL | FILE]` opens the start page, or the given URL
+`weststar [options] [URL | FILE]` opens the start page, or the given URL
 or local file. A normal launch runs under a watchdog process that restarts
-the browser, with its session, after a crash or hang. `debian/northstar.1`
-is the manual page.
+the browser, with its session, after a crash or hang.
 
 | Option | Effect |
 |--------|--------|
@@ -411,11 +295,11 @@ is the manual page.
 | `--proxy=URL` | Use an HTTP(S) proxy. |
 | `--ignore-certificate-errors` | Open pages with a self-signed or otherwise untrusted TLS certificate, such as home lab servers, after a warning dialog. The page is marked not secure; its own subresources, `fetch()` calls and WebSockets to the same host load too, and other hosts stay fully verified. See [security-model.md](security-model.md#network). |
 | `--window-size=WxH` | Initial window size. |
-| `--gsk-renderer=gl\|ngl\|vulkan\|cairo` | GTK renderer. |
+| `--render-driver=NAME` | SDL render driver for the window: `software`, `opengl`, `opengles2`, `vulkan` or `gpu`. The default, `auto`, lets SDL choose and draws in software on a Linux machine without a GPU. `SDL_RENDER_DRIVER` in the environment takes precedence. |
 | `--no-watchdog` | Run without the watchdog. |
 | `--print-config` | Print the effective configuration and exit. |
 | `--trace=FILE` | Write a Chrome trace-event JSON of frame phases, relayouts, scripts, fetches and decodes, for Perfetto (ui.perfetto.dev) or `chrome://tracing`. Works in the GUI and headless. |
-| `--` | End of options: every argument after it is a URL or file, never an option. The URL and file handlers are registered this way (`northstar -- "%1"`), so a URL passed in by another program cannot add options. |
+| `--` | End of options: every argument after it is a URL or file, never an option. The URL and file handlers are registered this way (`weststar -- "%1"`), so a URL passed in by another program cannot add options. |
 
 ## Headless mode (scripting / testing)
 
@@ -471,7 +355,7 @@ automatically.
 
 ## Configuration and environment
 
-Settings live in `~/.config/northstar/northstar.conf`, one `key = value`
+Settings live in `~/.config/weststar/weststar.conf`, one `key = value`
 per line; `--print-config` prints every key with its effective value.
 These environment variables override the file:
 
@@ -479,10 +363,9 @@ These environment variables override the file:
 |----------|--------|
 | `NS_HOME_URL`, `NS_USER_AGENT`, `NS_COMPAT_MODE` | Start page, User-Agent, compatibility mode. |
 | `NS_HTTP_PROXY`, `NS_HTTPS_PROXY`, `NS_NO_PROXY`, `NS_DOH_URL` | Proxies and the DNS-over-HTTPS resolver. |
-| `NS_GSK_RENDERER` | GTK renderer, as for `--gsk-renderer`. |
+| `NS_RENDER_DRIVER` | SDL render driver, as for `--render-driver`. |
 | `NS_JS_EVAL_BUDGET_MS` | Time one script may run before it is interrupted (`js_eval_budget_ms`, default 60000, at most 3600000). JetStream 2 needs more than the default: each of its benchmarks runs as one script for minutes on an interpreter. |
 | `NS_PRIVATE` | Start in private mode. |
-| `NS_NO_WEBGL` | Turn WebGL off for this run, which also restores the full content-thread seccomp filter. |
 | `NS_NO_WATCHDOG`, `NS_NO_CACHE`, `NS_NO_IMAGES`, `NS_NO_LOCAL_STORAGE`, `NS_NO_HTTPS_FIRST`, `NS_NO_PRELOAD_SCAN`, `NS_NO_ASYNC_IMG_DECODE`, `NS_NO_HARDEN_ALLOC` | Turn the matching feature off. |
 
 Others the browser reads:
@@ -490,8 +373,8 @@ Others the browser reads:
 | Variable | Effect |
 |----------|--------|
 | `NS_SAFE_BROWSING_API_KEY` | Google Safe Browsing API key. Read at build time into the generated `ns_sb_key.h` (release builds get it from the repository secret); set at run time it overrides the built-in key. Without a key only the local blocklist is used. |
-| `NS_SAFEBROWSING_LIST` | Blocklist file used instead of `~/.config/northstar/safebrowsing.list` and the bundled list. |
-| `NS_EXTENSIONS_DIR` | WebExtensions directory (default `~/.local/share/northstar-extensions`). |
+| `NS_SAFEBROWSING_LIST` | Blocklist file used instead of `~/.config/weststar/safebrowsing.list` and the bundled list. |
+| `NS_EXTENSIONS_DIR` | WebExtensions directory (default `~/.local/share/weststar-extensions`). |
 | `NS_I18N_DIR` | Directory of the `.lang` UI catalogues. |
 | `NS_LOG_FILE`, `NS_NO_LOG_FILE` | Mirror the debug event log to a file (on by default only on Windows). |
 | `NS_CAMERA_ALLOW` | Grant every `getUserMedia` (microphone) request without asking. Headless/test runs only; ignored by the interactive browser. |

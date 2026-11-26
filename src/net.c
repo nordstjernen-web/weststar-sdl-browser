@@ -3058,10 +3058,10 @@ about_logo_data_uri(void)
     if (cached) return cached;
 
     static const char *const gif_paths[] = {
-        "share/icons/hicolor/scalable/apps/northstar.gif",
-        "../share/icons/hicolor/scalable/apps/northstar.gif",
-        "../../../data/icons/hicolor/scalable/apps/northstar.gif",
-        "data/icons/hicolor/scalable/apps/northstar.gif",
+        "share/icons/hicolor/scalable/apps/weststar.gif",
+        "../share/icons/hicolor/scalable/apps/weststar.gif",
+        "../../../data/icons/hicolor/scalable/apps/weststar.gif",
+        "data/icons/hicolor/scalable/apps/weststar.gif",
         NULL,
     };
     gsize gif_len = 0;

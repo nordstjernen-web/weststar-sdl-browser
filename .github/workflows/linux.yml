@@ -1,0 +1,97 @@
+name: linux
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  workflow_dispatch:
+
+concurrency:
+  group: linux-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: gcc on ubuntu-26.04
+    runs-on: ubuntu-26.04
+    timeout-minutes: 40
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      NS_ALLOW_ROOT: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config meson ninja-build git \
+            libsdl3-dev libcurl4-openssl-dev libssl-dev \
+            libharfbuzz-dev libfribidi-dev libcairo2-dev libfontconfig-dev \
+            libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev \
+            libglib2.0-dev zlib1g-dev libbrotli-dev libzstd-dev \
+            libopusfile-dev libvorbis-dev xvfb xauth
+
+      - name: Configure and build
+        run: |
+          set -o pipefail
+          # Pull requests build without LTO (faster to link); pushes to main
+          # keep the release configuration with LTO.
+          lto=true; [ "$GITHUB_EVENT_NAME" = pull_request ] && lto=false
+          meson setup builddir --werror -Db_lto=$lto -Dpdfjs=disabled
+          meson compile -C builddir 2>&1 | tee build.log
+
+      - name: No GTK in the binary
+        run: |
+          test -x builddir/src/sdl/weststar
+          ! ldd builddir/src/sdl/weststar | grep -i -E 'libgtk|libgdk'
+          ldd builddir/src/sdl/weststar | grep -i libSDL3
+
+      - name: Headless smoke (about:start)
+        run: |
+          set -o pipefail
+          ./builddir/src/sdl/weststar --headless --dump=text about:start > about.txt
+          head -3 about.txt
+          grep -q 'Search duckduckgo.com' about.txt
+
+      - name: Headless JavaScript smoke
+        run: |
+          set -o pipefail
+          ./builddir/src/sdl/weststar --headless --dump=text --settle-ms=300 \
+            'data:text/html,<p id="a">before</p><script>var a=document.getElementById("a");a.textContent="js-ok "+(6*7);setTimeout(function(){a.textContent+=" timer-ok"},50);</script>' \
+            > js.txt
+          cat js.txt
+          grep -q 'js-ok 42 timer-ok' js.txt
+
+      - name: No WebGL, no video
+        run: |
+          set -o pipefail
+          ./builddir/src/sdl/weststar --headless --dump=text --settle-ms=300 \
+            'data:text/html,<p id="a"></p><script>var c=document.createElement("canvas");document.getElementById("a").textContent="gl="+c.getContext("webgl")+" mp4=["+document.createElement("video").canPlayType("video/mp4")+"] ms="+typeof MediaSource;</script>' \
+            > nofeat.txt
+          cat nofeat.txt
+          grep -q 'gl=null mp4=\[\] ms=undefined' nofeat.txt
+
+      - name: GUI smoke (SDL window under Xvfb)
+        run: |
+          # The browser must still be running after five seconds.
+          xvfb-run -a -s '-screen 0 1280x900x24' \
+            timeout 5 ./builddir/src/sdl/weststar --no-watchdog about:start \
+            > gui.log 2>&1 || status=$?
+          cat gui.log
+          test "${status:-0}" = 124

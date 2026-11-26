@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#ifndef NORTHSTAR_GTK_ENGINETHREAD_H
-#define NORTHSTAR_GTK_ENGINETHREAD_H
+#ifndef NS_SDL_ENGINETHREAD_H
+#define NS_SDL_ENGINETHREAD_H
 
 #include <glib.h>
 

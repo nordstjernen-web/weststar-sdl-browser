@@ -19,8 +19,8 @@ space.
     │  re-executes the binary with --watchdog-child,
     │  restarts it on crash or hang, restores the session
     ▼
- browser process  (appmain.c → src/gtk/)
-    ├─ GTK main thread: window, omnibox, menus, page view   (src/gtk/*.c)
+ browser process  (appmain.c → src/sdl/)
+    ├─ main thread: SDL windows, Nuklear chrome, page views (src/sdl/*.c)
     ├─ engine thread "ns-engine", own GMainContext         (enginethread.c)
     │     fetch → parse → style → layout → paint, page JS, timers
     ├─ curl multi thread + fetch tasks                      (net.c)
@@ -29,43 +29,47 @@ space.
     ├─ JS worker threads: Web Workers, service workers      (js.c)
     ├─ WebSocket and EventSource threads                    (ws.c, eventsource.c)
     ├─ audio mixer thread → SDL3                            (src/audio/audio.c)
-    └─ download threads                                     (procwindow.c)
+    └─ download threads                                     (src/sdl/window.c)
 
  headless / tooling  (--headless, --dump=, --export=, --eval=, --act=, --wpt, …)
-    the same binary, never supervised, no GTK window       (headless.c)
+    the same binary, never supervised, no window           (headless.c)
 ```
 
 - **Entry point** (`appmain.c`) — handles `--version`, refuses to run
   privileged, loads the UI catalogue and configuration, decides whether to
   supervise, applies the sandbox, parses the remaining flags and starts
-  either the GTK shell or the headless driver.
+  either the SDL shell or the headless driver.
 - **Watchdog supervisor** (`watchdog.c`) — a normal GUI launch first
   becomes a small parent that initialises no network, sandbox or UI and
   runs the real browser as a child (`--watchdog-child`). The child beats
-  a counter from the GTK main loop every two seconds; a thread in the
+  a counter from the main loop every two seconds; a thread in the
   child exits it when the beat stops for 60 seconds plus the configured
   JavaScript budget. The supervisor restarts a crashed or hung child with
   the saved session, and gives up after more than five failures within a
   minute. It is on by default (`--no-watchdog`, `NS_NO_WATCHDOG` or the
   `watchdog_enabled` setting turn it off); headless and tooling runs are
   never supervised. A hang on the engine thread alone does not stop the
-  heartbeat, since it is the GTK loop that beats.
-- **GTK shell** (`src/gtk/procwindow.c`) — the window chrome: toolbar,
-  omnibox, bookmarks, history, downloads, find bar, settings, printing,
-  zoom and full screen. *New Window* opens another window in the same
-  process; each window shows one page — there are no tabs. Its own
-  icons are the bundled SVGs drawn by the in-engine SVG renderer
-  (`src/gtk/icons.c`), so they never depend on a GdkPixbuf SVG loader.
-- **Page view** (`src/gtk/procview.c`) — the widget that shows a page.
-  It turns input into typed requests (`REQ_LOAD`, `REQ_RENDER`,
-  `REQ_CLICK`, `REQ_KEY`, `REQ_SCROLL`, `REQ_PRINT`, …), posts each as a
+  heartbeat, since it is the main loop that beats.
+- **SDL shell** (`src/sdl/window.c`) — one SDL window per browser
+  window, with its chrome built every frame with Nuklear
+  (`src/sdl/nkui.c`): back, forward, reload/stop, home, the address bar,
+  bookmark star and menu, the find bar, the context menu and the status
+  bubble; downloads, session saving and shortcuts. *New Window* opens
+  another window in the same process; each window shows one page — there
+  are no tabs. Its icons are the bundled SVGs drawn by the in-engine SVG
+  renderer (`src/sdl/icons.c`). `src/sdl/mainloop.c` runs GLib's default
+  context and SDL's event queue together on the main thread.
+- **Page view** (`src/sdl/pageview.c`) — shows a page in part of a
+  window. It turns SDL input into typed requests (`REQ_LOAD`,
+  `REQ_RENDER`, `REQ_CLICK`, `REQ_KEY`, `REQ_SCROLL`, …), posts each as a
   job to the engine thread (`enginethread.c`), and receives the matching
-  response — a frame surface plus title, URL, cursor, download and camera
-  side information — back on the GTK main loop. Both ends are in
-  this process; nothing is serialised.
-- **Engine thread** (`src/gtk/enginethread.c`) — one dedicated thread
+  response — the frame's pixels, or only its damaged rectangles, plus
+  title, URL, cursor and download side information — back on the main
+  loop, where they are uploaded to an SDL texture. Both ends are in this
+  process; nothing is serialised.
+- **Engine thread** (`src/sdl/enginethread.c`) — one dedicated thread
   with its own `GMainContext`, so page timers, fetch completions and
-  nested settle loops never block the GTK main loop. Engine code attaches
+  nested settle loops never block the main loop. Engine code attaches
   its timers and idle sources through `mainctx.c`, which resolves to that
   context in the GUI and to the default context headless.
 - **Page session** (`page_session.c`) — owns the open page, a
@@ -75,8 +79,8 @@ space.
   engine context asks the view for a frame only when the page has
   something to show: a DOM mutation, a pending `requestAnimationFrame`, a
   loaded image, a canvas draw, a scroll or a navigation.
-  The view then renders at the next GTK frame-clock tick, and it keeps a
-  per-tick callback only while the page animates continuously (CSS
+  The view then renders at once, and it keeps a 60 Hz timer only while
+  the page animates continuously (CSS
   animations, animated images, `requestAnimationFrame` loops,
   layout the dampener deferred) or a caret blinks. `requestAnimationFrame`
   and CSS animations are sampled at the frame clock's time. Canvas
@@ -154,7 +158,7 @@ drivers both call.
 | 5. Style | `css.c`, `css_syntax.c`, `css_calc.c`, `css_media.c`, `css_prop_syntax.c`, `anim.c`, `font.c` | Stylesheet parse, selector matching, the cascade, computed values. `css_syntax.c` is the CSS Syntax tokenizer, `css_calc.c` simplifies `calc()` trees and serializes specified values, `css_media.c` the Media Queries Level 4 parser and evaluator, and `css_prop_syntax.c` the `<syntax>` grammar behind `@property` and `CSS.registerProperty`. `anim.c` runs transitions and `@keyframes` animations; `font.c` loads `@font-face` web fonts. |
 | 6. Layout | `layout.c`, `mathml.c` | Box tree and fragmentation: block/inline, flex, grid, tables, multicol, positioned boxes. Text is itemized, shaped and broken into lines by web-text-lib. The box tree is rebuilt on every relayout, but a text run's measured height, max-content and min-content widths are kept across relayouts, keyed by its text, the font attributes of its inline runs, its style (whose mutation counter animations bump), the width and the viewport, so an unchanged paragraph is not broken into lines again. `mathml.c` lays out presentation MathML. |
 | 7. Paint | `paint.c`, `svg.c`, `smil.c`, `image.c`, `texture.c`, `selection.c`, `spellcheck.c` | `ns_paint` walks the box tree in stacking order and draws straight into a Cairo context; there is no intermediate display list, and the retained box tree plays that part when only part of the viewport is repainted. Blurred box shadows are cached by size, corner radii, blur and colour, so a page of identical cards blurs one shadow. `svg.c` renders inline and image SVG, reading every attribute through the SMIL timeline in `smil.c` (`<animate>`, `<set>`, `<animateTransform>`, `<animateMotion>`: one timeline per document, and one per animated SVG image), which is ticked with the other animations and never writes to the DOM. `image.c` decodes images on demand into the `texture.c` pixel abstraction, and paint draws the text selection (`selection.c`) and misspelling marks (`spellcheck.c`, over Enchant) over the text. |
-| 8. Present | `src/gtk/procview.c`, `headless.c`, `print.c` | The GUI draws the frame surface into the GTK widget; headless writes it to PNG or PDF or dumps a text/DOM/layout tree; printing paginates the same box tree onto sheets. |
+| 8. Present | `src/sdl/pageview.c`, `headless.c`, `print.c` | The GUI uploads the frame (or its damaged rectangles) to an SDL texture; headless writes it to PNG or PDF or dumps a text/DOM/layout tree; printing paginates the same box tree onto sheets. |
 
 Most computed values stay as parsed `ns_css_value`s, but `display` is
 resolved once per element into an `ns_display` — the CSS Display Level 3
