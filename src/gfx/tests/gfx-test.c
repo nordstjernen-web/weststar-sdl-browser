@@ -90,33 +90,23 @@ static const scene scenes[] = {
 
 static const int big = 24;
 
-/* Some Cairo builds (1.18.4 on Ubuntu 26.04) draw only the outlines of mesh
- * patches. Such a Cairo is no reference: this fills one red square patch
- * and looks at its middle. */
+/* Some Cairo builds (1.18.4 on Ubuntu 26.04) draw only the outlines of
+ * mesh patches. Such a Cairo is no reference: this draws the mesh scene
+ * with Cairo and looks at a point well inside one of its patches. */
 static int
 cairo_draws_meshes(void)
 {
-    cairo_surface_t *s = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 20, 20);
+    cairo_surface_t *s = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, W, H);
     cairo_t *cr = cairo_create(s);
-    cairo_pattern_t *p = cairo_pattern_create_mesh();
-    cairo_mesh_pattern_begin_patch(p);
-    cairo_mesh_pattern_move_to(p, 0, 0);
-    cairo_mesh_pattern_line_to(p, 20, 0);
-    cairo_mesh_pattern_line_to(p, 20, 20);
-    cairo_mesh_pattern_line_to(p, 0, 20);
-    for (unsigned i = 0; i < 4; i++)
-        cairo_mesh_pattern_set_corner_color_rgb(p, i, 1, 0, 0);
-    cairo_mesh_pattern_end_patch(p);
-    cairo_set_source(cr, p);
-    cairo_paint(cr);
-    cairo_pattern_destroy(p);
+    cairo_scene_mesh(cr);
     cairo_destroy(cr);
     cairo_surface_flush(s);
+    int x = 125 + 60, y = 125 + 3;   /* inside the first patch */
     uint32_t px;
     memcpy(&px, cairo_image_surface_get_data(s) +
-                10 * cairo_image_surface_get_stride(s) + 10 * 4, 4);
+                y * cairo_image_surface_get_stride(s) + x * 4, 4);
     cairo_surface_destroy(s);
-    return px == 0xffff0000u;
+    return (px >> 24) == 0xff;
 }
 
 static void
