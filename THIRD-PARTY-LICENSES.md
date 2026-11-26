@@ -255,7 +255,7 @@ non-commercial, without restriction.
 ### zlib — zlib License
 
 > DEFLATE compression behind `CompressionStream` and `DecompressionStream`,
-> and a dependency of libcurl, Cairo, FreeType and GLib.
+> and a dependency of libcurl, FreeType and GLib.
 > <https://zlib.net>
 >
 > Copyright (c) 1995-2024 Jean-loup Gailly and Mark Adler
@@ -310,20 +310,6 @@ package manager.
 Licensed under the zlib License. See the zlib section above for the
 full text (same license). Always linked; the meson `audio` feature only
 decides whether audio playback is built.
-
-### Cairo — LGPL-2.1 or MPL-1.1 (tests only, not in the browser)
-
-> 2D drawing; used only as the reference the gfx test and benchmark
-> compare against. The browser does not link it.
-> <https://www.cairographics.org>
->
-> Copyright Carl Worth, Behdad Esfahbod, and the Cairo contributors.
-
-Dual-licensed under the GNU Lesser General Public License 2.1 or the
-Mozilla Public License 1.1. See:
-
-- <https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html>
-- <https://www.mozilla.org/MPL/1.1/>
 
 ### libavif — BSD 2-Clause
 

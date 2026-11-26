@@ -162,9 +162,6 @@ endif
 glib    = dependency('glib-2.0', version: ns_floors['glib-2.0'])
 gobject = dependency('gobject-2.0', version: ns_floors['gobject-2.0'])
 gio     = dependency('gio-2.0', version: ns_floors['gio-2.0'])
-# Cairo is not part of the browser: only gfx's test and benchmark, which
-# compare gfx with it, use it, and are built when it is installed.
-cairo   = dependency('cairo', version: '>=1.18', required: false)
 
 # SDL3 opens the window, takes input and plays audio. The chrome is drawn
 # with Nuklear, vendored in subprojects/nuklear.

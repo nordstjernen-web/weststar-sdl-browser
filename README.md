@@ -36,10 +36,10 @@ has been removed and why, and what is left.
 prefix, with Cairo's pixel formats, which an SDL texture takes as they
 are. Text is laid out by web-text-lib (a Pango fork) and its glyphs are
 rasterized with FreeType into gfx (`src/web-text-lib/pangogfx-*`). Cairo
-is needed only to build the gfx test, which draws a set of scenes with gfx
-and with Cairo and compares the pixels (`meson test -C builddir --suite
-gfx`); `data/fixtures/canvas-2d.html` is a page of canvas 2D checks that
-each print PASS or FAIL. CI runs both on Linux and Windows.
+is not used at all. `meson test -C builddir --suite gfx` draws a set of
+scenes and compares them with reference images that were checked against
+Cairo, and `data/fixtures/canvas-2d.html` is a page of canvas 2D checks
+that each print PASS or FAIL. CI runs both on Linux and Windows.
 
 What is deliberately **not** in Weststar for now:
 

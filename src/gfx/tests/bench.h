@@ -1,5 +1,5 @@
-/* Weststar SDL Browser — gfx benchmark workloads, run once with gfx and once with Cairo.
- * Included twice by gfx-bench.c with the same macros as scenes.h. Each
+/* Weststar SDL Browser — gfx benchmark workloads.
+ * Included by gfx-bench.c with the same macros as scenes.h. Each
  * workload draws something a web page's painting does a lot of, into a
  * BW x BH surface.
  * Copyright 2026 Andreas Røsdal

@@ -127,15 +127,15 @@ options.
 `./scripts/dev.sh build` runs `meson setup` (only when needed) and
 `meson compile -C builddir` in one step.
 
-Cairo is optional: when it is installed (`libcairo2-dev`, `cairo-devel`,
-`mingw-w64-ucrt-x86_64-cairo`), the build adds the gfx test and benchmark,
-which use it as the reference.
-
 `meson test -C builddir --suite gfx` checks the in-tree rasterizer
-(`src/gfx/`) against Cairo: it draws a set of scenes (fills, strokes,
-dashes, gradients, images, clips, groups, masks, every operator) with
-both and compares the pixels. `GFX_TEST_OUT=<dir>` writes each pair as
-PNGs.
+(`src/gfx/`): it draws a set of scenes (fills, strokes, dashes,
+gradients, images, clips, groups, masks, every operator) and compares
+each with its reference image in `src/gfx/tests/ref/`. The references
+were made while gfx was checked against Cairo scene by scene; after an
+intended change to gfx's output, regenerate them with
+`GFX_TEST_WRITE_REF=1` and look at the new images (`GFX_TEST_OUT=<dir>`
+writes each scene as a PNG). `meson test -C builddir --benchmark
+--verbose` times page-like workloads.
 
 ## Building with muon
 
@@ -429,7 +429,7 @@ or `NS_TEST_VIEWPORT`) for visual inspection.
 
 Neither is an automated test suite, and this project has none by design:
 the baselines catch drift, the PNGs are read by eye, and correctness is
-verified by running the browser. Two exceptions guard the move off Cairo:
+verified by running the browser. Two exceptions guard Weststar's own rasterizer:
 the gfx test (above), and `data/fixtures/canvas-2d.html`, a page of
 canvas checks that each print PASS or FAIL, which CI renders with
 `--dump=text` and fails on any FAIL.

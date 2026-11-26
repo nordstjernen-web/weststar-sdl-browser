@@ -36,9 +36,8 @@ So the shell goes first, and Cairo after it:
    masks and damage regions — drawing into premultiplied ARGB32 pixel
    buffers that upload to SDL textures as they are. Text is laid out by
    web-text-lib (the engine's Pango fork) and its glyphs are rasterized
-   with FreeType into gfx. The browser no longer links Cairo; it is an
-   optional build dependency, used only by the gfx test and benchmark as
-   the reference. PDF export (`--export=pdf:`) and the dormant print path
+   with FreeType into gfx. Cairo is not a build dependency
+   at all. PDF export (`--export=pdf:`) and the dormant print path
    drew through Cairo's PDF and recording surfaces; they are removed for
    now, to come back in a form that does not need Cairo.
 5. **Composite with SDL textures.** Next. Today the engine paints each
@@ -90,14 +89,16 @@ the two, now gone), and so that the test can draw every scene with both.
 - **Regions** (`gfx-region.c`): sets of pixels as non-overlapping
   rectangles, for the page session's damage tracking.
 
-`meson test -C builddir --suite gfx` draws sixteen scenes with gfx and
-with Cairo and compares the pixels, and compares `in_fill`, `in_stroke`,
-extents, `copy_path` and the current point; both CI workflows run it.
-Cairo 1.18.4 (Ubuntu 26.04) draws only the outlines of mesh patches, so
-there the mesh scene is skipped; canvas conic gradients, which are mesh
-patterns, were broken with such a Cairo and draw correctly since canvas
-moved to gfx. The
-known differences are a level or two of anti-aliasing at edges, ties on
+While the engine moved over, `meson test -C builddir --suite gfx` drew
+sixteen scenes with gfx and with Cairo and compared the pixels, and
+compared `in_fill`, `in_stroke`, extents, `copy_path` and the current
+point. With Cairo gone from the build, the scenes are compared with
+reference images made at that point (`src/gfx/tests/ref/`, regenerated
+with `GFX_TEST_WRITE_REF=1` after an intended change), and the queries
+with fixed values; both CI workflows run it. Cairo 1.18.4 (Ubuntu 26.04)
+draws only the outlines of mesh patches; canvas conic gradients, which
+are mesh patterns, were broken with such a Cairo and draw correctly since
+canvas moved to gfx. The known differences from Cairo were a level or two of anti-aliasing at edges, ties on
 a repeating gradient's seams, coverage where two edges cross inside one
 pixel, and the butt caps at the ends of an open curve, which gfx squares
 to the first and last flattened segment where Cairo uses the exact

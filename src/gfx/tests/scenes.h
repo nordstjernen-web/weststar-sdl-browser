@@ -1,7 +1,8 @@
-/* Weststar SDL Browser — gfx test scenes, drawn once with gfx and once with Cairo.
- * Included twice by gfx-test.c with P(name) naming a function (gfx_name or
- * cairo_name), E(NAME) an enumerator (GFX_NAME or CAIRO_NAME), CTX the
- * context type, SURF the surface type and PAT the pattern type.
+/* Weststar SDL Browser — gfx test scenes.
+ * Included by gfx-test.c with P(name) naming a function (gfx_name),
+ * E(NAME) an enumerator (GFX_NAME), CTX the context type, SURF the surface
+ * type and PAT the pattern type. (Written this way so the scenes could be
+ * drawn with Cairo too while gfx was checked against it.)
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

@@ -72,7 +72,6 @@ jobs:
             mingw-w64-ucrt-x86_64-glib2
             mingw-w64-ucrt-x86_64-harfbuzz
             mingw-w64-ucrt-x86_64-fribidi
-            mingw-w64-ucrt-x86_64-cairo
             mingw-w64-ucrt-x86_64-fontconfig
             mingw-w64-ucrt-x86_64-freetype
             mingw-w64-ucrt-x86_64-curl
@@ -111,7 +110,7 @@ jobs:
           ld.lld --version
           meson --version
           ninja --version
-          pkg-config --modversion sdl3 cairo libcurl
+          pkg-config --modversion sdl3 freetype2 libcurl
 
       - name: Build (ThinLTO via LLD on main, no LTO on pull requests)
         run: |
@@ -131,7 +130,7 @@ jobs:
         if: always()
         run: ccache --show-stats
 
-      - name: gfx against Cairo
+      - name: gfx test
         run: |
           mkdir -p gfx-test-out
           GFX_TEST_OUT="$(cygpath -m "$PWD/gfx-test-out")" meson test -C builddir --suite gfx --print-errorlogs
@@ -178,7 +177,7 @@ jobs:
             while read -r dll; do cp "$dll" bundle/; done
           cp -r /ucrt64/etc/fonts bundle/etc/
           ls bundle
-          # Cairo is installed for the gfx test only; the browser must not link it.
+          # The browser must not link Cairo.
           ! ls bundle | grep -i -E 'cairo|pixman'
 
       # Run as an installed copy runs, with only the Windows system folders

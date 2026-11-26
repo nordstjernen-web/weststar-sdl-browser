@@ -42,7 +42,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config meson ninja-build git \
             libsdl3-dev libcurl4-openssl-dev libssl-dev \
-            libharfbuzz-dev libfribidi-dev libcairo2-dev libfontconfig-dev \
+            libharfbuzz-dev libfribidi-dev libfontconfig-dev \
             libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev \
             libglib2.0-dev zlib1g-dev libbrotli-dev libzstd-dev \
             libopusfile-dev libvorbis-dev xvfb xauth
@@ -56,7 +56,7 @@ jobs:
           meson setup builddir --werror -Db_lto=$lto -Dpdfjs=disabled
           meson compile -C builddir 2>&1 | tee build.log
 
-      - name: gfx against Cairo
+      - name: gfx test
         run: |
           mkdir -p gfx-test-out
           GFX_TEST_OUT="$PWD/gfx-test-out" meson test -C builddir --suite gfx --print-errorlogs

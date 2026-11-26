@@ -25,36 +25,35 @@ weststar_gfx_dep = declare_dependency(
 
 # The test and the benchmark compare gfx with Cairo, so they are built only
 # where Cairo is installed; the browser itself does not use it.
-if cairo.found()
-  # Draws every scene with gfx and with Cairo and compares the pixels.
-  test(
-    'gfx',
-    executable(
-      'gfx-test',
-      files('tests/gfx-test.c'),
-      dependencies: [weststar_gfx_dep, cairo],
-      include_directories: include_directories('tests'),
-      # As for the browser: no -pie on Windows, where clang rejects it as
-      # unused at link time (src/sdl/meson.build).
-      pie: host_machine.system() != 'windows',
-      build_by_default: true,
-    ),
-    suite: 'gfx',
-  )
+# Draws every scene and compares it with its reference image in
+# tests/ref/; GFX_TEST_WRITE_REF=1 regenerates them.
+test(
+  'gfx',
+  executable(
+    'gfx-test',
+    files('tests/gfx-test.c'),
+    dependencies: [weststar_gfx_dep, zlib],
+    include_directories: include_directories('tests'),
+    c_args: ['-DGFX_REF_DIR="@0@"'.format(meson.current_source_dir() / 'tests' / 'ref')],
+    # As for the browser: no -pie on Windows, where clang rejects it as
+    # unused at link time (src/sdl/meson.build).
+    pie: host_machine.system() != 'windows',
+    build_by_default: true,
+  ),
+  suite: 'gfx',
+)
 
-  # Times page-like workloads with gfx and with Cairo:
-  # meson test -C builddir --benchmark --verbose
-  benchmark(
-    'gfx',
-    executable(
-      'gfx-bench',
-      files('tests/gfx-bench.c'),
-      dependencies: [weststar_gfx_dep, cairo],
-      include_directories: include_directories('tests'),
-      pie: host_machine.system() != 'windows',
-      build_by_default: true,
-    ),
-    suite: 'gfx',
-    timeout: 600,
-  )
-endif
+# Times page-like workloads: meson test -C builddir --benchmark --verbose
+benchmark(
+  'gfx',
+  executable(
+    'gfx-bench',
+    files('tests/gfx-bench.c'),
+    dependencies: [weststar_gfx_dep],
+    include_directories: include_directories('tests'),
+    pie: host_machine.system() != 'windows',
+    build_by_default: true,
+  ),
+  suite: 'gfx',
+  timeout: 600,
+)

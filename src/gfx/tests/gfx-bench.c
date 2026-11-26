@@ -1,14 +1,14 @@
-/* Weststar SDL Browser — gfx benchmark: page-like workloads timed with gfx and with Cairo.
- * Prints the best of several runs of each workload, in milliseconds, and
- * the ratio gfx / Cairo. Run with `meson test -C builddir --benchmark`
- * or directly; GFX_BENCH_RUNS=<n> sets the number of runs (default 5).
+/* Weststar SDL Browser — gfx benchmark: page-like workloads, timed.
+ * Prints the best of several runs of each workload in milliseconds. Run
+ * with `meson test -C builddir --benchmark --verbose` or directly;
+ * GFX_BENCH_RUNS=<n> sets the number of runs (default 5). Earlier results,
+ * when gfx was timed against Cairo, are in docs/porting-to-sdl.md.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 #include "gfx.h"
 
-#include <cairo.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -37,27 +37,12 @@
 #undef PAT
 #undef BENCH
 
-#define P(name) cairo_##name
-#define E(name) CAIRO_##name
-#define CTX cairo_t
-#define SURF cairo_surface_t
-#define PAT cairo_pattern_t
-#define BENCH(name) cairo_bench_##name
-#include "bench.h"
-#undef P
-#undef E
-#undef CTX
-#undef SURF
-#undef PAT
-#undef BENCH
-
 typedef struct {
     const char *name;
     void (*gfx)(gfx_t *, gfx_surface_t *);
-    void (*cairo)(cairo_t *, cairo_surface_t *);
 } bench;
 
-#define B(n) { #n, gfx_bench_##n, cairo_bench_##n }
+#define B(n) { #n, gfx_bench_##n }
 
 static const bench benches[] = {
     B(fill_page), B(alpha_page), B(rects_aligned), B(rounded_boxes),
@@ -97,46 +82,29 @@ main(void)
     if (runs < 1)
         runs = 1;
 
-    gfx_surface_t *gimg = gfx_image_surface_create(GFX_FORMAT_ARGB32, 512, 512);
-    fill_image(gfx_image_surface_get_data(gimg), gfx_image_surface_get_stride(gimg));
-    cairo_surface_t *cimg = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 512, 512);
-    cairo_surface_flush(cimg);
-    fill_image(cairo_image_surface_get_data(cimg), cairo_image_surface_get_stride(cimg));
-    cairo_surface_mark_dirty(cimg);
+    gfx_surface_t *img = gfx_image_surface_create(GFX_FORMAT_ARGB32, 512, 512);
+    fill_image(gfx_image_surface_get_data(img), gfx_image_surface_get_stride(img));
+    gfx_surface_mark_dirty(img);
 
-    printf("gfx against Cairo %s, %dx%d, best of %d runs\n",
-           cairo_version_string(), BW, BH, runs);
-    printf("%-14s %10s %10s %8s\n", "workload", "gfx ms", "cairo ms", "ratio");
-    double tg = 0, tc = 0;
+    printf("gfx, %dx%d, best of %d runs\n", BW, BH, runs);
+    printf("%-14s %10s\n", "workload", "ms");
+    double total = 0;
     for (size_t i = 0; i < sizeof benches / sizeof benches[0]; i++) {
-        double bg = INFINITY, bc = INFINITY;
+        double best = INFINITY;
         for (int r = 0; r < runs; r++) {
-            gfx_surface_t *gs = gfx_image_surface_create(GFX_FORMAT_ARGB32, BW, BH);
-            gfx_t *g = gfx_create(gs);
+            gfx_surface_t *s = gfx_image_surface_create(GFX_FORMAT_ARGB32, BW, BH);
+            gfx_t *g = gfx_create(s);
             double t0 = now_ms();
-            benches[i].gfx(g, gimg);
+            benches[i].gfx(g, img);
             double t1 = now_ms();
             gfx_destroy(g);
-            gfx_surface_destroy(gs);
-            bg = fmin(bg, t1 - t0);
-
-            cairo_surface_t *cs = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, BW, BH);
-            cairo_t *cr = cairo_create(cs);
-            t0 = now_ms();
-            benches[i].cairo(cr, cimg);
-            cairo_surface_flush(cs);
-            t1 = now_ms();
-            cairo_destroy(cr);
-            cairo_surface_destroy(cs);
-            bc = fmin(bc, t1 - t0);
+            gfx_surface_destroy(s);
+            best = fmin(best, t1 - t0);
         }
-        tg += bg;
-        tc += bc;
-        printf("%-14s %10.2f %10.2f %7.2fx\n", benches[i].name, bg, bc,
-               bc > 0 ? bg / bc : 0);
+        total += best;
+        printf("%-14s %10.2f\n", benches[i].name, best);
     }
-    printf("%-14s %10.2f %10.2f %7.2fx\n", "total", tg, tc, tc > 0 ? tg / tc : 0);
-    gfx_surface_destroy(gimg);
-    cairo_surface_destroy(cimg);
+    printf("%-14s %10.2f\n", "total", total);
+    gfx_surface_destroy(img);
     return 0;
 }
