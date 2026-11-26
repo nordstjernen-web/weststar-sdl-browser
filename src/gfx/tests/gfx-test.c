@@ -63,9 +63,11 @@ typedef struct {
      * fraction of all pixels, and the mean difference per channel. */
     double max_big_fraction;
     double max_mean;
+    int    mesh;      /* compared only where Cairo draws meshes */
 } scene;
 
-#define S(n, frac, mean) { #n, gfx_scene_##n, cairo_scene_##n, frac, mean }
+#define S(n, frac, mean) { #n, gfx_scene_##n, cairo_scene_##n, frac, mean, 0 }
+#define S_MESH(n, frac, mean) { #n, gfx_scene_##n, cairo_scene_##n, frac, mean, 1 }
 
 static const scene scenes[] = {
     S(fills, 0.002, 0.3),
@@ -81,12 +83,41 @@ static const scene scenes[] = {
     S(groups, 0.002, 0.3),
     S(masks, 0.002, 0.5),
     S(operators, 0.01, 0.6),
-    S(mesh, 0.01, 1.0),
+    S_MESH(mesh, 0.01, 1.0),
     S(a8, 0.002, 0.4),
     S(paths, 0.004, 0.4),
 };
 
 static const int big = 24;
+
+/* Some Cairo builds (1.18.4 on Ubuntu 26.04) draw only the outlines of mesh
+ * patches. Such a Cairo is no reference: this fills one red square patch
+ * and looks at its middle. */
+static int
+cairo_draws_meshes(void)
+{
+    cairo_surface_t *s = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 20, 20);
+    cairo_t *cr = cairo_create(s);
+    cairo_pattern_t *p = cairo_pattern_create_mesh();
+    cairo_mesh_pattern_begin_patch(p);
+    cairo_mesh_pattern_move_to(p, 0, 0);
+    cairo_mesh_pattern_line_to(p, 20, 0);
+    cairo_mesh_pattern_line_to(p, 20, 20);
+    cairo_mesh_pattern_line_to(p, 0, 20);
+    for (unsigned i = 0; i < 4; i++)
+        cairo_mesh_pattern_set_corner_color_rgb(p, i, 1, 0, 0);
+    cairo_mesh_pattern_end_patch(p);
+    cairo_set_source(cr, p);
+    cairo_paint(cr);
+    cairo_pattern_destroy(p);
+    cairo_destroy(cr);
+    cairo_surface_flush(s);
+    uint32_t px;
+    memcpy(&px, cairo_image_surface_get_data(s) +
+                10 * cairo_image_surface_get_stride(s) + 10 * 4, 4);
+    cairo_surface_destroy(s);
+    return px == 0xffff0000u;
+}
 
 static void
 write_png(const char *dir, const char *name, const char *kind,
@@ -283,9 +314,16 @@ main(void)
 {
     const char *out = getenv("GFX_TEST_OUT");
     printf("gfx against Cairo %s, %dx%d\n", cairo_version_string(), W, H);
-    for (size_t i = 0; i < sizeof scenes / sizeof scenes[0]; i++)
+    int meshes = cairo_draws_meshes();
+    for (size_t i = 0; i < sizeof scenes / sizeof scenes[0]; i++) {
+        if (scenes[i].mesh && !meshes) {
+            printf("skip %-11s this Cairo does not fill mesh patches\n",
+                   scenes[i].name);
+            continue;
+        }
         if (!run_scene(&scenes[i], out && *out ? out : NULL))
             failures++;
+    }
     test_queries();
     test_png();
     if (failures)

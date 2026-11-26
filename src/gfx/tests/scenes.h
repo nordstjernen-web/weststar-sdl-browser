@@ -393,20 +393,18 @@ SCENE(operators)(CTX *cr)
 static void
 SCENE(mesh)(CTX *cr)
 {
-    /* A ring of straight-sided patches. The canvas conic gradient makes
-     * triangles (a patch whose first and last corners meet at the centre),
-     * but Cairo 1.18.4 draws those nearly empty, so the reference here
-     * keeps every patch a proper quadrilateral. */
+    /* The canvas conic gradient: a fan of straight-sided patches whose
+     * first and last corners meet at the centre. */
     PAT *p = P(pattern_create_mesh)();
     int n = 36;
     for (int i = 0; i < n; i++) {
         double a0 = 2 * M_PI * i / n, a1 = 2 * M_PI * (i + 1) / n;
         double t0 = (double)i / n, t1 = (double)(i + 1) / n;
         P(mesh_pattern_begin_patch)(p);
-        P(mesh_pattern_move_to)(p, 125 + 20 * cos(a0), 125 + 20 * sin(a0));
+        P(mesh_pattern_move_to)(p, 125, 125);
         P(mesh_pattern_line_to)(p, 125 + 200 * cos(a0), 125 + 200 * sin(a0));
         P(mesh_pattern_line_to)(p, 125 + 200 * cos(a1), 125 + 200 * sin(a1));
-        P(mesh_pattern_line_to)(p, 125 + 20 * cos(a1), 125 + 20 * sin(a1));
+        P(mesh_pattern_line_to)(p, 125, 125);
         P(mesh_pattern_set_corner_color_rgba)(p, 0, t0, 0.2, 1 - t0, 1);
         P(mesh_pattern_set_corner_color_rgba)(p, 1, t0, 0.2, 1 - t0, 1);
         P(mesh_pattern_set_corner_color_rgba)(p, 2, t1, 0.2, 1 - t1, 1);
