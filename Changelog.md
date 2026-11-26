@@ -2,6 +2,26 @@ Changelog:
 =========
 Significant changes in each release:
 
+Weststar SDL Browser 1.0.0:
+===========================
+The first Weststar release: Northstar 1.0.27 ported from GTK 4 to SDL3.
+
+* The window is an SDL3 window with chrome built with Nuklear; GTK is
+  no longer used.
+* 2D drawing is moving from Cairo to Weststar's own rasterizer
+  (`src/gfx/`): the chrome, SVG, MathML and canvas 2D draw with it.
+* Canvas 2D: conic gradients draw with Cairo builds that drew them as
+  outlines; `fillRect()`, `strokeRect()`, `clearRect()` and `strokeText()`
+  no longer fill or stroke the current path; gradient and pattern fills
+  on text are placed in canvas space.
+* Builds and runs on Windows (MSYS2 UCRT64), with CI for Windows and
+  Linux.
+* Removed: WebGL, `<video>`, Media Source Extensions, camera capture,
+  Northstar's packaging, and, for now, printing and PDF export
+  (`--export=pdf:`).
+
+Northstar Web Browser history, up to the snapshot Weststar started from:
+
 1.0.27:
 =======
 * Developer tools: `Ctrl+Shift+I` toggles them, as `F12` and

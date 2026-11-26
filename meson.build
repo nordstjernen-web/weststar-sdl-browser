@@ -1,7 +1,7 @@
 project(
   'weststar',
   'c',
-  version: '1.0.27-dev',
+  version: '1.0.0',
   license: 'GPL-3.0-or-later',
   license_files: ['LICENSE', 'THIRD-PARTY-LICENSES.md'],
   default_options: {
