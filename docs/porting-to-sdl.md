@@ -35,10 +35,77 @@ So the shell goes first, and Cairo after it:
    extend modes, the Porter-Duff and blend operators, groups and masks —
    drawing into premultiplied ARGB32 pixel buffers that are wrapped as
    `SDL_Surface`s. Glyphs are rasterized with FreeType. Once every call
-   site compiles against `src/gfx/`, the Cairo dependency is dropped and
-   the remaining names are moved off the `cairo_` prefix.
+   site compiles against `src/gfx/`, the Cairo dependency is dropped.
    PDF output (`--export=pdf:`) and the recording surface need a separate
    answer; until then they are built only when Cairo is present.
+   **In progress:** the rasterizer is written and tested against Cairo,
+   and the chrome draws with it (see below).
+
+## The rasterizer: gfx
+
+`src/gfx/` is Cairo's API under a `gfx_` prefix (`gfx_t`,
+`gfx_surface_t`, `gfx_pattern_t`, `GFX_OPERATOR_OVER`, …) with Cairo's
+semantics, so moving a call site is a rename. It has its own prefix,
+rather than reusing Cairo's names, because Cairo stays linked while the
+call sites move over: web-text-lib renders glyphs through pangocairo
+until it gets a FreeType glyph path. With distinct names the two can
+live in one binary, and the test can draw every scene with both.
+
+- **Pixels** are Cairo's: native-endian premultiplied ARGB32, RGB24 and
+  A8, so a gfx surface and a Cairo surface can share one buffer, and an
+  ARGB32 surface uploads to an `SDL_PIXELFORMAT_ARGB8888` texture as it
+  is.
+- **Paths** are kept in target pixels, as Cairo keeps them in backend
+  space; curves are flattened to the tolerance (0.1 px by default) by
+  uniform subdivision.
+- **Rasterization** (`gfx-raster.c`) accumulates each edge's signed area
+  per pixel along a row, the technique of font-rs and stb_truetype; a
+  running sum gives exact coverage where one edge crosses a pixel, to
+  which the fill rule is applied.
+- **Strokes** (`gfx-stroke.c`) are built in user space, so a non-uniform
+  matrix shapes the pen as in Cairo: one outline polygon per run of
+  segments that turn gently (curves), quadrilaterals elsewhere, and joins
+  and caps as separate polygons, all wound the same way and filled
+  non-zero. Dashes, including zero-length dashes with round caps, follow
+  Cairo's rules.
+- **Patterns** (`gfx-pattern.c`): solid colours; linear and radial
+  gradients (Cairo's two-circle radial, root selection as in pixman) with
+  premultiplied interpolation; surface patterns with nearest and bilinear
+  filtering, and for `GOOD`/`BEST` a box filter when shrinking; mesh
+  patterns with straight-sided patches, which is what the canvas conic
+  gradient makes.
+- **Compositing** (`gfx-composite.c`): every Cairo operator, Porter-Duff
+  and blend modes, with Cairo's coverage rules for bounded and unbounded
+  operators. Clips are a pixel box, or a box and an 8-bit mask.
+- **Groups** draw into an ARGB32 surface the size of the current clip.
+
+`meson test -C builddir --suite gfx` draws sixteen scenes with gfx and
+with Cairo and compares the pixels, and compares `in_fill`, `in_stroke`,
+extents, `copy_path` and the current point; both CI workflows run it. The
+known differences are a level or two of anti-aliasing at edges, ties on
+a repeating gradient's seams, coverage where two edges cross inside one
+pixel, and the butt caps at the ends of an open curve, which gfx squares
+to the first and last flattened segment where Cairo uses the exact
+tangent.
+
+Not in gfx: regions (`cairo_region_t`, used by the page session's damage
+tracking), text (`cairo_show_text`, `cairo_text_extents`), the PDF and
+recording surfaces, and curved mesh patch sides.
+
+**The Cairo bridge.** `gfx_cairo_begin()` (`gfx-cairo.h`) hands out a
+`cairo_t` drawing into a gfx context's current target with its matrix and
+clip (a mask clip is applied exactly, through a group), so a call site
+can move to gfx before everything it calls has: the chrome's text still
+goes through pangocairo and its icons through the SVG renderer this way.
+The bridge goes away with the Cairo dependency.
+
+**Order of the remaining work.** The engine paints into one context per
+frame (`page_session.c`), so it moves as a whole, but through the bridge
+it can move file by file: `svg.c` and `mathml.c`, then `js_canvas.c`
+(whose surfaces become gfx surfaces), then `paint.c`, then the page
+session and its damage regions (a small region type in gfx). Glyphs come
+last: web-text-lib's `pangocairo-*` files are replaced by a renderer that
+rasterizes FreeType outlines into gfx, and then Cairo is dropped.
 
 ## The chrome: Nuklear
 
@@ -59,13 +126,14 @@ unmodified in `subprojects/nuklear/`. Alternatives considered:
 Nuklear brings edit fields with selection, clipboard and undo, menus,
 popups and scrollable windows, and emits a plain list of draw commands.
 `src/sdl/nkui.c` is Weststar's backend for it: SDL3 events are fed in,
-the commands are drawn with Cairo into a window-sized layer, and only the
+the commands are drawn with gfx into a window-sized layer, and only the
 part that changed since the last frame is uploaded to the GPU. Text goes
 through an `nk_user_font` that measures and draws with web-text-lib (the
 engine's Pango fork), so the chrome gets HarfBuzz shaping and fontconfig
 fallback; kerning is off in the chrome because Nuklear places the caret
-by adding up the widths of single characters. In stage 4 the backend
-draws through the in-tree rasterizer like the rest of the engine.
+by adding up the widths of single characters. The chrome was the first
+code moved to gfx; its text and icons reach Cairo through the bridge
+until web-text-lib and the SVG renderer move too.
 
 Nuklear only reports a click when the button is still down at the end of
 a frame, so the window ends the frame early when a release follows a

@@ -7,6 +7,7 @@
 #include "icons.h"
 
 #include "dom.h"
+#include "gfx-cairo.h"
 #include "html.h"
 #include "svg.h"
 
@@ -58,36 +59,36 @@ icon_lookup(const char *name)
 }
 
 gboolean
-ns_sdl_icon_draw(cairo_t *cr, const char *name, double x, double y,
+ns_sdl_icon_draw(gfx_t *g, const char *name, double x, double y,
                  double size)
 {
     const Icon *icon = icon_lookup(name);
     if (!icon)
         return FALSE;
-    cairo_save(cr);
+    /* The SVG renderer still draws with Cairo, into gfx's pixels. */
+    cairo_t *cr = gfx_cairo_begin(g);
     cairo_translate(cr, x, y);
     ns_svg_render_node(cr, icon->root, size, size, NULL, NULL);
-    cairo_restore(cr);
+    gfx_cairo_end(g, cr);
     return TRUE;
 }
 
 SDL_Surface *
 ns_sdl_icon_surface(const char *name, int px)
 {
-    cairo_surface_t *s = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, px, px);
-    cairo_t *cr = cairo_create(s);
-    gboolean ok = ns_sdl_icon_draw(cr, name, 0, 0, px);
-    cairo_destroy(cr);
-    cairo_surface_flush(s);
+    gfx_surface_t *s = gfx_image_surface_create(GFX_FORMAT_ARGB32, px, px);
+    gfx_t *ctx = gfx_create(s);
+    gboolean ok = ns_sdl_icon_draw(ctx, name, 0, 0, px);
+    gfx_destroy(ctx);
     if (!ok) {
-        cairo_surface_destroy(s);
+        gfx_surface_destroy(s);
         return NULL;
     }
     SDL_Surface *out = SDL_CreateSurface(px, px, SDL_PIXELFORMAT_ARGB8888);
     if (out) {
-        /* Cairo stores premultiplied alpha, SDL surfaces straight alpha. */
-        const guint8 *src = cairo_image_surface_get_data(s);
-        int sstride = cairo_image_surface_get_stride(s);
+        /* gfx stores premultiplied alpha, SDL surfaces straight alpha. */
+        const guint8 *src = gfx_image_surface_get_data(s);
+        int sstride = gfx_image_surface_get_stride(s);
         for (int y = 0; y < px; y++) {
             const guint32 *in = (const guint32 *)(const void *)(src + (gsize)y * sstride);
             guint32 *row = (guint32 *)(void *)((guint8 *)out->pixels +
@@ -107,6 +108,6 @@ ns_sdl_icon_surface(const char *name, int px)
             }
         }
     }
-    cairo_surface_destroy(s);
+    gfx_surface_destroy(s);
     return out;
 }

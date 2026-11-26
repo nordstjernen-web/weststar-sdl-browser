@@ -19,7 +19,7 @@ This is the start of the port. The work is done in stages, each merged to
 | 1 | Import Northstar without history, rebrand | done |
 | 2 | Remove WebGL, WebGPU and `<video>` | done |
 | 3 | Replace the GTK shell with an SDL3 shell, chrome drawn with Nuklear | done |
-| 4 | Replace Cairo with an in-tree rasterizer drawing into SDL surfaces | planned |
+| 4 | Replace Cairo with an in-tree rasterizer drawing into SDL surfaces | in progress: `src/gfx/` written, the chrome draws with it |
 
 See [docs/porting-to-sdl.md](docs/porting-to-sdl.md) for the plan, what
 has been removed and why, and what is left.
@@ -49,6 +49,10 @@ meson compile -C builddir
 ./builddir/src/sdl/weststar https://example.org
 ```
 
+On Windows, Weststar builds in an MSYS2 UCRT64 shell with the same
+commands; [docs/building.md](docs/building.md#windows-msys2) lists the
+packages.
+
 SDL3 3.2 or newer is required; GTK is not. Distributions without an SDL3
 package (Ubuntu 24.04, Debian 12) can build it from the
 [SDL release tarball](https://github.com/libsdl-org/SDL/releases) with
@@ -63,8 +67,9 @@ built every frame with [Nuklear](https://github.com/Immediate-Mode-UI/Nuklear),
 an immediate-mode GUI library: back, forward, reload/stop, home, the
 address bar, a bookmark star and a menu; a find bar (Ctrl+F), a context
 menu, and a status bubble for hovered links and messages. Nuklear's draw
-commands are rendered with the engine's own text stack, so the chrome
-shows any script the page can.
+commands are rendered by `src/gfx/`, Weststar's own 2D rasterizer, with
+text from the engine's own text stack, so the chrome shows any script the
+page can.
 
 Keyboard: Ctrl+L / F6 address bar, Ctrl+F find, F3 / Ctrl+G next match,
 Alt+Left / Alt+Right back and forward, F5 / Ctrl+R reload, Ctrl+D

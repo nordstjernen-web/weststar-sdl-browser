@@ -1,0 +1,190 @@
+name: windows
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  workflow_dispatch:
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: msys2/ucrt64 on windows-${{ matrix.windows }}
+    runs-on: windows-${{ matrix.windows }}
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        windows: ['2025']
+
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up MSYS2 (ucrt64)
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
+        with:
+          msystem: UCRT64
+          # No full system upgrade (pacman -Syuu) on every run: it took most
+          # of the job in Northstar. If the package databases go stale and
+          # installs 404, set this back to true.
+          update: false
+          cache: true
+          install: >-
+            git
+            diffutils
+            mingw-w64-ucrt-x86_64-binutils
+            mingw-w64-ucrt-x86_64-clang
+            mingw-w64-ucrt-x86_64-lld
+            mingw-w64-ucrt-x86_64-llvm-tools
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-meson
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-ccache
+            mingw-w64-ucrt-x86_64-sdl3
+            mingw-w64-ucrt-x86_64-glib2
+            mingw-w64-ucrt-x86_64-harfbuzz
+            mingw-w64-ucrt-x86_64-fribidi
+            mingw-w64-ucrt-x86_64-cairo
+            mingw-w64-ucrt-x86_64-fontconfig
+            mingw-w64-ucrt-x86_64-freetype
+            mingw-w64-ucrt-x86_64-curl
+            mingw-w64-ucrt-x86_64-openssl
+            mingw-w64-ucrt-x86_64-ca-certificates
+            mingw-w64-ucrt-x86_64-libpsl
+            mingw-w64-ucrt-x86_64-sqlite3
+            mingw-w64-ucrt-x86_64-zlib
+            mingw-w64-ucrt-x86_64-brotli
+            mingw-w64-ucrt-x86_64-zstd
+            mingw-w64-ucrt-x86_64-libavif
+            mingw-w64-ucrt-x86_64-opusfile
+            mingw-w64-ucrt-x86_64-libvorbis
+
+      - name: Restore ccache
+        id: ccache-restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}\ccache
+            ${{ runner.temp }}\thinlto-cache
+          key: ccache-windows-${{ matrix.windows }}-ucrt64-${{ github.sha }}
+          restore-keys: |
+            ccache-windows-${{ matrix.windows }}-ucrt64-
+
+      - name: Configure ccache
+        run: |
+          export CCACHE_DIR="$RUNNER_TEMP/ccache"
+          echo "CCACHE_DIR=$CCACHE_DIR" >> "$GITHUB_ENV"
+          ccache --max-size=500M
+          ccache --zero-stats
+
+      - name: Show toolchain versions
+        run: |
+          clang --version
+          ld.lld --version
+          meson --version
+          ninja --version
+          pkg-config --modversion sdl3 cairo libcurl
+
+      - name: Build (ThinLTO via LLD on main, no LTO on pull requests)
+        run: |
+          export CC="ccache clang"
+          export CC_LD=lld
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            meson setup builddir --werror -Db_lto=false -Dpdfjs=disabled
+          else
+            meson setup builddir --werror -Db_lto=true -Db_lto_mode=thin -Dpdfjs=disabled
+            THINLTO_CACHE_DIR=$(cygpath -m "$RUNNER_TEMP/thinlto-cache")
+            mkdir -p "$THINLTO_CACHE_DIR"
+            meson configure builddir -Dc_link_args="-Wl,--thinlto-cache-dir=$THINLTO_CACHE_DIR -Wl,--thinlto-cache-policy=cache_size_bytes=300m"
+          fi
+          meson compile -C builddir
+
+      - name: ccache stats
+        if: always()
+        run: ccache --show-stats
+
+      - name: gfx against Cairo
+        run: meson test -C builddir --suite gfx --print-errorlogs
+
+      - name: Headless smoke (about:start)
+        run: |
+          set -o pipefail
+          ./builddir/src/sdl/weststar.exe --headless --dump=text about:start > about.txt
+          head -3 about.txt
+          grep -q 'Search duckduckgo.com' about.txt
+
+      - name: Headless JavaScript smoke
+        run: |
+          set -o pipefail
+          ./builddir/src/sdl/weststar.exe --headless --dump=text --settle-ms=300 \
+            'data:text/html,<p id="a">before</p><script>var a=document.getElementById("a");a.textContent="js-ok "+(6*7);setTimeout(function(){a.textContent+=" timer-ok"},50);</script>' \
+            > js.txt
+          cat js.txt
+          grep -q 'js-ok 42 timer-ok' js.txt
+
+      # The binary with the UCRT64 DLLs it links and fontconfig's
+      # configuration: what a Windows package would hold.
+      - name: Bundle
+        run: |
+          mkdir -p bundle/etc
+          cp builddir/src/sdl/weststar.exe bundle/
+          ldd bundle/weststar.exe | awk 'tolower($3) ~ /ucrt64/ {print $3}' | sort -u |
+            while read -r dll; do cp "$dll" bundle/; done
+          cp -r /ucrt64/etc/fonts bundle/etc/
+          ls bundle
+
+      # Run as an installed copy runs, with only the Windows system folders
+      # on PATH, to catch a DLL the bundle left out.
+      - name: Bundle starts without MSYS2 on PATH
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          $p = Start-Process -FilePath bundle\weststar.exe `
+                 -ArgumentList '--headless','--dump=text','about:start' `
+                 -WorkingDirectory bundle -RedirectStandardOutput bundle-about.txt `
+                 -RedirectStandardError bundle-about.err -NoNewWindow -Wait -PassThru
+          Get-Content bundle-about.txt -TotalCount 3
+          Get-Content bundle-about.err
+          if ($p.ExitCode -ne 0) { throw "exit code $($p.ExitCode)" }
+          if (-not (Select-String -Quiet -Path bundle-about.txt -Pattern 'Search duckduckgo.com')) { throw 'about:start did not render' }
+
+      - name: Upload the bundle
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: weststar-windows-${{ matrix.windows }}-ucrt64
+          path: bundle
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Save ccache
+        if: always() && steps.ccache-restore.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}\ccache
+            ${{ runner.temp }}\thinlto-cache
+          key: ccache-windows-${{ matrix.windows }}-ucrt64-${{ github.sha }}

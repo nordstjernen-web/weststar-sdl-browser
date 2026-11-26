@@ -8,8 +8,9 @@
 #define NS_SDL_UI_H
 
 #include <SDL3/SDL.h>
-#include <cairo.h>
 #include <glib.h>
+
+#include "gfx.h"
 
 G_BEGIN_DECLS
 
@@ -38,7 +39,7 @@ typedef struct {
 const NsUiTheme *ns_ui_theme(void);
 void             ns_ui_set_dark(gboolean dark);
 
-void ns_ui_set_source(cairo_t *cr, NsColor c);
+void ns_ui_set_source(gfx_t *g, NsColor c);
 
 /* Chrome text, in the chrome font at size_px UI units. Kerning and
  * ligatures are off, so a string is as wide as its characters together:
@@ -46,13 +47,13 @@ void ns_ui_set_source(cairo_t *cr, NsColor c);
 double ns_ui_text_width(const char *text, int len, double size_px,
                         gboolean bold);
 /* Draws text vertically centred in the box; clipped to w with an ellipsis. */
-void   ns_ui_text_draw(cairo_t *cr, double x, double y, double w, double h,
+void   ns_ui_text_draw(gfx_t *gc, double x, double y, double w, double h,
                        const char *text, int len, double size_px,
                        gboolean bold, double r, double g, double b, double a);
 
-/* A cairo surface uploaded to an SDL texture. */
+/* A gfx surface uploaded to an SDL texture. */
 typedef struct {
-    cairo_surface_t *surface;
+    gfx_surface_t   *surface;
     SDL_Texture     *texture;
     int              px_w, px_h;
 } NsUiLayer;

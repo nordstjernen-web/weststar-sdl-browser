@@ -176,6 +176,20 @@ stb_textedit, stb_truetype and stb_rect_pack by Sean Barrett (public domain
 or MIT) and the ProggyClean font by Tristan Grimmer (MIT); Weststar builds
 it without font baking, so neither the font nor stb_truetype is compiled in.
 
+### font-rs — Apache License 2.0
+
+> The per-pixel area accumulation in Weststar's rasterizer
+> (`accumulate()` in `src/gfx/gfx-raster.c`) is adapted from font-rs's
+> line accumulation, translated from Rust to C and limited to one row.
+> <https://github.com/raphlinus/font-rs>
+>
+> Copyright 2015 Google Inc.
+
+Licensed under the Apache License, Version 2.0 (see the lexbor section
+above). The adapted code carries
+Weststar's changes: rows are processed one at a time with edges clipped
+to the drawing box, in double precision.
+
 ### pl_mpeg — MIT License
 
 > MPEG-1 Part 2 video decoder for `<video>` and MPEG-1 Audio Layer II

@@ -5,6 +5,7 @@
 
 #include "ui.h"
 
+#include "gfx-cairo.h"
 #include "ns_pango.h"
 
 #include <string.h>
@@ -63,9 +64,9 @@ ns_ui_set_dark(gboolean dark)
 }
 
 void
-ns_ui_set_source(cairo_t *cr, NsColor c)
+ns_ui_set_source(gfx_t *g, NsColor c)
 {
-    cairo_set_source_rgba(cr, c.r, c.g, c.b, c.a);
+    gfx_set_source_rgba(g, c.r, c.g, c.b, c.a);
 }
 
 /* A context for measuring text outside of drawing. */
@@ -116,12 +117,14 @@ ns_ui_text_width(const char *text, int len, double size_px, gboolean bold)
 }
 
 void
-ns_ui_text_draw(cairo_t *cr, double x, double y, double w, double h,
+ns_ui_text_draw(gfx_t *gc, double x, double y, double w, double h,
                 const char *text, int len, double size_px, gboolean bold,
                 double r, double g, double b, double a)
 {
     if (!text || len <= 0)
         return;
+    /* Text still goes through pangocairo, drawing into gfx's pixels. */
+    cairo_t *cr = gfx_cairo_begin(gc);
     NsPangoLayout *layout = ui_layout(cr, text, len, size_px, bold);
     if (w > 0) {
         ns_pango_layout_set_width(layout, (int)((w + 1) * NS_PANGO_SCALE));
@@ -134,6 +137,7 @@ ns_ui_text_draw(cairo_t *cr, double x, double y, double w, double h,
     cairo_move_to(cr, x, y + (h - th) / 2);
     ns_pango_cairo_show_layout(cr, layout);
     g_object_unref(layout);
+    gfx_cairo_end(gc, cr);
 }
 
 /* ---- layers ------------------------------------------------------------ */
@@ -146,8 +150,8 @@ ns_ui_layer_size(NsUiLayer *layer, int px_w, int px_h)
     if (layer->surface && layer->px_w == px_w && layer->px_h == px_h)
         return FALSE;
     if (layer->surface)
-        cairo_surface_destroy(layer->surface);
-    layer->surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, px_w, px_h);
+        gfx_surface_destroy(layer->surface);
+    layer->surface = gfx_image_surface_create(GFX_FORMAT_ARGB32, px_w, px_h);
     if (layer->texture) {
         SDL_DestroyTexture(layer->texture);
         layer->texture = NULL;
@@ -163,7 +167,6 @@ ns_ui_layer_upload(NsUiLayer *layer, SDL_Renderer *renderer,
 {
     if (!layer->surface)
         return;
-    cairo_surface_flush(layer->surface);
     gboolean fresh = FALSE;
     if (!layer->texture) {
         layer->texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
@@ -171,14 +174,14 @@ ns_ui_layer_upload(NsUiLayer *layer, SDL_Renderer *renderer,
                                            layer->px_w, layer->px_h);
         if (!layer->texture)
             return;
-        /* Cairo's pixels are premultiplied. */
+        /* gfx's pixels are premultiplied. */
         SDL_SetTextureBlendMode(layer->texture,
                                 SDL_BLENDMODE_BLEND_PREMULTIPLIED);
         SDL_SetTextureScaleMode(layer->texture, SDL_SCALEMODE_NEAREST);
         fresh = TRUE;
     }
-    const guint8 *data = cairo_image_surface_get_data(layer->surface);
-    int stride = cairo_image_surface_get_stride(layer->surface);
+    const guint8 *data = gfx_image_surface_get_data(layer->surface);
+    int stride = gfx_image_surface_get_stride(layer->surface);
     if (!rect || fresh) {
         SDL_UpdateTexture(layer->texture, NULL, data, stride);
         return;
@@ -214,6 +217,6 @@ ns_ui_layer_clear(NsUiLayer *layer)
     if (layer->texture)
         SDL_DestroyTexture(layer->texture);
     if (layer->surface)
-        cairo_surface_destroy(layer->surface);
+        gfx_surface_destroy(layer->surface);
     memset(layer, 0, sizeof *layer);
 }

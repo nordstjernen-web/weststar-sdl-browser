@@ -1,9 +1,9 @@
 # Building and running Weststar SDL Browser
 
 Weststar builds with **meson + ninja** and a C compiler (GCC or Clang).
-It is C only. Linux is the platform the SDL port is developed and tested
-on; SDL3 itself runs on macOS, Windows and the BSDs, but Weststar has not
-been built there yet (see [porting-to-sdl.md](porting-to-sdl.md)).
+It is C only. It is built and tested on Linux and on Windows (MSYS2
+UCRT64), both in CI; SDL3 also runs on macOS and the BSDs, where Weststar
+has not been built yet (see [porting-to-sdl.md](porting-to-sdl.md)).
 
 ## Linux dependencies
 
@@ -62,6 +62,22 @@ cmake -S SDL3-3.2.26 -B sdl3-build -G Ninja -DCMAKE_BUILD_TYPE=Release \
 sudo ninja -C sdl3-build install
 ```
 
+## Windows (MSYS2)
+
+Weststar builds natively on Windows in an [MSYS2](https://www.msys2.org)
+**UCRT64** shell, with GCC or Clang. Install the toolchain and libraries:
+
+```sh
+pacman -S --needed git mingw-w64-ucrt-x86_64-{gcc,clang,lld,pkgconf,meson,ninja}     mingw-w64-ucrt-x86_64-{sdl3,glib2,harfbuzz,fribidi,cairo,fontconfig,freetype}     mingw-w64-ucrt-x86_64-{curl,openssl,ca-certificates,libpsl,sqlite3,zlib,brotli,zstd}     mingw-w64-ucrt-x86_64-{libavif,opusfile,libvorbis}
+```
+
+then build as below; the binary is `builddir/src/sdl/weststar.exe`. To run
+it outside the MSYS2 shell, put it in a folder with the UCRT64 DLLs it
+links (`ldd weststar.exe`) and `/ucrt64/etc/fonts` as `etc/fonts`: the
+`windows` workflow (`.github/workflows/windows.yml`) builds exactly that
+bundle and checks that it starts with only the Windows system folders on
+`PATH`.
+
 ## Visual Studio Code
 
 The repository's `.vscode/` workspace builds, runs and debugs the browser
@@ -110,6 +126,12 @@ options.
 
 `./scripts/dev.sh build` runs `meson setup` (only when needed) and
 `meson compile -C builddir` in one step.
+
+`meson test -C builddir --suite gfx` checks the in-tree rasterizer
+(`src/gfx/`) against Cairo: it draws a set of scenes (fills, strokes,
+dashes, gradients, images, clips, groups, masks, every operator) with
+both and compares the pixels. `GFX_TEST_OUT=<dir>` writes each pair as
+PNGs.
 
 ## Building with muon
 

@@ -7,14 +7,15 @@
 #define NS_SDL_ICONS_H
 
 #include <SDL3/SDL.h>
-#include <cairo.h>
 #include <glib.h>
+
+#include "gfx.h"
 
 G_BEGIN_DECLS
 
 /* Draws icon "name" (e.g. "weststar-back") into the size x size box at (x, y);
  * FALSE when there is no such icon. */
-gboolean ns_sdl_icon_draw(cairo_t *cr, const char *name, double x, double y,
+gboolean ns_sdl_icon_draw(gfx_t *g, const char *name, double x, double y,
                           double size);
 
 /* The window icon: icon "name" at px x px, as a new SDL surface. */

@@ -50,7 +50,8 @@ executable(
     weststar_icon_resources +
     northstar_win_resources + ns_embedded_headers + [sb_key_h] +
     pdf_viewer_headers,
-  dependencies: northstar_deps + [sdl3_dep, libnuklear] + northstar_audio_deps,
+  dependencies: northstar_deps + [sdl3_dep, libnuklear, weststar_gfx_dep] +
+    northstar_audio_deps,
   link_with: [northstar_audio_libs, weststar_nuklear_lib],
   include_directories: [include_directories('..', '.'), ns_embedded_inc],
   pie: weststar_pie,

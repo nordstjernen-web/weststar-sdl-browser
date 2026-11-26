@@ -258,4 +258,5 @@ else
   message('in-process audio playback disabled (-Daudio=disabled)')
 endif
 
+subdir('gfx')
 subdir('sdl')

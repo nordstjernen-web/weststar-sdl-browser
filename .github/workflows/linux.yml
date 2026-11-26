@@ -56,6 +56,9 @@ jobs:
           meson setup builddir --werror -Db_lto=$lto -Dpdfjs=disabled
           meson compile -C builddir 2>&1 | tee build.log
 
+      - name: gfx against Cairo
+        run: meson test -C builddir --suite gfx --print-errorlogs
+
       - name: No GTK in the binary
         run: |
           test -x builddir/src/sdl/weststar

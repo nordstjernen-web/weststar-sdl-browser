@@ -404,27 +404,27 @@ ns_nk_input_event(NsNk *nk, const SDL_Event *ev, float to_ui)
 /* ---- rendering --------------------------------------------------------- */
 
 static void
-set_color(cairo_t *cr, struct nk_color c)
+set_color(gfx_t *g, struct nk_color c)
 {
-    cairo_set_source_rgba(cr, c.r / 255.0, c.g / 255.0, c.b / 255.0,
+    gfx_set_source_rgba(g, c.r / 255.0, c.g / 255.0, c.b / 255.0,
                           c.a / 255.0);
 }
 
 static void
-rounded(cairo_t *cr, double x, double y, double w, double h, double r)
+rounded(gfx_t *g, double x, double y, double w, double h, double r)
 {
     if (r <= 0) {
-        cairo_rectangle(cr, x, y, w, h);
+        gfx_rectangle(g, x, y, w, h);
         return;
     }
     if (r > w / 2) r = w / 2;
     if (r > h / 2) r = h / 2;
-    cairo_new_sub_path(cr);
-    cairo_arc(cr, x + w - r, y + r, r, -G_PI / 2, 0);
-    cairo_arc(cr, x + w - r, y + h - r, r, 0, G_PI / 2);
-    cairo_arc(cr, x + r, y + h - r, r, G_PI / 2, G_PI);
-    cairo_arc(cr, x + r, y + r, r, G_PI, 3 * G_PI / 2);
-    cairo_close_path(cr);
+    gfx_new_sub_path(g);
+    gfx_arc(g, x + w - r, y + r, r, -G_PI / 2, 0);
+    gfx_arc(g, x + w - r, y + h - r, r, 0, G_PI / 2);
+    gfx_arc(g, x + r, y + h - r, r, G_PI / 2, G_PI);
+    gfx_arc(g, x + r, y + r, r, G_PI, 3 * G_PI / 2);
+    gfx_close_path(g);
 }
 
 /* The command's bounds in UI units; FALSE for commands that draw nothing. */
@@ -543,79 +543,79 @@ cmd_bounds(const struct nk_command *cmd, double *x0, double *y0, double *x1,
 }
 
 static void
-path_points(cairo_t *cr, const struct nk_vec2i *pts, unsigned short n)
+path_points(gfx_t *g, const struct nk_vec2i *pts, unsigned short n)
 {
     for (unsigned short i = 0; i < n; i++) {
         if (i == 0)
-            cairo_move_to(cr, pts[i].x, pts[i].y);
+            gfx_move_to(g, pts[i].x, pts[i].y);
         else
-            cairo_line_to(cr, pts[i].x, pts[i].y);
+            gfx_line_to(g, pts[i].x, pts[i].y);
     }
 }
 
 static void
-draw_cmd(cairo_t *cr, const struct nk_command *cmd, const SDL_Rect *dirty_ui)
+draw_cmd(gfx_t *g, const struct nk_command *cmd, const SDL_Rect *dirty_ui)
 {
     switch (cmd->type) {
     case NK_COMMAND_SCISSOR: {
         const struct nk_command_scissor *c = (const void *)cmd;
-        cairo_reset_clip(cr);
-        cairo_rectangle(cr, dirty_ui->x, dirty_ui->y, dirty_ui->w, dirty_ui->h);
-        cairo_clip(cr);
-        cairo_rectangle(cr, c->x, c->y, c->w, c->h);
-        cairo_clip(cr);
+        gfx_reset_clip(g);
+        gfx_rectangle(g, dirty_ui->x, dirty_ui->y, dirty_ui->w, dirty_ui->h);
+        gfx_clip(g);
+        gfx_rectangle(g, c->x, c->y, c->w, c->h);
+        gfx_clip(g);
         break;
     }
     case NK_COMMAND_LINE: {
         const struct nk_command_line *c = (const void *)cmd;
-        set_color(cr, c->color);
-        cairo_set_line_width(cr, c->line_thickness);
-        cairo_move_to(cr, c->begin.x + 0.5, c->begin.y + 0.5);
-        cairo_line_to(cr, c->end.x + 0.5, c->end.y + 0.5);
-        cairo_stroke(cr);
+        set_color(g, c->color);
+        gfx_set_line_width(g, c->line_thickness);
+        gfx_move_to(g, c->begin.x + 0.5, c->begin.y + 0.5);
+        gfx_line_to(g, c->end.x + 0.5, c->end.y + 0.5);
+        gfx_stroke(g);
         break;
     }
     case NK_COMMAND_CURVE: {
         const struct nk_command_curve *c = (const void *)cmd;
-        set_color(cr, c->color);
-        cairo_set_line_width(cr, c->line_thickness);
-        cairo_move_to(cr, c->begin.x, c->begin.y);
-        cairo_curve_to(cr, c->ctrl[0].x, c->ctrl[0].y, c->ctrl[1].x,
+        set_color(g, c->color);
+        gfx_set_line_width(g, c->line_thickness);
+        gfx_move_to(g, c->begin.x, c->begin.y);
+        gfx_curve_to(g, c->ctrl[0].x, c->ctrl[0].y, c->ctrl[1].x,
                        c->ctrl[1].y, c->end.x, c->end.y);
-        cairo_stroke(cr);
+        gfx_stroke(g);
         break;
     }
     case NK_COMMAND_RECT: {
         const struct nk_command_rect *c = (const void *)cmd;
         double t = c->line_thickness;
-        set_color(cr, c->color);
-        cairo_set_line_width(cr, t);
-        rounded(cr, c->x + t / 2, c->y + t / 2, c->w - t, c->h - t, c->rounding);
-        cairo_stroke(cr);
+        set_color(g, c->color);
+        gfx_set_line_width(g, t);
+        rounded(g, c->x + t / 2, c->y + t / 2, c->w - t, c->h - t, c->rounding);
+        gfx_stroke(g);
         break;
     }
     case NK_COMMAND_RECT_FILLED: {
         const struct nk_command_rect_filled *c = (const void *)cmd;
-        set_color(cr, c->color);
-        rounded(cr, c->x, c->y, c->w, c->h, c->rounding);
-        cairo_fill(cr);
+        set_color(g, c->color);
+        rounded(g, c->x, c->y, c->w, c->h, c->rounding);
+        gfx_fill(g);
         break;
     }
     case NK_COMMAND_RECT_MULTI_COLOR: {
         const struct nk_command_rect_multi_color *c = (const void *)cmd;
-        cairo_pattern_t *p = cairo_pattern_create_linear(c->x, c->y, c->x,
+        gfx_pattern_t *p = gfx_pattern_create_linear(c->x, c->y, c->x,
                                                          c->y + c->h);
-        cairo_pattern_add_color_stop_rgba(p, 0, c->top.r / 255.0,
+        gfx_pattern_add_color_stop_rgba(p, 0, c->top.r / 255.0,
                                           c->top.g / 255.0, c->top.b / 255.0,
                                           c->top.a / 255.0);
-        cairo_pattern_add_color_stop_rgba(p, 1, c->bottom.r / 255.0,
+        gfx_pattern_add_color_stop_rgba(p, 1, c->bottom.r / 255.0,
                                           c->bottom.g / 255.0,
                                           c->bottom.b / 255.0,
                                           c->bottom.a / 255.0);
-        cairo_set_source(cr, p);
-        cairo_rectangle(cr, c->x, c->y, c->w, c->h);
-        cairo_fill(cr);
-        cairo_pattern_destroy(p);
+        gfx_set_source(g, p);
+        gfx_rectangle(g, c->x, c->y, c->w, c->h);
+        gfx_fill(g);
+        gfx_pattern_destroy(p);
         break;
     }
     case NK_COMMAND_CIRCLE:
@@ -627,81 +627,81 @@ draw_cmd(cairo_t *cr, const struct nk_command *cmd, const SDL_Rect *dirty_ui)
         unsigned short w = fill ? f->w : c->w, h = fill ? f->h : c->h;
         if (w == 0 || h == 0)
             break;
-        set_color(cr, fill ? f->color : c->color);
-        cairo_save(cr);
-        cairo_translate(cr, x + w / 2.0, y + h / 2.0);
-        cairo_scale(cr, w / 2.0, h / 2.0);
-        cairo_arc(cr, 0, 0, 1, 0, 2 * G_PI);
-        cairo_restore(cr);
+        set_color(g, fill ? f->color : c->color);
+        gfx_save(g);
+        gfx_translate(g, x + w / 2.0, y + h / 2.0);
+        gfx_scale(g, w / 2.0, h / 2.0);
+        gfx_arc(g, 0, 0, 1, 0, 2 * G_PI);
+        gfx_restore(g);
         if (fill) {
-            cairo_fill(cr);
+            gfx_fill(g);
         } else {
-            cairo_set_line_width(cr, c->line_thickness);
-            cairo_stroke(cr);
+            gfx_set_line_width(g, c->line_thickness);
+            gfx_stroke(g);
         }
         break;
     }
     case NK_COMMAND_ARC: {
         const struct nk_command_arc *c = (const void *)cmd;
-        set_color(cr, c->color);
-        cairo_set_line_width(cr, c->line_thickness);
-        cairo_arc(cr, c->cx, c->cy, c->r, c->a[0], c->a[1]);
-        cairo_stroke(cr);
+        set_color(g, c->color);
+        gfx_set_line_width(g, c->line_thickness);
+        gfx_arc(g, c->cx, c->cy, c->r, c->a[0], c->a[1]);
+        gfx_stroke(g);
         break;
     }
     case NK_COMMAND_ARC_FILLED: {
         const struct nk_command_arc_filled *c = (const void *)cmd;
-        set_color(cr, c->color);
-        cairo_move_to(cr, c->cx, c->cy);
-        cairo_arc(cr, c->cx, c->cy, c->r, c->a[0], c->a[1]);
-        cairo_close_path(cr);
-        cairo_fill(cr);
+        set_color(g, c->color);
+        gfx_move_to(g, c->cx, c->cy);
+        gfx_arc(g, c->cx, c->cy, c->r, c->a[0], c->a[1]);
+        gfx_close_path(g);
+        gfx_fill(g);
         break;
     }
     case NK_COMMAND_TRIANGLE: {
         const struct nk_command_triangle *c = (const void *)cmd;
-        set_color(cr, c->color);
-        cairo_set_line_width(cr, c->line_thickness);
-        cairo_move_to(cr, c->a.x, c->a.y);
-        cairo_line_to(cr, c->b.x, c->b.y);
-        cairo_line_to(cr, c->c.x, c->c.y);
-        cairo_close_path(cr);
-        cairo_stroke(cr);
+        set_color(g, c->color);
+        gfx_set_line_width(g, c->line_thickness);
+        gfx_move_to(g, c->a.x, c->a.y);
+        gfx_line_to(g, c->b.x, c->b.y);
+        gfx_line_to(g, c->c.x, c->c.y);
+        gfx_close_path(g);
+        gfx_stroke(g);
         break;
     }
     case NK_COMMAND_TRIANGLE_FILLED: {
         const struct nk_command_triangle_filled *c = (const void *)cmd;
-        set_color(cr, c->color);
-        cairo_move_to(cr, c->a.x, c->a.y);
-        cairo_line_to(cr, c->b.x, c->b.y);
-        cairo_line_to(cr, c->c.x, c->c.y);
-        cairo_close_path(cr);
-        cairo_fill(cr);
+        set_color(g, c->color);
+        gfx_move_to(g, c->a.x, c->a.y);
+        gfx_line_to(g, c->b.x, c->b.y);
+        gfx_line_to(g, c->c.x, c->c.y);
+        gfx_close_path(g);
+        gfx_fill(g);
         break;
     }
     case NK_COMMAND_POLYGON: {
         const struct nk_command_polygon *c = (const void *)cmd;
-        set_color(cr, c->color);
-        cairo_set_line_width(cr, c->line_thickness);
-        path_points(cr, c->points, c->point_count);
-        cairo_close_path(cr);
-        cairo_stroke(cr);
+        set_color(g, c->color);
+        gfx_set_line_width(g, c->line_thickness);
+        path_points(g, c->points, c->point_count);
+        gfx_close_path(g);
+        gfx_stroke(g);
         break;
     }
     case NK_COMMAND_POLYGON_FILLED: {
         const struct nk_command_polygon_filled *c = (const void *)cmd;
-        set_color(cr, c->color);
-        path_points(cr, c->points, c->point_count);
-        cairo_close_path(cr);
-        cairo_fill(cr);
+        set_color(g, c->color);
+        path_points(g, c->points, c->point_count);
+        gfx_close_path(g);
+        gfx_fill(g);
         break;
     }
     case NK_COMMAND_POLYLINE: {
         const struct nk_command_polyline *c = (const void *)cmd;
-        set_color(cr, c->color);
-        cairo_set_line_width(cr, c->line_thickness);
-        path_points(cr, c->points, c->point_count);
-        cairo_stroke(cr);
+        set_color(g, c->color);
+        gfx_set_line_width(g, c->line_thickness);
+        path_points(g, c->points, c->point_count);
+        gfx_stroke(g);
         break;
     }
     case NK_COMMAND_TEXT: {
@@ -709,7 +709,7 @@ draw_cmd(cairo_t *cr, const struct nk_command *cmd, const SDL_Rect *dirty_ui)
         const FontSpec *spec = c->font ? c->font->userdata.ptr : NULL;
         if (!spec)
             break;
-        ns_ui_text_draw(cr, c->x, c->y, 0, c->h, c->string, c->length,
+        ns_ui_text_draw(g, c->x, c->y, 0, c->h, c->string, c->length,
                         spec->size, spec->bold, c->foreground.r / 255.0,
                         c->foreground.g / 255.0, c->foreground.b / 255.0,
                         c->foreground.a / 255.0);
@@ -724,12 +724,12 @@ draw_cmd(cairo_t *cr, const struct nk_command *cmd, const SDL_Rect *dirty_ui)
         /* A disabled widget's image comes tinted grey: draw it faded. */
         double alpha = (c->col.r / 255.0) * (c->col.a / 255.0);
         if (alpha < 0.99)
-            cairo_push_group(cr);
-        ns_sdl_icon_draw(cr, name, c->x + (c->w - size) / 2,
+            gfx_push_group(g);
+        ns_sdl_icon_draw(g, name, c->x + (c->w - size) / 2,
                          c->y + (c->h - size) / 2, size);
         if (alpha < 0.99) {
-            cairo_pop_group_to_source(cr);
-            cairo_paint_with_alpha(cr, MAX(alpha, 0.3));
+            gfx_pop_group_to_source(g);
+            gfx_paint_with_alpha(g, MAX(alpha, 0.3));
         }
         break;
     }
@@ -799,19 +799,19 @@ ns_nk_render(NsNk *nk, SDL_Renderer *renderer, int px_w, int px_h,
         return FALSE;
     }
 
-    cairo_t *cr = cairo_create(nk->layer.surface);
-    cairo_rectangle(cr, dirty.x, dirty.y, dirty.w, dirty.h);
-    cairo_clip(cr);
-    cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
-    cairo_paint(cr);
-    cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
-    cairo_scale(cr, ui_scale, ui_scale);
+    gfx_t *g = gfx_create(nk->layer.surface);
+    gfx_rectangle(g, dirty.x, dirty.y, dirty.w, dirty.h);
+    gfx_clip(g);
+    gfx_set_operator(g, GFX_OPERATOR_CLEAR);
+    gfx_paint(g);
+    gfx_set_operator(g, GFX_OPERATOR_OVER);
+    gfx_scale(g, ui_scale, ui_scale);
     SDL_Rect dirty_ui = { (int)floor(dirty.x / ui_scale), (int)floor(dirty.y / ui_scale),
                           (int)ceil(dirty.w / ui_scale) + 2,
                           (int)ceil(dirty.h / ui_scale) + 2 };
     nk_foreach(cmd, ctx)
-        draw_cmd(cr, cmd, &dirty_ui);
-    cairo_destroy(cr);
+        draw_cmd(g, cmd, &dirty_ui);
+    gfx_destroy(g);
     nk_clear(ctx);
     ns_ui_layer_upload(&nk->layer, renderer, &dirty);
     return TRUE;

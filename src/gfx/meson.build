@@ -1,0 +1,40 @@
+# gfx: the in-tree 2D rasterizer replacing Cairo (see docs/porting-to-sdl.md).
+weststar_gfx_sources = files(
+  'gfx-composite.c',
+  'gfx-context.c',
+  'gfx-matrix.c',
+  'gfx-path.c',
+  'gfx-pattern.c',
+  'gfx-raster.c',
+  'gfx-stroke.c',
+  'gfx-surface.c',
+)
+
+# The bridge to Cairo for call sites not ported yet; it leaves with the
+# Cairo dependency.
+weststar_gfx_cairo_sources = files('gfx-cairo.c')
+
+weststar_gfx_lib = static_library(
+  'weststar-gfx',
+  weststar_gfx_sources + weststar_gfx_cairo_sources,
+  dependencies: [libm, zlib, cairo],
+)
+
+weststar_gfx_dep = declare_dependency(
+  link_with: weststar_gfx_lib,
+  include_directories: include_directories('.'),
+  dependencies: [libm, zlib, cairo],
+)
+
+# Draws every scene with gfx and with Cairo and compares the pixels.
+test(
+  'gfx',
+  executable(
+    'gfx-test',
+    files('tests/gfx-test.c'),
+    dependencies: [weststar_gfx_dep],
+    include_directories: include_directories('tests'),
+    build_by_default: true,
+  ),
+  suite: 'gfx',
+)
