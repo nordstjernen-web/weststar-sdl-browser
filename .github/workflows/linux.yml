@@ -57,7 +57,17 @@ jobs:
           meson compile -C builddir 2>&1 | tee build.log
 
       - name: gfx against Cairo
-        run: meson test -C builddir --suite gfx --print-errorlogs
+        run: |
+          mkdir -p gfx-test-out
+          GFX_TEST_OUT="$PWD/gfx-test-out" meson test -C builddir --suite gfx --print-errorlogs
+
+      - name: Upload the gfx test images
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gfx-test-linux
+          path: gfx-test-out
+          retention-days: 7
 
       - name: No GTK in the binary
         run: |
