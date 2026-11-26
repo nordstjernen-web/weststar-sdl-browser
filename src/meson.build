@@ -141,6 +141,7 @@ northstar_engine_sources = files(
   'content_decode.c',
   'paint.c',
   'pdf.c',
+  'plat/ns_plat.c',
   'render.c',
   'safebrowsing.c',
   'safebrowsing_google.c',
@@ -183,6 +184,7 @@ endif
 # A dependency that was not found is ignored, so optional libraries are
 # listed unconditionally.
 northstar_deps = [
+  sdl3_dep,
   glib,
   gobject,
   gio,

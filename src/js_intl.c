@@ -5,6 +5,7 @@
  */
 
 #include "js_intl.h"
+#include "plat/ns_plat.h"
 
 #include <math.h>
 #include <string.h>
@@ -1269,7 +1270,7 @@ static double
 intl_to_ms(JSContext *ctx, int argc, JSValueConst *argv)
 {
     if (argc < 1 || JS_IsUndefined(argv[0]))
-        return (double)(g_get_real_time() / 1000);
+        return (double)(ns_time_real_us() / 1000);
     double ms;
     if (JS_ToFloat64(ctx, &ms, argv[0]) != 0) return NAN;
     return ms;

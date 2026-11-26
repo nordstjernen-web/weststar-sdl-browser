@@ -6,6 +6,7 @@
  */
 
 #include "camera.h"
+#include "plat/ns_plat.h"
 #include "security.h"
 
 #include <string.h>
@@ -14,7 +15,7 @@
 #include "net.h"
 
 /* Permission state is touched from the engine and UI threads. */
-static GMutex g_camera_lock;
+static NsMutex g_camera_lock;
 static GHashTable *g_camera_decisions;
 static char *g_camera_pending;
 
@@ -32,9 +33,9 @@ ns_camera_record_decision(const char *origin, gboolean allow)
 gboolean
 ns_camera_has_pending_origin(void)
 {
-    g_mutex_lock(&g_camera_lock);
+    ns_mutex_lock(&g_camera_lock);
     gboolean pending = g_camera_pending != NULL;
-    g_mutex_unlock(&g_camera_lock);
+    ns_mutex_unlock(&g_camera_lock);
     return pending;
 }
 
@@ -42,10 +43,10 @@ ns_camera_has_pending_origin(void)
 char *
 ns_camera_take_pending_origin(void)
 {
-    g_mutex_lock(&g_camera_lock);
+    ns_mutex_lock(&g_camera_lock);
     char *origin = g_camera_pending;
     g_camera_pending = NULL;
-    g_mutex_unlock(&g_camera_lock);
+    ns_mutex_unlock(&g_camera_lock);
     return origin;
 }
 
@@ -54,11 +55,11 @@ void
 ns_camera_set_decision(const char *origin, int allow)
 {
     if (!origin || !*origin) return;
-    g_mutex_lock(&g_camera_lock);
+    ns_mutex_lock(&g_camera_lock);
     ns_camera_record_decision(origin, allow ? TRUE : FALSE);
     if (g_camera_pending && g_strcmp0(g_camera_pending, origin) == 0)
         g_clear_pointer(&g_camera_pending, g_free);
-    g_mutex_unlock(&g_camera_lock);
+    ns_mutex_unlock(&g_camera_lock);
 }
 
 static int ns_camera_permission_locked(char *origin);
@@ -84,10 +85,10 @@ gboolean
 ns_camera_permission_granted(ns_js *js)
 {
     g_autofree char *origin = ns_camera_key(js);
-    g_mutex_lock(&g_camera_lock);
+    ns_mutex_lock(&g_camera_lock);
     gpointer v = g_camera_decisions
         ? g_hash_table_lookup(g_camera_decisions, origin) : NULL;
-    g_mutex_unlock(&g_camera_lock);
+    ns_mutex_unlock(&g_camera_lock);
     return GPOINTER_TO_INT(v) == 1;
 }
 
@@ -96,9 +97,9 @@ int
 ns_camera_permission(ns_js *js)
 {
     char *origin = ns_camera_key(js);
-    g_mutex_lock(&g_camera_lock);
+    ns_mutex_lock(&g_camera_lock);
     int r = ns_camera_permission_locked(origin);
-    g_mutex_unlock(&g_camera_lock);
+    ns_mutex_unlock(&g_camera_lock);
     return r;
 }
 

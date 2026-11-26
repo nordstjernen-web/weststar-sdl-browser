@@ -5,6 +5,7 @@
  */
 
 #include "quickjs_compat.h"
+#include "plat/ns_plat.h"
 #include "js_internal.h"
 
 #include <math.h>
@@ -64,7 +65,7 @@ double
 ns_perf_now_ms(const ns_js *js)
 {
     gint64 origin = js ? js->time_origin_us : 0;
-    return ns_perf_relative_ms(g_get_monotonic_time(), origin);
+    return ns_perf_relative_ms(ns_time_monotonic_us(), origin);
 }
 
 JSValue
@@ -865,7 +866,7 @@ ns_window_performance_getEntriesByType(JSContext *ctx, JSValueConst this_val,
 static void
 ns_js_sample_heap_usage(ns_js *js)
 {
-    gint64 now = g_get_monotonic_time();
+    gint64 now = ns_time_monotonic_us();
     if (js->heap_usage_sampled_us &&
         now - js->heap_usage_sampled_us < NS_HEAP_USAGE_SAMPLE_US)
         return;

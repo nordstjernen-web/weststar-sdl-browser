@@ -5,6 +5,7 @@
  */
 
 #include "anim.h"
+#include "plat/ns_plat.h"
 
 #include <math.h>
 #include <string.h>
@@ -118,7 +119,7 @@ struct ns_anim {
 static gint64
 anim_now(ns_anim *a)
 {
-    if (a->now_us == 0) a->now_us = g_get_monotonic_time();
+    if (a->now_us == 0) a->now_us = ns_time_monotonic_us();
     return a->now_us;
 }
 

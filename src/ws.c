@@ -5,6 +5,7 @@
  */
 
 #include "mainctx.h"
+#include "plat/ns_plat.h"
 #include "ws.h"
 
 #include <curl/curl.h>
@@ -43,15 +44,15 @@ struct ns_ws {
     ns_ws_callbacks   cbs;
     gpointer          user_data;
 
-    GMutex            lock;
-    GCond             cond;
+    NsMutex           lock;
+    NsCond            cond;
     GQueue            out_queue;
     volatile gint     state;
     volatile gint     exit_requested;
     volatile gint     detached;
     volatile gint     pending;
 
-    GThread          *thread;
+    NsThread         *thread;
 
     GByteArray       *recv_assembly;
     int               recv_assembly_kind;
@@ -80,8 +81,8 @@ ns_ws_destroy(ns_ws *ws)
         g_free(m);
     }
     if (ws->recv_assembly) g_byte_array_free(ws->recv_assembly, TRUE);
-    g_mutex_clear(&ws->lock);
-    g_cond_clear(&ws->cond);
+    ns_mutex_clear(&ws->lock);
+    ns_cond_clear(&ws->cond);
     g_free(ws);
 }
 
@@ -134,7 +135,7 @@ ns_ws_post(ns_ws *ws,
     while (throttled && !g_atomic_int_get(&ws->detached) &&
            !g_atomic_int_get(&ws->exit_requested) &&
            g_atomic_int_get(&ws->pending) >= NS_WS_MAX_PENDING)
-        g_usleep(2000);
+        ns_sleep_us(2000);
     if (g_atomic_int_get(&ws->detached)) {
         if (payload && payload_free) payload_free(payload);
         return;
@@ -270,7 +271,7 @@ ns_ws_send_curl(ns_ws *ws, CURL *curl, const guint8 *data, gsize len,
                                    remain, &sent, 0, flags);
         if (rc == CURLE_AGAIN) {
             if (++stalls > 5000) return FALSE;
-            g_usleep(2000);
+            ns_sleep_us(2000);
             continue;
         }
         if (rc != CURLE_OK) return FALSE;
@@ -278,7 +279,7 @@ ns_ws_send_curl(ns_ws *ws, CURL *curl, const guint8 *data, gsize len,
         if (off >= len) return TRUE;
         if (sent == 0) {
             if (++stalls > 5000) return FALSE;
-            g_usleep(2000);
+            ns_sleep_us(2000);
         } else {
             stalls = 0;
         }
@@ -324,9 +325,9 @@ ns_ws_drain_outgoing(ns_ws *ws, CURL *curl, gboolean *want_close,
                      int *close_code, char **close_reason)
 {
     for (;;) {
-        g_mutex_lock(&ws->lock);
+        ns_mutex_lock(&ws->lock);
         ns_ws_out_msg *m = g_queue_pop_head(&ws->out_queue);
-        g_mutex_unlock(&ws->lock);
+        ns_mutex_unlock(&ws->lock);
         if (!m) return;
         switch (m->kind) {
         case NS_WS_OUT_TEXT:
@@ -425,14 +426,14 @@ ns_ws_handle_frame(ns_ws *ws, const guint8 *data, gsize len,
 static void
 ns_ws_worker_wait(ns_ws *ws)
 {
-    g_mutex_lock(&ws->lock);
+    ns_mutex_lock(&ws->lock);
     if (g_queue_is_empty(&ws->out_queue) &&
         !g_atomic_int_get(&ws->exit_requested)) {
-        gint64 deadline = g_get_monotonic_time() +
+        gint64 deadline = ns_time_monotonic_us() +
                           (gint64)NS_WS_POLL_MSEC * G_TIME_SPAN_MILLISECOND;
-        g_cond_wait_until(&ws->cond, &ws->lock, deadline);
+        ns_cond_wait_until(&ws->cond, &ws->lock, deadline);
     }
-    g_mutex_unlock(&ws->lock);
+    ns_mutex_unlock(&ws->lock);
 }
 
 /* Curl progress callback that aborts the handshake once exit is requested. */
@@ -671,13 +672,13 @@ ns_ws_new(const char        *url,
     }
     if (cbs) ws->cbs = *cbs;
     ws->user_data = user_data;
-    g_mutex_init(&ws->lock);
-    g_cond_init(&ws->cond);
+    ns_mutex_init(&ws->lock);
+    ns_cond_init(&ws->cond);
     g_queue_init(&ws->out_queue);
     g_atomic_int_set(&ws->state, NS_WS_STATE_CONNECTING);
 
     ns_ws_ref(ws);
-    ws->thread = g_thread_new("nd-ws", ns_ws_worker_curl, ws);
+    ws->thread = ns_thread_new("nd-ws", ns_ws_worker_curl, ws);
     return ws;
 }
 
@@ -699,10 +700,10 @@ ns_ws_enqueue(ns_ws *ws, ns_ws_out_kind kind,
         m->data = g_memdup2(data, len);
         m->len = len;
     }
-    g_mutex_lock(&ws->lock);
+    ns_mutex_lock(&ws->lock);
     g_queue_push_tail(&ws->out_queue, m);
-    g_cond_signal(&ws->cond);
-    g_mutex_unlock(&ws->lock);
+    ns_cond_signal(&ws->cond);
+    ns_mutex_unlock(&ws->lock);
     return TRUE;
 }
 
@@ -746,11 +747,11 @@ ns_ws_free(ns_ws *ws)
     if (!ws) return;
     g_atomic_int_set(&ws->detached, 1);
     g_atomic_int_set(&ws->exit_requested, 1);
-    g_mutex_lock(&ws->lock);
-    g_cond_signal(&ws->cond);
-    g_mutex_unlock(&ws->lock);
+    ns_mutex_lock(&ws->lock);
+    ns_cond_signal(&ws->cond);
+    ns_mutex_unlock(&ws->lock);
     if (ws->thread) {
-        g_thread_join(ws->thread);
+        ns_thread_join(ws->thread);
         ws->thread = NULL;
     }
     ns_ws_unref(ws);

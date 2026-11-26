@@ -5,6 +5,7 @@
  */
 
 #include "config.h"
+#include "plat/ns_plat.h"
 #include "security.h"
 
 #include <glib/gstdio.h>
@@ -365,18 +366,18 @@ ns_config_mut(void)
     return &g_cfg;
 }
 
-static GMutex g_cfg_mutex;
+static NsMutex g_cfg_mutex;
 
 void
 ns_config_lock(void)
 {
-    g_mutex_lock(&g_cfg_mutex);
+    ns_mutex_lock(&g_cfg_mutex);
 }
 
 void
 ns_config_unlock(void)
 {
-    g_mutex_unlock(&g_cfg_mutex);
+    ns_mutex_unlock(&g_cfg_mutex);
 }
 
 static const char *const referer_policy_names[] = {

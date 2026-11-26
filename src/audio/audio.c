@@ -8,6 +8,7 @@
 #endif
 #define SDL_MAIN_HANDLED
 #include "audio.h"
+#include "plat/ns_plat.h"
 #include "trace.h"
 
 #include <glib.h>
@@ -72,7 +73,7 @@ typedef struct {
 struct NsAudioContext {
     gint          generation;
     gint          destroyed;
-    GMutex        lock;
+    NsMutex       lock;
     char         *document_url;
     ns_fetch_policy *policy;
     GCancellable *cancel;
@@ -112,7 +113,7 @@ static SDL_Thread       *g_null_thread;
 static SDL_AtomicInt     g_null_quit;
 static ns_audio_player   g_players[NS_AUDIO_MAX_PLAYERS];
 static GAsyncQueue      *g_commands;
-static GThread          *g_worker;
+static NsThread         *g_worker;
 static gint              g_shutting_down;
 static gint              g_silent;
 static guint             g_command_seq;
@@ -216,7 +217,7 @@ static void
 audio_mix(float *out, int nframes)
 {
     memset(out, 0, (size_t)nframes * 2 * sizeof(float));
-    gint64 now = g_get_monotonic_time();
+    gint64 now = ns_time_monotonic_us();
     gint64 trace_start = ns_trace_now();
     int playing = 0, starved = 0;
 
@@ -750,10 +751,10 @@ local_file_path(const char *url)
 static GCancellable *
 context_cancellable(NsAudioContext *context)
 {
-    g_mutex_lock(&context->lock);
+    ns_mutex_lock(&context->lock);
     GCancellable *cancel = context->cancel ? g_object_ref(context->cancel)
                                            : NULL;
-    g_mutex_unlock(&context->lock);
+    ns_mutex_unlock(&context->lock);
     return cancel;
 }
 
@@ -761,11 +762,11 @@ context_cancellable(NsAudioContext *context)
 static void
 context_cancel_fetches(NsAudioContext *context)
 {
-    g_mutex_lock(&context->lock);
+    ns_mutex_lock(&context->lock);
     GCancellable *old = context->cancel;
     context->cancel = g_cancellable_new();
     g_hash_table_remove_all(context->failures);
-    g_mutex_unlock(&context->lock);
+    ns_mutex_unlock(&context->lock);
     if (old) {
         g_cancellable_cancel(old);
         g_object_unref(old);
@@ -777,13 +778,13 @@ static void
 context_set_failure(NsAudioContext *context, const char *token,
                     NsAudioError error)
 {
-    g_mutex_lock(&context->lock);
+    ns_mutex_lock(&context->lock);
     if (error == NS_AUDIO_ERROR_NONE)
         g_hash_table_remove(context->failures, token);
     else
         g_hash_table_replace(context->failures, g_strdup(token),
                              GINT_TO_POINTER(error));
-    g_mutex_unlock(&context->lock);
+    ns_mutex_unlock(&context->lock);
 }
 
 /* Reads a file: audio URL, allowed only for file: documents. */
@@ -1112,7 +1113,7 @@ context_free(NsAudioContext *context)
     g_clear_pointer(&context->failures, g_hash_table_destroy);
     g_free(context->document_url);
     ns_fetch_policy_unref(context->policy);
-    g_mutex_clear(&context->lock);
+    ns_mutex_clear(&context->lock);
     g_free(context);
 }
 
@@ -1217,8 +1218,8 @@ audio_open_device(void)
  * connect through one, and SDL starts their threads from the thread that
  * opens the device. A helper thread started before the engine thread opens
  * the device on request instead. It touches no page data. */
-static GMutex   g_dev_helper_lock;
-static GCond    g_dev_helper_cond;
+static NsMutex  g_dev_helper_lock;
+static NsCond   g_dev_helper_cond;
 static gboolean g_dev_helper_running;
 static int      g_dev_helper_state; /* 0 idle, 1 open requested, 2 done */
 
@@ -1226,15 +1227,15 @@ static gpointer
 audio_device_helper(gpointer data)
 {
     (void)data;
-    g_mutex_lock(&g_dev_helper_lock);
+    ns_mutex_lock(&g_dev_helper_lock);
     while (g_dev_helper_state != 1)
-        g_cond_wait(&g_dev_helper_cond, &g_dev_helper_lock);
-    g_mutex_unlock(&g_dev_helper_lock);
+        ns_cond_wait(&g_dev_helper_cond, &g_dev_helper_lock);
+    ns_mutex_unlock(&g_dev_helper_lock);
     audio_open_device();
-    g_mutex_lock(&g_dev_helper_lock);
+    ns_mutex_lock(&g_dev_helper_lock);
     g_dev_helper_state = 2;
-    g_cond_broadcast(&g_dev_helper_cond);
-    g_mutex_unlock(&g_dev_helper_lock);
+    ns_cond_broadcast(&g_dev_helper_cond);
+    ns_mutex_unlock(&g_dev_helper_lock);
     return NULL;
 }
 
@@ -1244,12 +1245,12 @@ void
 ns_audio_start_device_helper(void)
 {
     if (g_atomic_int_get(&g_silent)) return;
-    g_mutex_lock(&g_dev_helper_lock);
+    ns_mutex_lock(&g_dev_helper_lock);
     gboolean start = !g_dev_helper_running;
     g_dev_helper_running = TRUE;
-    g_mutex_unlock(&g_dev_helper_lock);
+    ns_mutex_unlock(&g_dev_helper_lock);
     if (start)
-        g_thread_unref(g_thread_new("ns-audio-dev", audio_device_helper, NULL));
+        ns_thread_unref(ns_thread_new("ns-audio-dev", audio_device_helper, NULL));
 }
 
 /* Lazily opens the SDL device (or null output) and starts the worker thread. */
@@ -1259,21 +1260,21 @@ audio_start(void)
     if (g_worker) return TRUE;
     SDL_SetMainReady();
     if (!g_atomic_int_get(&g_silent)) {
-        g_mutex_lock(&g_dev_helper_lock);
+        ns_mutex_lock(&g_dev_helper_lock);
         gboolean helper = g_dev_helper_running && g_dev_helper_state == 0;
         if (helper) {
             g_dev_helper_state = 1;
-            g_cond_broadcast(&g_dev_helper_cond);
+            ns_cond_broadcast(&g_dev_helper_cond);
             while (g_dev_helper_state != 2)
-                g_cond_wait(&g_dev_helper_cond, &g_dev_helper_lock);
+                ns_cond_wait(&g_dev_helper_cond, &g_dev_helper_lock);
         }
-        g_mutex_unlock(&g_dev_helper_lock);
+        ns_mutex_unlock(&g_dev_helper_lock);
         if (!helper) audio_open_device();
     }
     if (!g_dev_ok) null_audio_start();
     g_atomic_int_set(&g_shutting_down, 0);
     g_commands = g_async_queue_new();
-    g_worker = g_thread_new("ns-audio", audio_worker, NULL);
+    g_worker = ns_thread_new("ns-audio", audio_worker, NULL);
     emit("ready %s", g_dev_ok || g_null_thread ? "1" : "0");
     return TRUE;
 }
@@ -1294,9 +1295,9 @@ push_command(ns_audio_op op, NsAudioContext *context, const char *token,
     command->bytes = bytes ? g_bytes_ref(bytes) : NULL;
     command->value = value;
     if (context && op == NS_AUDIO_OP_OPEN) {
-        g_mutex_lock(&context->lock);
+        ns_mutex_lock(&context->lock);
         command->document_url = g_strdup(context->document_url);
-        g_mutex_unlock(&context->lock);
+        ns_mutex_unlock(&context->lock);
     }
     g_async_queue_push(g_commands, command);
 }
@@ -1333,7 +1334,7 @@ ns_audio_context_new(const char *document_url, ns_fetch_policy *policy)
 {
     NsAudioContext *context = g_new0(NsAudioContext, 1);
     context->policy = ns_fetch_policy_ref(policy);
-    g_mutex_init(&context->lock);
+    ns_mutex_init(&context->lock);
     context->cancel = g_cancellable_new();
     context->failures = g_hash_table_new_full(g_str_hash, g_str_equal,
                                               g_free, NULL);
@@ -1408,7 +1409,7 @@ static double
 player_clock_frames(const ns_audio_player *p)
 {
     if (!p->playing || !p->clock_offset_valid) return (double)p->cursor;
-    double frames = (double)g_get_monotonic_time() / 1e6 * NS_AUDIO_DEVICE_RATE +
+    double frames = (double)ns_time_monotonic_us() / 1e6 * NS_AUDIO_DEVICE_RATE +
                     p->clock_offset;
     return CLAMP(frames, 0.0, (double)p->cursor);
 }
@@ -1420,9 +1421,9 @@ ns_audio_context_status(NsAudioContext *context, const char *token,
 {
     memset(out, 0, sizeof *out);
     if (!context || !token) return FALSE;
-    g_mutex_lock(&context->lock);
+    ns_mutex_lock(&context->lock);
     gpointer failure = g_hash_table_lookup(context->failures, token);
-    g_mutex_unlock(&context->lock);
+    ns_mutex_unlock(&context->lock);
     if (failure) {
         out->state = NS_AUDIO_PLAYER_FAILED;
         out->error = (NsAudioError)GPOINTER_TO_INT(failure);
@@ -1577,7 +1578,7 @@ ns_audio_shutdown(void)
     if (!g_worker) return;
     g_atomic_int_set(&g_shutting_down, 1);
     push_command(NS_AUDIO_OP_QUIT, NULL, NULL, NULL, NULL, 0.0);
-    g_thread_join(g_worker);
+    ns_thread_join(g_worker);
     g_worker = NULL;
     null_audio_stop();
     if (g_dev_ok) {

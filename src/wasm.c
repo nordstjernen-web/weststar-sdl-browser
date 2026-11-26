@@ -5,6 +5,7 @@
  */
 
 #include "wasm.h"
+#include "plat/ns_plat.h"
 
 #include "quickjs_compat.h"
 
@@ -75,7 +76,7 @@ static JSClassID ns_wasm_table_class_id;
 static JSClassID ns_wasm_global_class_id;
 static JSClassID ns_wasm_func_class_id;
 
-static GMutex ns_wasm_link_mutex;
+static NsMutex ns_wasm_link_mutex;
 
 /* When control last entered WebAssembly on this thread (0: in JS). Time
  * spent in wasm is credited back to the page's script deadlines. */
@@ -113,7 +114,7 @@ typedef struct {
      * runs page JS (import getters, the start function), and one global
      * lock let any page or worker stall every other's instantiation.
      * Recursive because instantiation can call back into JS. */
-    GRecMutex lock;
+    NsRecMutex lock;
     /* JS Module objects (one per realm or worker it was posted to) */
     gint ref_count;
 } ns_wasm_module;
@@ -188,8 +189,8 @@ typedef struct {
     JSValue v;
 } ns_wasm_ref;
 
-static GPrivate ns_wasm_thread_env_done = G_PRIVATE_INIT(NULL);
-static GPrivate ns_wasm_instantiating = G_PRIVATE_INIT(NULL);
+static NsPrivate ns_wasm_thread_env_done = NS_PRIVATE_INIT(NULL);
+static NsPrivate ns_wasm_instantiating = NS_PRIVATE_INIT(NULL);
 
 static void ns_wasm_on_memory_grown(wasm_module_inst_t inst, void *user_data);
 
@@ -248,34 +249,37 @@ ns_wasm_linkage_gc_mark(JSRuntime *rt, const ns_wasm_linkage *linkage,
 }
 
 /* One-time WAMR init with the system allocator; ND_WASM_LOG enables verbose logging. */
-static gpointer
-ns_wasm_runtime_init_once(gpointer data)
+static gboolean
+ns_wasm_runtime_init_once(void)
 {
     RuntimeInitArgs args;
     memset(&args, 0, sizeof(args));
     args.mem_alloc_type = Alloc_With_System_Allocator;
     if (!wasm_runtime_full_init(&args))
-        return NULL;
+        return FALSE;
     wasm_runtime_set_log_level(g_getenv("ND_WASM_LOG")
                                    ? WASM_LOG_LEVEL_VERBOSE
                                    : WASM_LOG_LEVEL_ERROR);
     wasm_runtime_set_enlarge_mem_success_callback(ns_wasm_on_memory_grown,
                                                   NULL);
-    (void)data;
-    return GINT_TO_POINTER(1);
+    return TRUE;
 }
 
 /* Initializes WAMR once and the per-thread env on first use; FALSE if init failed. */
 static gboolean
 ns_wasm_runtime_ready(void)
 {
-    static GOnce once = G_ONCE_INIT;
-    g_once(&once, ns_wasm_runtime_init_once, NULL);
-    if (!once.retval)
+    static NsOnce once;
+    static gboolean inited;
+    if (ns_once_enter(&once)) {
+        inited = ns_wasm_runtime_init_once();
+        ns_once_leave(&once);
+    }
+    if (!inited)
         return FALSE;
-    if (!g_private_get(&ns_wasm_thread_env_done)) {
+    if (!ns_private_get(&ns_wasm_thread_env_done)) {
         wasm_runtime_init_thread_env();
-        g_private_set(&ns_wasm_thread_env_done, GINT_TO_POINTER(1));
+        ns_private_set(&ns_wasm_thread_env_done, GINT_TO_POINTER(1));
     }
     return TRUE;
 }
@@ -823,11 +827,11 @@ ns_wasm_call_function(JSContext *ctx, ns_wasm_instance *wi,
     wi->call_depth++;
     /* wasm time is not script time: credit it back to the deadlines */
     gint64 outer_entered = ns_wasm_entered_us;
-    ns_wasm_entered_us = g_get_monotonic_time();
+    ns_wasm_entered_us = ns_time_monotonic_us();
     gboolean ok = wasm_runtime_call_wasm_a(wi->exec_env, func, n_results,
                                            results, n_params, args);
     if (ns_wasm_entered_us)
-        ns_js_credit_wasm_time(ctx, g_get_monotonic_time() - ns_wasm_entered_us);
+        ns_js_credit_wasm_time(ctx, ns_time_monotonic_us() - ns_wasm_entered_us);
     ns_wasm_entered_us = outer_entered;
     wi->call_depth--;
     ns_wasm_memory_resync(ctx, wi);
@@ -1549,7 +1553,7 @@ ns_wasm_module_unref(JSRuntime *rt, ns_wasm_module *m)
         wasm_runtime_unload(m->module);
     ns_wasm_linkage_clear(rt, &m->linkage);
     g_free(m->load_bytes);
-    g_rec_mutex_clear(&m->lock);
+    ns_rec_mutex_clear(&m->lock);
     g_free(m);
 }
 
@@ -1651,7 +1655,7 @@ ns_wasm_native_dispatch(wasm_exec_env_t exec_env, uint64_t *args)
     wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
     ns_wasm_instance *wi = inst ? wasm_runtime_get_custom_data(inst) : NULL;
     if (!wi)
-        wi = g_private_get(&ns_wasm_instantiating);
+        wi = ns_private_get(&ns_wasm_instantiating);
     ns_wasm_binding *b = NULL;
     if (wi && desc && wi->linkage.bindings &&
         desc->index < wi->linkage.bindings->len)
@@ -1699,10 +1703,10 @@ ns_wasm_native_dispatch(wasm_exec_env_t exec_env, uint64_t *args)
 
     /* the clock stops while the JS import runs and restarts after it */
     if (ns_wasm_entered_us)
-        ns_js_credit_wasm_time(ctx, g_get_monotonic_time() - ns_wasm_entered_us);
+        ns_js_credit_wasm_time(ctx, ns_time_monotonic_us() - ns_wasm_entered_us);
     ns_wasm_entered_us = 0;
     JSValue ret = JS_Call(ctx, b->fn, JS_UNDEFINED, (int)argc, argv);
-    ns_wasm_entered_us = g_get_monotonic_time();
+    ns_wasm_entered_us = ns_time_monotonic_us();
     for (guint i = 0; i < argc; i++)
         JS_FreeValue(ctx, argv[i]);
 
@@ -2067,7 +2071,7 @@ ns_wasm_link_import_symbols(JSContext *ctx, ns_wasm_module *mod)
     GPtrArray *reg_blocks = g_ptr_array_new();
     g_hash_table_iter_init(&it, groups);
 
-    g_mutex_lock(&ns_wasm_link_mutex);
+    ns_mutex_lock(&ns_wasm_link_mutex);
     while (g_hash_table_iter_next(&it, &key, &value)) {
         GArray *group = value;
         NativeSymbol *syms =
@@ -2085,7 +2089,7 @@ ns_wasm_link_import_symbols(JSContext *ctx, ns_wasm_module *mod)
     for (guint i = 0; i < reg_names->len; i++)
         wasm_runtime_unregister_natives(g_ptr_array_index(reg_names, i),
                                         g_ptr_array_index(reg_blocks, i));
-    g_mutex_unlock(&ns_wasm_link_mutex);
+    ns_mutex_unlock(&ns_wasm_link_mutex);
 
     g_ptr_array_free(reg_names, TRUE);
     g_ptr_array_free(reg_blocks, TRUE);
@@ -2254,7 +2258,7 @@ ns_wasm_module_from_bytes(JSContext *ctx, const guint8 *bytes, size_t len)
 
     ns_wasm_module *mod = g_new0(ns_wasm_module, 1);
     mod->ref_count = 1;
-    g_rec_mutex_init(&mod->lock);
+    ns_rec_mutex_init(&mod->lock);
     ns_wasm_linkage_init(&mod->linkage);
     mod->load_bytes = ns_wasm_memdup_bytes(bytes, len);
     mod->len = len;
@@ -2410,11 +2414,11 @@ ns_wasm_instance_create(JSContext *ctx, JSValueConst module_obj,
     char error_buf[192] = "";
     wasm_module_t inst_module = mod->module;
     int32_t import_count = wasm_runtime_get_import_count(mod->module);
-    g_rec_mutex_lock(&mod->lock);
+    ns_rec_mutex_lock(&mod->lock);
     /* Import getters run JS while this module's globals are half linked;
      * instantiating the same module from there would overwrite them. */
     if (mod->instantiating) {
-        g_rec_mutex_unlock(&mod->lock);
+        ns_rec_mutex_unlock(&mod->lock);
         ns_wasm_linkage_clear(rt, &linkage);
         return JS_ThrowTypeError(ctx,
             "WebAssembly.Instance: module is already being instantiated");
@@ -2424,13 +2428,13 @@ ns_wasm_instance_create(JSContext *ctx, JSValueConst module_obj,
         if (!ns_wasm_bind_imports(ctx, inst_module, &linkage,
                                   import_object)) {
             mod->instantiating = FALSE;
-            g_rec_mutex_unlock(&mod->lock);
+            ns_rec_mutex_unlock(&mod->lock);
             ns_wasm_linkage_clear(rt, &linkage);
             return JS_EXCEPTION;
         }
         if (!ns_wasm_link_import_symbols(ctx, mod)) {
             mod->instantiating = FALSE;
-            g_rec_mutex_unlock(&mod->lock);
+            ns_rec_mutex_unlock(&mod->lock);
             ns_wasm_linkage_clear(rt, &linkage);
             return JS_EXCEPTION;
         }
@@ -2439,7 +2443,7 @@ ns_wasm_instance_create(JSContext *ctx, JSValueConst module_obj,
     if (import_count == 0 &&
         !ns_wasm_bind_imports(ctx, inst_module, &linkage, import_object)) {
         mod->instantiating = FALSE;
-        g_rec_mutex_unlock(&mod->lock);
+        ns_rec_mutex_unlock(&mod->lock);
         ns_wasm_linkage_clear(rt, &linkage);
         return JS_EXCEPTION;
     }
@@ -2455,7 +2459,7 @@ ns_wasm_instance_create(JSContext *ctx, JSValueConst module_obj,
     wi->js_exceptions = JS_UNDEFINED;
     wi->linkage = linkage;
 
-    g_private_set(&ns_wasm_instantiating, wi);
+    ns_private_set(&ns_wasm_instantiating, wi);
     ns_wasm_memory *provided_shared =
         JS_IsUndefined(wi->linkage.provided_memory)
             ? NULL
@@ -2468,8 +2472,8 @@ ns_wasm_instance_create(JSContext *ctx, JSValueConst module_obj,
                                  sizeof(error_buf));
     ns_wamr_provide_shared_memory_for_next_instance(NULL);
     mod->instantiating = FALSE;
-    g_rec_mutex_unlock(&mod->lock);
-    g_private_set(&ns_wasm_instantiating, NULL);
+    ns_rec_mutex_unlock(&mod->lock);
+    ns_private_set(&ns_wasm_instantiating, NULL);
     if (!inst) {
         JSValue exc = JS_UNDEFINED;
         if (wi->has_pending) {
@@ -2682,7 +2686,7 @@ typedef struct {
     uint32_t max_pages;
 } ns_wasm_xthread;
 
-static GMutex ns_wasm_xthread_lock;
+static NsMutex ns_wasm_xthread_lock;
 static GHashTable *ns_wasm_xthread_table; /* id -> ns_wasm_xthread */
 static guint64 ns_wasm_xthread_next_id;
 
@@ -2727,7 +2731,7 @@ ns_wasm_cross_thread_export(JSContext *ctx, JSValueConst v)
         h->memory = mem->shared;
         h->max_pages = mem->max_pages;
     }
-    g_mutex_lock(&ns_wasm_xthread_lock);
+    ns_mutex_lock(&ns_wasm_xthread_lock);
     if (!ns_wasm_xthread_table)
         ns_wasm_xthread_table = g_hash_table_new_full(
             g_int64_hash, g_int64_equal, g_free,
@@ -2736,7 +2740,7 @@ ns_wasm_cross_thread_export(JSContext *ctx, JSValueConst v)
     *key = ++ns_wasm_xthread_next_id;
     guint64 id = *key;
     g_hash_table_insert(ns_wasm_xthread_table, key, h);
-    g_mutex_unlock(&ns_wasm_xthread_lock);
+    ns_mutex_unlock(&ns_wasm_xthread_lock);
     return id;
 }
 
@@ -2745,7 +2749,7 @@ ns_wasm_cross_thread_import(JSContext *ctx, guint64 id)
 {
     if (!ns_wasm_runtime_ready())
         return JS_ThrowInternalError(ctx, "wasm runtime init failed");
-    g_mutex_lock(&ns_wasm_xthread_lock);
+    ns_mutex_lock(&ns_wasm_xthread_lock);
     ns_wasm_xthread *h = ns_wasm_xthread_table
         ? g_hash_table_lookup(ns_wasm_xthread_table, &id) : NULL;
     ns_wasm_module *mod = h ? h->module : NULL;
@@ -2755,7 +2759,7 @@ ns_wasm_cross_thread_import(JSContext *ctx, guint64 id)
         g_atomic_int_inc(&mod->ref_count);
     if (memory)
         ns_wamr_shared_memory_retain(memory);
-    g_mutex_unlock(&ns_wasm_xthread_lock);
+    ns_mutex_unlock(&ns_wasm_xthread_lock);
     if (!mod && !memory)
         return JS_ThrowTypeError(ctx, "posted WebAssembly object is gone");
 
@@ -2785,10 +2789,10 @@ ns_wasm_cross_thread_import(JSContext *ctx, guint64 id)
 void
 ns_wasm_cross_thread_drop(guint64 id)
 {
-    g_mutex_lock(&ns_wasm_xthread_lock);
+    ns_mutex_lock(&ns_wasm_xthread_lock);
     if (ns_wasm_xthread_table)
         g_hash_table_remove(ns_wasm_xthread_table, &id);
-    g_mutex_unlock(&ns_wasm_xthread_lock);
+    ns_mutex_unlock(&ns_wasm_xthread_lock);
 }
 
 /* WebAssembly.Memory({shared: true}): needs a maximum, reserved now. */

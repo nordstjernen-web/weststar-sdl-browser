@@ -5,6 +5,7 @@
  */
 
 #include "bytecode_cache.h"
+#include "plat/ns_plat.h"
 
 #include "config.h"
 #include "net.h"
@@ -48,10 +49,9 @@ typedef struct ns_bytecode_cache_entry {
 } ns_bytecode_cache_entry;
 
 static GHashTable *g_mem;
-static GMutex      g_lock;
-static GCond       g_pending_cond;
+static NsMutex     g_lock;
+static NsCond      g_pending_cond;
 static GHashTable *g_pending;
-static GThreadPool *g_precompile_pool;
 static guint64     g_mem_bytes;
 static char       *g_dir;
 
@@ -68,7 +68,7 @@ ns_bytecode_cache_entry_free(gpointer data)
 void
 ns_bytecode_cache_init(void)
 {
-    g_mutex_lock(&g_lock);
+    ns_mutex_lock(&g_lock);
     if (!g_mem)
         g_mem = g_hash_table_new_full(g_str_hash, g_str_equal,
                                       g_free, ns_bytecode_cache_entry_free);
@@ -80,18 +80,17 @@ ns_bytecode_cache_init(void)
             g_mkdir_with_parents(g_dir, 0700);
         }
     }
-    g_mutex_unlock(&g_lock);
+    ns_mutex_unlock(&g_lock);
 }
+
+static void precompile_pool_stop(void);
 
 /* Joins precompile workers and frees the memory cache and pending set. */
 void
 ns_bytecode_cache_shutdown(void)
 {
-    if (g_precompile_pool) {
-        g_thread_pool_free(g_precompile_pool, TRUE, TRUE);
-        g_precompile_pool = NULL;
-    }
-    g_mutex_lock(&g_lock);
+    precompile_pool_stop();
+    ns_mutex_lock(&g_lock);
     g_clear_pointer(&g_pending, g_hash_table_destroy);
     if (g_mem) {
         g_hash_table_destroy(g_mem);
@@ -99,7 +98,7 @@ ns_bytecode_cache_shutdown(void)
     }
     g_mem_bytes = 0;
     g_clear_pointer(&g_dir, g_free);
-    g_mutex_unlock(&g_lock);
+    ns_mutex_unlock(&g_lock);
 }
 
 /* SHA-256 key over top-level site partition, script name and source text. */
@@ -131,9 +130,9 @@ cache_bypassed(void)
 static char *
 disk_path_for(const char *key)
 {
-    g_mutex_lock(&g_lock);
+    ns_mutex_lock(&g_lock);
     char *base = g_strdup(g_dir);
-    g_mutex_unlock(&g_lock);
+    ns_mutex_unlock(&g_lock);
     if (!base || !key || !*key) { g_free(base); return NULL; }
     char sub[3] = { key[0], key[1], '\0' };
     char *dir = g_build_filename(base, sub, NULL);
@@ -201,9 +200,9 @@ disk_file_older_first(gconstpointer a, gconstpointer b)
 static void
 prune_disk(void)
 {
-    g_mutex_lock(&g_lock);
+    ns_mutex_lock(&g_lock);
     char *base = g_strdup(g_dir);
-    g_mutex_unlock(&g_lock);
+    ns_mutex_unlock(&g_lock);
     if (!base) return;
     GArray *files = g_array_new(FALSE, FALSE, sizeof(disk_file));
     guint64 total = 0;
@@ -311,42 +310,42 @@ ns_bytecode_cache_get(const char *top_url, const char *name,
     char key[65];
     hash_source(top_url, name, src, src_len, key);
 
-    g_mutex_lock(&g_lock);
+    ns_mutex_lock(&g_lock);
     if (!g_mem) {
-        g_mutex_unlock(&g_lock);
+        ns_mutex_unlock(&g_lock);
         return NULL;
     }
-    gint64 wait_until = g_get_monotonic_time() + NS_BYTECODE_PRECOMPILE_WAIT_US;
+    gint64 wait_until = ns_time_monotonic_us() + NS_BYTECODE_PRECOMPILE_WAIT_US;
     while (g_pending && g_hash_table_contains(g_pending, key))
-        if (!g_cond_wait_until(&g_pending_cond, &g_lock, wait_until))
+        if (!ns_cond_wait_until(&g_pending_cond, &g_lock, wait_until))
             break;
     ns_bytecode_cache_entry *e = g_hash_table_lookup(g_mem, key);
     if (e) {
-        e->used_us = g_get_monotonic_time();
+        e->used_us = ns_time_monotonic_us();
         guint8 *copy = g_memdup2(e->bytes, e->len);
         if (out_len) *out_len = e->len;
-        g_mutex_unlock(&g_lock);
+        ns_mutex_unlock(&g_lock);
         return copy;
     }
-    g_mutex_unlock(&g_lock);
+    ns_mutex_unlock(&g_lock);
 
     gsize disk_len = 0;
     guint8 *disk = read_disk(key, &disk_len);
     if (!disk) return NULL;
 
-    g_mutex_lock(&g_lock);
+    ns_mutex_lock(&g_lock);
     if (g_mem && disk_len <= NS_BYTECODE_CACHE_VALUE_CAP_BYTES) {
         if (!g_hash_table_lookup(g_mem, key)) {
             evict_until_fits(disk_len);
             ns_bytecode_cache_entry *ne = g_new0(ns_bytecode_cache_entry, 1);
             ne->bytes = g_memdup2(disk, disk_len);
             ne->len = disk_len;
-            ne->used_us = g_get_monotonic_time();
+            ne->used_us = ns_time_monotonic_us();
             g_hash_table_insert(g_mem, g_strdup(key), ne);
             g_mem_bytes += disk_len;
         }
     }
-    g_mutex_unlock(&g_lock);
+    ns_mutex_unlock(&g_lock);
     if (out_len) *out_len = disk_len;
     return disk;
 }
@@ -362,22 +361,22 @@ ns_bytecode_cache_put(const char *top_url, const char *name,
     char key[65];
     hash_source(top_url, name, src, src_len, key);
 
-    g_mutex_lock(&g_lock);
-    if (!g_mem) { g_mutex_unlock(&g_lock); return; }
+    ns_mutex_lock(&g_lock);
+    if (!g_mem) { ns_mutex_unlock(&g_lock); return; }
     ns_bytecode_cache_entry *existing = g_hash_table_lookup(g_mem, key);
     if (existing) {
-        existing->used_us = g_get_monotonic_time();
-        g_mutex_unlock(&g_lock);
+        existing->used_us = ns_time_monotonic_us();
+        ns_mutex_unlock(&g_lock);
         return;
     }
     evict_until_fits(bc_len);
     ns_bytecode_cache_entry *ne = g_new0(ns_bytecode_cache_entry, 1);
     ne->bytes = g_memdup2(bc, bc_len);
     ne->len = bc_len;
-    ne->used_us = g_get_monotonic_time();
+    ne->used_us = ns_time_monotonic_us();
     g_hash_table_insert(g_mem, g_strdup(key), ne);
     g_mem_bytes += bc_len;
-    g_mutex_unlock(&g_lock);
+    ns_mutex_unlock(&g_lock);
 
     write_disk(key, bc, bc_len);
 }
@@ -393,22 +392,20 @@ typedef struct {
 static void
 precompile_job_finish(precompile_job *job)
 {
-    g_mutex_lock(&g_lock);
+    ns_mutex_lock(&g_lock);
     if (g_pending) g_hash_table_remove(g_pending, job->key);
-    g_cond_broadcast(&g_pending_cond);
-    g_mutex_unlock(&g_lock);
+    ns_cond_broadcast(&g_pending_cond);
+    ns_mutex_unlock(&g_lock);
     g_bytes_unref(job->source);
     g_free(job->top_url);
     g_free(job->url);
     g_free(job);
 }
 
-/* Worker: compiles a script in a throwaway runtime and caches its bytecode. */
+/* Compiles a job's script in a throwaway runtime and caches its bytecode. */
 static void
-precompile_run(gpointer data, gpointer user_data)
+precompile_run(precompile_job *job)
 {
-    (void)user_data;
-    precompile_job *job = data;
     gsize len = 0;
     const char *src = g_bytes_get_data(job->source, &len);
     JSRuntime *rt = JS_NewRuntime();
@@ -436,6 +433,84 @@ precompile_run(gpointer data, gpointer user_data)
     precompile_job_finish(job);
 }
 
+/* The precompile workers: up to NS_PRECOMPILE_WORKERS threads, started as
+ * jobs arrive, that take jobs from g_pool_jobs until shutdown joins them. */
+#define NS_PRECOMPILE_WORKERS 2
+
+static NsMutex   g_pool_lock;
+static NsCond    g_pool_cond;
+static GQueue    g_pool_jobs = G_QUEUE_INIT;
+static NsThread *g_pool_threads[NS_PRECOMPILE_WORKERS];
+static int       g_pool_nthreads;
+static int       g_pool_idle;
+static gboolean  g_pool_quit;
+
+/* Worker thread: runs queued jobs, sleeping while the queue is empty. */
+static gpointer
+precompile_worker(gpointer data)
+{
+    (void)data;
+    ns_mutex_lock(&g_pool_lock);
+    while (!g_pool_quit) {
+        precompile_job *job = g_queue_pop_head(&g_pool_jobs);
+        if (!job) {
+            g_pool_idle++;
+            ns_cond_wait(&g_pool_cond, &g_pool_lock);
+            g_pool_idle--;
+            continue;
+        }
+        ns_mutex_unlock(&g_pool_lock);
+        precompile_run(job);
+        ns_mutex_lock(&g_pool_lock);
+    }
+    ns_mutex_unlock(&g_pool_lock);
+    return NULL;
+}
+
+/* Queues a job, starting a worker when none is idle and there is room;
+ * with no worker at all the job is dropped (its pending mark cleared). */
+static void
+precompile_pool_push(precompile_job *job)
+{
+    ns_mutex_lock(&g_pool_lock);
+    if (g_pool_idle == 0 && g_pool_nthreads < NS_PRECOMPILE_WORKERS) {
+        NsThread *t = ns_thread_try_new("ns-precompile", precompile_worker,
+                                        NULL, 0);
+        if (t) g_pool_threads[g_pool_nthreads++] = t;
+    }
+    if (g_pool_nthreads == 0) {
+        ns_mutex_unlock(&g_pool_lock);
+        precompile_job_finish(job);
+        return;
+    }
+    g_queue_push_tail(&g_pool_jobs, job);
+    ns_cond_signal(&g_pool_cond);
+    ns_mutex_unlock(&g_pool_lock);
+}
+
+/* Stops and joins the workers once their current jobs finish; jobs still
+ * queued are dropped. Workers start again on the next push. */
+static void
+precompile_pool_stop(void)
+{
+    ns_mutex_lock(&g_pool_lock);
+    g_pool_quit = TRUE;
+    GQueue dropped = g_pool_jobs;
+    g_queue_init(&g_pool_jobs);
+    NsThread *threads[NS_PRECOMPILE_WORKERS];
+    int n = g_pool_nthreads;
+    for (int i = 0; i < n; i++) threads[i] = g_pool_threads[i];
+    g_pool_nthreads = 0;
+    ns_cond_broadcast(&g_pool_cond);
+    ns_mutex_unlock(&g_pool_lock);
+    for (int i = 0; i < n; i++) ns_thread_join(threads[i]);
+    for (precompile_job *job; (job = g_queue_pop_head(&dropped)); )
+        precompile_job_finish(job);
+    ns_mutex_lock(&g_pool_lock);
+    g_pool_quit = FALSE;
+    ns_mutex_unlock(&g_pool_lock);
+}
+
 /* Queues background compilation of a large classic script not yet cached. */
 void
 ns_bytecode_cache_precompile(const char *top_url, const char *url,
@@ -445,10 +520,10 @@ ns_bytecode_cache_precompile(const char *top_url, const char *url,
         return;
     precompile_job *job = g_new0(precompile_job, 1);
     hash_source(top_url, url ? url : "", (const char *)src, len, job->key);
-    g_mutex_lock(&g_lock);
+    ns_mutex_lock(&g_lock);
     gboolean skip = !g_mem || g_hash_table_contains(g_mem, job->key) ||
                     (g_pending && g_hash_table_contains(g_pending, job->key));
-    g_mutex_unlock(&g_lock);
+    ns_mutex_unlock(&g_lock);
     char *path = skip ? NULL : disk_path_for(job->key);
     if (path && g_file_test(path, G_FILE_TEST_EXISTS)) skip = TRUE;
     g_free(path);
@@ -456,20 +531,17 @@ ns_bytecode_cache_precompile(const char *top_url, const char *url,
         g_free(job);
         return;
     }
-    g_mutex_lock(&g_lock);
+    ns_mutex_lock(&g_lock);
     if (!g_pending)
         g_pending = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
                                           NULL);
     g_hash_table_add(g_pending, g_strdup(job->key));
-    if (!g_precompile_pool)
-        g_precompile_pool = g_thread_pool_new(precompile_run, NULL, 2, FALSE,
-                                              NULL);
-    g_mutex_unlock(&g_lock);
+    ns_mutex_unlock(&g_lock);
     job->url = g_strdup(url ? url : "");
     job->top_url = g_strdup(top_url);
     char *terminated = g_malloc(len + 1);
     memcpy(terminated, src, len);
     terminated[len] = '\0';
     job->source = g_bytes_new_take(terminated, len);
-    g_thread_pool_push(g_precompile_pool, job, NULL);
+    precompile_pool_push(job);
 }

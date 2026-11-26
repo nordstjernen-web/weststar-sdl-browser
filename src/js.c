@@ -5,6 +5,7 @@
  */
 
 #include "js.h"
+#include "plat/ns_plat.h"
 #include "polyfills.h"
 #include "typed_om.h"
 
@@ -23,8 +24,6 @@
 
 #ifdef G_OS_WIN32
 #include <windows.h>
-#else
-#include <pthread.h>
 #endif
 
 #include "anim.h"
@@ -155,15 +154,11 @@ struct ns_worker_host {
     gint          ref_count;
     gint          closing;
     gint          owner_alive;
-    GMutex        lock;
+    NsMutex       lock;
     ns_js        *owner;
     JSContext    *owner_ctx;
     JSValue       owner_obj;
-    GThread      *thread;
-#ifndef G_OS_WIN32
-    pthread_t     pthread;
-    gboolean      has_pthread;
-#endif
+    NsThread    *thread;
     gint          joined;
     GMainContext *context;
     GMainContext *owner_context;
@@ -215,18 +210,18 @@ struct ns_js_drag_session {
 #define NS_JS_BODY_BYTES_MAX (32u * 1024u * 1024u)
 #define NS_WORKER_STACK_BYTES ((size_t)8 * 1024 * 1024)
 
-static GPrivate g_active_js_key = G_PRIVATE_INIT(NULL);
+static NsPrivate g_active_js_key = NS_PRIVATE_INIT(NULL);
 
 static ns_js *
 ns_active_js(void)
 {
-    return g_private_get(&g_active_js_key);
+    return ns_private_get(&g_active_js_key);
 }
 
 static void
 ns_set_active_js(ns_js *js)
 {
-    g_private_set(&g_active_js_key, js);
+    ns_private_set(&g_active_js_key, js);
 }
 
 #define NS_TRANSIENT_ACTIVATION_US (5 * G_USEC_PER_SEC)
@@ -235,7 +230,7 @@ static void
 ns_js_note_user_activation(ns_js *js)
 {
     if (!js) return;
-    js->user_activation_us = g_get_monotonic_time();
+    js->user_activation_us = ns_time_monotonic_us();
     js->user_ever_activated = TRUE;
 }
 
@@ -244,7 +239,7 @@ gboolean
 ns_js_has_transient_activation(ns_js *js)
 {
     return js && js->user_activation_us != 0 &&
-           g_get_monotonic_time() - js->user_activation_us <=
+           ns_time_monotonic_us() - js->user_activation_us <=
                NS_TRANSIENT_ACTIVATION_US;
 }
 
@@ -695,7 +690,7 @@ ns_js_interrupt(void *opaque)
     }
     if (ns_js_runs_uncapped(js))
         return 0;
-    gint64 now = g_get_monotonic_time();
+    gint64 now = ns_time_monotonic_us();
     if (js->js_monitor_deadline_us != 0 && now > js->js_monitor_deadline_us) {
         js->halted = TRUE;
         g_warning("[js] monitor: page JavaScript ran longer than %d s — halting it",
@@ -745,7 +740,7 @@ static void
 ns_js_credit_pumped_time(ns_js *js, gint64 pump_start_us)
 {
     if (!js) return;
-    gint64 pumped_us = g_get_monotonic_time() - pump_start_us;
+    gint64 pumped_us = ns_time_monotonic_us() - pump_start_us;
     if (pumped_us <= 0) return;
     if (js->eval_deadline_us != 0)
         js->eval_deadline_us += pumped_us;
@@ -810,7 +805,7 @@ ns_js_fetch_resource_with_body(ns_js *js, const char *url, const char *top_url,
                          ns_js_pumped_fetch_done, &pf);
     gboolean saved = js->in_pump;
     js->in_pump = TRUE;
-    gint64 pump_start_us = g_get_monotonic_time();
+    gint64 pump_start_us = ns_time_monotonic_us();
     if (!pf.done)
         g_main_loop_run(pf.loop);
     ns_js_credit_pumped_time(js, pump_start_us);
@@ -847,7 +842,7 @@ ns_js_budget_push(ns_js *js, ns_budget_guard *g)
         g->saved = 0;
         return;
     }
-    gint64 now = g_get_monotonic_time();
+    gint64 now = ns_time_monotonic_us();
     if (g->saved == 0)
         js->js_monitor_deadline_us = now + ns_js_monitor_limit_us_for(js);
     gint64 fresh = now + ns_js_eval_budget_us_for(js);
@@ -1497,15 +1492,15 @@ ns_drain_microtasks(ns_js *js)
     int r = 0;
     int jobs = 0;
     gint64 slice_deadline =
-        g_get_monotonic_time() + NS_MICROTASK_SLICE_US;
+        ns_time_monotonic_us() + NS_MICROTASK_SLICE_US;
     gint64 trace_start = ns_trace_now();
     js->callback_depth++;
     for (;;) {
         if (js->eval_deadline_us != 0 &&
-            g_get_monotonic_time() > js->eval_deadline_us)
+            ns_time_monotonic_us() > js->eval_deadline_us)
             break;
         if (jobs >= NS_MICROTASK_SLICE_JOBS ||
-            g_get_monotonic_time() >= slice_deadline)
+            ns_time_monotonic_us() >= slice_deadline)
             break;
         if ((r = ns_js_execute_pending_job(js, &ctx_out)) <= 0)
             break;
@@ -1561,7 +1556,7 @@ ns_js_run_due_timers(ns_js *js)
         js->eval_depth > 0 || js->n_immediate_timers <= 0)
         return;
     if (ns_engine_in_blocking_fetch()) return;
-    gint64 now = g_get_monotonic_time();
+    gint64 now = ns_time_monotonic_us();
     int due_ids[8];
     int n_due = 0;
     GHashTableIter it;
@@ -1826,7 +1821,7 @@ ns_timer_fire_impl(gpointer data)
         return G_SOURCE_REMOVE;
     }
     gboolean idle_expired = t->is_idle && t->idle_deadline_us > 0 &&
-                            g_get_monotonic_time() >= t->idle_deadline_us;
+                            ns_time_monotonic_us() >= t->idle_deadline_us;
     if (js->in_pump)
         return G_SOURCE_CONTINUE;
     if (ns_engine_in_blocking_fetch() && !idle_expired)
@@ -2015,7 +2010,7 @@ ns_js_setTimeout(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     t->id = ++js->next_timer_id;
     if (!is_interval && ms <= 1) {
         t->immediate = TRUE;
-        t->due_us = g_get_monotonic_time() + (gint64)ms * 1000;
+        t->due_us = ns_time_monotonic_us() + (gint64)ms * 1000;
         js->n_immediate_timers++;
     }
     t->glib_source = ns_js_attach_timeout(js, (guint)ms, ns_timer_fire, t);
@@ -13834,8 +13829,8 @@ ns_sc_class_of_eval(JSContext *ctx, const char *expr)
 static void
 ns_sc_learn_builtin_classes(JSContext *ctx)
 {
-    static gsize learned;
-    if (!g_once_init_enter(&learned)) return;
+    static NsOnce learned;
+    if (!ns_once_enter(&learned)) return;
     ns_sc_builtin_classes *c = &ns_sc_classes;
     c->date     = ns_sc_class_of_eval(ctx, "new Date(0)");
     c->regexp   = ns_sc_class_of_eval(ctx, "/a/");
@@ -13846,7 +13841,7 @@ ns_sc_learn_builtin_classes(JSContext *ctx)
     c->string   = ns_sc_class_of_eval(ctx, "Object('')");
     c->boolean  = ns_sc_class_of_eval(ctx, "Object(false)");
     c->bigint   = ns_sc_class_of_eval(ctx, "Object(0n)");
-    g_once_init_leave(&learned, 1);
+    ns_once_leave(&learned);
 }
 
 /* Class test by cached class id, falling back to instanceof. */
@@ -19702,9 +19697,9 @@ ns_xhr_pump_until_done_in(JSContext *ctx, JSValueConst this_val,
 {
     ns_js *js = js_from_ctx(ctx);
     if (!mc) mc = js && js->main_context ? js->main_context : NULL;
-    gint64 pump_start_us = g_get_monotonic_time();
+    gint64 pump_start_us = ns_time_monotonic_us();
     gint64 deadline = pump_start_us + 60 * G_USEC_PER_SEC;
-    while (g_get_monotonic_time() < deadline) {
+    while (ns_time_monotonic_us() < deadline) {
         if (js && js->halted)
             break;
         JSValue rs = JS_GetPropertyStr(ctx, this_val, "readyState");
@@ -20918,7 +20913,7 @@ ns_blob_entry_free(gpointer p)
 /* Blob URL tables are written by the page and worker threads and read by
  * the network threads through ns_js_net_blob_resolver(); g_blob_lock
  * guards g_blob_js_registry and every instance's blob_urls table. */
-static GMutex g_blob_lock;
+static NsMutex g_blob_lock;
 static GPtrArray *g_blob_js_registry = NULL;
 
 /* Snapshots a Blob's bytes and type into a blob URL entry. */
@@ -20949,7 +20944,7 @@ ns_js_net_blob_resolver(const char *url, char **out_type, gpointer user_data)
     if (out_type) *out_type = NULL;
     if (!url) return NULL;
     GBytes *found = NULL;
-    g_mutex_lock(&g_blob_lock);
+    ns_mutex_lock(&g_blob_lock);
     for (guint i = 0; g_blob_js_registry && i < g_blob_js_registry->len; i++) {
         ns_js *js = g_ptr_array_index(g_blob_js_registry, i);
         if (!js || !js->blob_urls) continue;
@@ -20960,7 +20955,7 @@ ns_js_net_blob_resolver(const char *url, char **out_type, gpointer user_data)
             break;
         }
     }
-    g_mutex_unlock(&g_blob_lock);
+    ns_mutex_unlock(&g_blob_lock);
     return found;
 }
 
@@ -20969,13 +20964,13 @@ static void
 ns_js_blob_registry_add(ns_js *js)
 {
     if (!js) return;
-    g_mutex_lock(&g_blob_lock);
+    ns_mutex_lock(&g_blob_lock);
     gboolean first = !g_blob_js_registry;
     if (first)
         g_blob_js_registry = g_ptr_array_new();
     if (!g_ptr_array_find(g_blob_js_registry, js, NULL))
         g_ptr_array_add(g_blob_js_registry, js);
-    g_mutex_unlock(&g_blob_lock);
+    ns_mutex_unlock(&g_blob_lock);
     if (first)
         ns_net_set_blob_resolver(ns_js_net_blob_resolver, NULL);
 }
@@ -20984,22 +20979,22 @@ ns_js_blob_registry_add(ns_js *js)
 static void
 ns_js_blob_registry_remove(ns_js *js)
 {
-    g_mutex_lock(&g_blob_lock);
+    ns_mutex_lock(&g_blob_lock);
     if (g_blob_js_registry && js)
         g_ptr_array_remove_fast(g_blob_js_registry, js);
-    g_mutex_unlock(&g_blob_lock);
+    ns_mutex_unlock(&g_blob_lock);
 }
 
 /* Stores a blob URL entry under the blob lock, taking ownership. */
 static void
 ns_js_blob_store(ns_js *js, const char *url, ns_blob_entry *e)
 {
-    g_mutex_lock(&g_blob_lock);
+    ns_mutex_lock(&g_blob_lock);
     if (!js->blob_urls)
         js->blob_urls = g_hash_table_new_full(g_str_hash, g_str_equal,
                                               g_free, ns_blob_entry_free);
     g_hash_table_replace(js->blob_urls, g_strdup(url), e);
-    g_mutex_unlock(&g_blob_lock);
+    ns_mutex_unlock(&g_blob_lock);
 }
 
 /* Web origin of the calling script: the calling frame's origin, not the
@@ -21056,12 +21051,12 @@ ns_window_url_update_object(JSContext *ctx, JSValueConst this_val,
     const char *url = JS_ToCString(ctx, argv[0]);
     if (!url) return JS_FALSE;
     /* Only replace a blob URL this document created itself. */
-    g_mutex_lock(&g_blob_lock);
+    ns_mutex_lock(&g_blob_lock);
     g_autofree char *caller = ns_js_caller_origin(js, ctx);
     ns_blob_entry *existing = g_str_has_prefix(url, "blob:") && js->blob_urls
         ? g_hash_table_lookup(js->blob_urls, url) : NULL;
     gboolean own = existing && g_strcmp0(existing->creator, caller) == 0;
-    g_mutex_unlock(&g_blob_lock);
+    ns_mutex_unlock(&g_blob_lock);
     if (!own) {
         JS_FreeCString(ctx, url);
         return JS_FALSE;
@@ -21089,11 +21084,11 @@ ns_window_url_revoke_object(JSContext *ctx, JSValueConst this_val,
         if (url) {
             /* Only the realm that created a blob URL may revoke it. */
             g_autofree char *caller = ns_js_caller_origin(js, ctx);
-            g_mutex_lock(&g_blob_lock);
+            ns_mutex_lock(&g_blob_lock);
             ns_blob_entry *e = g_hash_table_lookup(js->blob_urls, url);
             if (e && g_strcmp0(e->creator, caller) == 0)
                 g_hash_table_remove(js->blob_urls, url);
-            g_mutex_unlock(&g_blob_lock);
+            ns_mutex_unlock(&g_blob_lock);
             JS_FreeCString(ctx, url);
         }
     }
@@ -21117,7 +21112,7 @@ ns_js_blob_url_lookup(ns_js *js, JSContext *ctx, const char *url,
     g_autofree char *requester = ns_js_caller_web_origin(js, ctx);
     if (g_ascii_strcasecmp(label, requester) != 0) return NULL;
     GBytes *bytes = NULL;
-    g_mutex_lock(&g_blob_lock);
+    ns_mutex_lock(&g_blob_lock);
     ns_blob_entry *e = js->blob_urls
         ? g_hash_table_lookup(js->blob_urls, url) : NULL;
     /* A dedicated worker shares its creator's blob URL store: it may load a
@@ -21145,7 +21140,7 @@ ns_js_blob_url_lookup(ns_js *js, JSContext *ctx, const char *url,
         if (out_type) *out_type = g_strdup(e->type);
         bytes = e->bytes ? g_bytes_ref(e->bytes) : NULL;
     }
-    g_mutex_unlock(&g_blob_lock);
+    ns_mutex_unlock(&g_blob_lock);
     return bytes;
 }
 
@@ -22808,7 +22803,7 @@ static void
 ns_worker_host_unref(ns_worker_host *host)
 {
     if (!host || !g_atomic_int_dec_and_test(&host->ref_count)) return;
-    g_mutex_clear(&host->lock);
+    ns_mutex_clear(&host->lock);
     if (host->context) g_main_context_unref(host->context);
     if (host->owner_context) g_main_context_unref(host->owner_context);
     g_free(host->url);
@@ -22827,10 +22822,10 @@ static gboolean
 ns_worker_quit_cb(gpointer data)
 {
     ns_worker_host *host = data;
-    g_mutex_lock(&host->lock);
+    ns_mutex_lock(&host->lock);
     if (host->worker_js) host->worker_js->halted = TRUE;
     if (host->loop) g_main_loop_quit(host->loop);
-    g_mutex_unlock(&host->lock);
+    ns_mutex_unlock(&host->lock);
     return G_SOURCE_REMOVE;
 }
 
@@ -22865,26 +22860,22 @@ ns_worker_host_stop(ns_worker_host *host, gboolean join)
     ns_worker_host_request_quit(host);
     if (!join) return;
 
-    GThread *thread = NULL;
+    NsThread *thread = NULL;
     gboolean join_now = FALSE;
-    g_mutex_lock(&host->lock);
+    ns_mutex_lock(&host->lock);
     if (!host->joined) {
         thread = host->thread;
         join_now = TRUE;
         host->joined = 1;
     }
-    g_mutex_unlock(&host->lock);
+    ns_mutex_unlock(&host->lock);
 
     if (!join_now) return;
-#ifndef G_OS_WIN32
-    if (host->has_pthread) {
-        if (!pthread_equal(host->pthread, pthread_self()))
-            pthread_join(host->pthread, NULL);
-        return;
-    }
-#endif
-    if (thread && thread != g_thread_self())
-        g_thread_join(thread);
+    if (!thread) return;
+    if (thread == ns_thread_self())
+        ns_thread_unref(thread); /* stopping itself: detach, cannot join */
+    else
+        ns_thread_join(thread);
 }
 
 /* Frees a worker message and recursively its queued port follow-up messages. */
@@ -23774,9 +23765,9 @@ ns_worker_deliver_worker(gpointer data)
     ns_worker_message *msg = data;
     ns_worker_host *host = msg->host;
     ns_js *js = NULL;
-    g_mutex_lock(&host->lock);
+    ns_mutex_lock(&host->lock);
     js = host->worker_js;
-    g_mutex_unlock(&host->lock);
+    ns_mutex_unlock(&host->lock);
     if (!js || !js->ctx || g_atomic_int_get(&host->closing)) {
         ns_worker_message_free(msg);
         return G_SOURCE_REMOVE;
@@ -24043,7 +24034,7 @@ ns_worker_performance_now(JSContext *ctx, JSValueConst this_val,
 {
     (void)this_val; (void)argc; (void)argv;
     ns_js *js = js_from_ctx(ctx);
-    double ms = js ? ns_perf_relative_ms(g_get_monotonic_time(), js->time_origin_us)
+    double ms = js ? ns_perf_relative_ms(ns_time_monotonic_us(), js->time_origin_us)
                    : 0.0;
     return JS_NewFloat64(ctx, ms);
 }
@@ -24743,8 +24734,8 @@ static ns_js *
 ns_worker_js_new(ns_worker_host *host)
 {
     ns_js *js = g_new0(ns_js, 1);
-    js->time_origin_us = (g_get_monotonic_time() / 100) * 100;
-    js->time_origin_real_ms = floor((double)g_get_real_time() / 100.0) / 10.0;
+    js->time_origin_us = (ns_time_monotonic_us() / 100) * 100;
+    js->time_origin_real_ms = floor((double)ns_time_real_us() / 100.0) / 10.0;
     js->history_state = JS_NULL;
     js->iframe_doc = JS_UNDEFINED;
     js->pristine_promise = JS_UNDEFINED;
@@ -24930,24 +24921,15 @@ ns_worker_js_new(ns_worker_host *host)
 
 static gpointer ns_worker_thread(gpointer data);
 
-/* Starts the worker thread, using pthreads with a larger stack where available. */
+/* Starts the worker thread with an 8 MiB stack, falling back to the default one. */
 static void
 ns_worker_spawn(ns_worker_host *host, const char *name)
 {
-#ifndef G_OS_WIN32
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, NS_WORKER_STACK_BYTES);
     ns_worker_host *ref = ns_worker_host_ref(host);
-    int rc = pthread_create(&host->pthread, &attr, ns_worker_thread, ref);
-    pthread_attr_destroy(&attr);
-    if (rc == 0) {
-        host->has_pthread = TRUE;
-        return;
-    }
-    ns_worker_host_unref(ref);
-#endif
-    host->thread = g_thread_new(name, ns_worker_thread, ns_worker_host_ref(host));
+    host->thread = ns_thread_try_new(name, ns_worker_thread, ref,
+                                     NS_WORKER_STACK_BYTES);
+    if (!host->thread)
+        host->thread = ns_thread_new(name, ns_worker_thread, ref);
 }
 
 /* Worker thread body: loads and runs the script, SW lifecycle, then the event loop. */
@@ -24986,9 +24968,9 @@ ns_worker_thread(gpointer data)
 
     g_free(js->current_url);
     js->current_url = g_strdup(final_url ? final_url : host->url);
-    g_mutex_lock(&host->lock);
+    ns_mutex_lock(&host->lock);
     host->worker_js = js;
-    g_mutex_unlock(&host->lock);
+    ns_mutex_unlock(&host->lock);
 
     gboolean ok = ns_worker_eval_script(js, body, strlen(body), js->current_url, &error);
     g_free(final_url);
@@ -25007,20 +24989,20 @@ ns_worker_thread(gpointer data)
 
     if (ok && !g_atomic_int_get(&host->closing)) {
         GMainLoop *loop = g_main_loop_new(host->context, FALSE);
-        g_mutex_lock(&host->lock);
+        ns_mutex_lock(&host->lock);
         host->loop = loop;
-        g_mutex_unlock(&host->lock);
+        ns_mutex_unlock(&host->lock);
         if (!g_atomic_int_get(&host->closing))
             g_main_loop_run(loop);
-        g_mutex_lock(&host->lock);
+        ns_mutex_lock(&host->lock);
         host->loop = NULL;
-        g_mutex_unlock(&host->lock);
+        ns_mutex_unlock(&host->lock);
         g_main_loop_unref(loop);
     }
 
-    g_mutex_lock(&host->lock);
+    ns_mutex_lock(&host->lock);
     host->worker_js = NULL;
-    g_mutex_unlock(&host->lock);
+    ns_mutex_unlock(&host->lock);
     ns_js_free(js);
     g_atomic_int_set(&host->closing, 1);
     ns_worker_context_drain(host);
@@ -25102,7 +25084,7 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     ns_worker_host *host = g_new0(ns_worker_host, 1);
     g_atomic_int_set(&host->ref_count, 1);
     g_atomic_int_set(&host->owner_alive, 1);
-    g_mutex_init(&host->lock);
+    ns_mutex_init(&host->lock);
     host->owner = js;
     host->owner_ctx = ctx;
     host->owner_obj = JS_DupValue(ctx, obj);
@@ -25350,7 +25332,7 @@ ns_sw_start_registration(JSContext *ctx, JSValueConst container, ns_js *js,
     ns_worker_host *host = g_new0(ns_worker_host, 1);
     g_atomic_int_set(&host->ref_count, 1);
     g_atomic_int_set(&host->owner_alive, 1);
-    g_mutex_init(&host->lock);
+    ns_mutex_init(&host->lock);
     host->owner = js;
     host->owner_ctx = ctx;
     host->owner_obj = JS_DupValue(ctx, sw);
@@ -27384,7 +27366,7 @@ ns_io_call_cb(JSContext *ctx, ns_io_observer *o, JSValue entries)
     ns_js *jsx = js_from_ctx(ctx);
     gint64 io_saved = jsx ? jsx->eval_deadline_us : 0;
     if (jsx) jsx->eval_deadline_us =
-        g_get_monotonic_time() + ns_js_eval_budget_us_for(jsx);
+        ns_time_monotonic_us() + ns_js_eval_budget_us_for(jsx);
     JSValue cb = JS_DupValue(ctx, o->cb);
     JSValue self = JS_DupValue(ctx, o->wrapper);
     JSValueConst args[2] = { entries, self };
@@ -28035,7 +28017,7 @@ ns_window_request_idle_callback(JSContext *ctx, JSValueConst this_val,
         int32_t timeout_ms = 0;
         if (JS_IsNumber(to) && JS_ToInt32(ctx, &timeout_ms, to) == 0 &&
             timeout_ms > 0) {
-            t->idle_deadline_us = g_get_monotonic_time() +
+            t->idle_deadline_us = ns_time_monotonic_us() +
                                   (gint64)timeout_ms * 1000;
             if ((guint)timeout_ms < delay_ms) delay_ms = (guint)timeout_ms;
         }
@@ -30634,7 +30616,7 @@ static gint64
 ns_js_animation_frame_time(ns_js *js)
 {
     gint64 t = js->frame_time_us > 0 ? js->frame_time_us
-                                     : g_get_monotonic_time();
+                                     : ns_time_monotonic_us();
     if (t < js->last_raf_time_us) t = js->last_raf_time_us;
     js->last_raf_time_us = t;
     return t;
@@ -30712,7 +30694,7 @@ ns_js_run_animation_frame_body(ns_js *js)
                                                          "data-nd-frame-url");
             js->current_url = g_strdup(frame_url ? frame_url : "");
         }
-        js->eval_deadline_us = g_get_monotonic_time() + ns_js_eval_budget_us_for(js);
+        js->eval_deadline_us = ns_time_monotonic_us() + ns_js_eval_budget_us_for(js);
         JSValue arg = JS_NewFloat64(callback_ctx, ts_ms);
         JSValue ret;
         if (e->video_frame) {
@@ -50440,7 +50422,7 @@ ns_js_console_time(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
     if (!js->console_timers)
         js->console_timers = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
     gint64 *now = g_new(gint64, 1);
-    *now = g_get_monotonic_time();
+    *now = ns_time_monotonic_us();
     g_hash_table_replace(js->console_timers, g_strdup(label), now);
     g_free(label);
     return JS_UNDEFINED;
@@ -50459,7 +50441,7 @@ ns_js_console_time_emit(ns_js *js, JSContext *ctx, const char *label,
         g_free(line);
         return;
     }
-    double ms = (g_get_monotonic_time() - *start) / 1000.0;
+    double ms = (ns_time_monotonic_us() - *start) / 1000.0;
     GString *prefix = g_string_new(NULL);
     g_string_append_printf(prefix, "%s: %.3fms", label, ms);
     if (extra_argc > 0)
@@ -53125,8 +53107,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
         js->time_origin_us = navigation_timing->origin_us;
         js->time_origin_real_ms = navigation_timing->origin_real_ms;
     } else {
-        js->time_origin_us = g_get_monotonic_time();
-        js->time_origin_real_ms = (double)g_get_real_time() / 1000.0;
+        js->time_origin_us = ns_time_monotonic_us();
+        js->time_origin_real_ms = (double)ns_time_real_us() / 1000.0;
         js->navigation_timing.origin_us = js->time_origin_us;
         js->navigation_timing.origin_real_ms = js->time_origin_real_ms;
     }
@@ -56944,7 +56926,7 @@ ns_cookie_parse_attrs(const char *attrs, ns_cookie_attrs *out)
             g_autofree char *date = g_strndup(vp, vlen);
             time_t expiry = curl_getdate(date, NULL);
             if (expiry != (time_t)-1 &&
-                expiry <= (time_t)(g_get_real_time() / G_USEC_PER_SEC))
+                expiry <= (time_t)(ns_time_real_us() / G_USEC_PER_SEC))
                 out->expired = TRUE;
         } else if (klen == 6 && g_ascii_strncasecmp(attrs, "domain", 6) == 0 &&
                    eq && vlen) {
@@ -58931,10 +58913,10 @@ ns_js_free(ns_js *js)
     }
     if (js->console_counts) g_hash_table_destroy(js->console_counts);
     if (js->console_timers) g_hash_table_destroy(js->console_timers);
-    g_mutex_lock(&g_blob_lock);
+    ns_mutex_lock(&g_blob_lock);
     if (js->blob_urls) g_hash_table_destroy(js->blob_urls);
     js->blob_urls = NULL;
-    g_mutex_unlock(&g_blob_lock);
+    ns_mutex_unlock(&g_blob_lock);
     if (js->timers) g_hash_table_destroy(js->timers);
     if (js->raf_pending) {
         for (guint i = 0; i < js->raf_pending->len; i++) {
@@ -59369,7 +59351,7 @@ ns_js_eval_realm_classic(JSContext *realm, const char *top_url,
                          const char *source, gsize length, const char *origin)
 {
     gboolean profile = ns_js_profile_enabled();
-    gint64 t0 = profile ? g_get_monotonic_time() : 0;
+    gint64 t0 = profile ? ns_time_monotonic_us() : 0;
     JSValue value = JS_UNDEFINED;
     gboolean cache_hit = FALSE;
     if (!(ns_js_eval_bytecode_cached_in(realm, top_url, origin, source, length,
@@ -59393,7 +59375,7 @@ ns_js_eval_realm_classic(JSContext *realm, const char *top_url,
     }
     if (profile)
         g_printerr("[profile] js eval     %6.1fms  %zub  %s[frame] %s\n",
-                   (g_get_monotonic_time() - t0) / 1000.0, (size_t)length,
+                   (ns_time_monotonic_us() - t0) / 1000.0, (size_t)length,
                    cache_hit ? "[bc] " : "", origin);
     return value;
 }
@@ -59521,7 +59503,7 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
         if (!JS_IsException(fn) && JS_IsFunction(js->ctx, fn)) {
             JSValue global = JS_GetGlobalObject(js->ctx);
             JSValueConst args[1] = { js->iframe_doc };
-            js->eval_deadline_us = g_get_monotonic_time() + ns_js_eval_budget_us_for(js);
+            js->eval_deadline_us = ns_time_monotonic_us() + ns_js_eval_budget_us_for(js);
             js->eval_depth++;
             JSValue v = JS_Call(js->ctx, fn, global, 1, args);
             js->eval_depth--;
@@ -59557,9 +59539,9 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
     }
     char *copy = g_strndup(src ? src : "", len);
     gboolean profile = ns_js_profile_enabled();
-    gint64 t0 = profile ? g_get_monotonic_time() : 0;
+    gint64 t0 = profile ? ns_time_monotonic_us() : 0;
     gint64 trace_start = ns_trace_now();
-    js->eval_deadline_us = g_get_monotonic_time() + ns_js_eval_budget_us_for(js);
+    js->eval_deadline_us = ns_time_monotonic_us() + ns_js_eval_budget_us_for(js);
     js->eval_depth++;
 
     JSValue v = JS_UNDEFINED;
@@ -59599,7 +59581,7 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
                       trace_start, origin ? origin : "inline");
     if (profile)
         g_printerr("[profile] js eval     %6.1fms  %zub  %s%s\n",
-                   (g_get_monotonic_time() - t0) / 1000.0, (size_t)len,
+                   (ns_time_monotonic_us() - t0) / 1000.0, (size_t)len,
                    cache_hit ? "[bc] " : "",
                    origin ? origin : "<inline>");
     if (JS_IsException(v)) {
@@ -60141,9 +60123,9 @@ ns_js_eval_module(ns_js *js, const char *src, gsize len, const char *origin)
     JSContext *ctx = js->module_ctx ? js->module_ctx : js->ctx;
     char *copy = g_strndup(src ? src : "", len);
     gboolean profile = ns_js_profile_enabled();
-    gint64 t0 = profile ? g_get_monotonic_time() : 0;
+    gint64 t0 = profile ? ns_time_monotonic_us() : 0;
     gint64 trace_start = ns_trace_now();
-    js->eval_deadline_us = g_get_monotonic_time() + ns_js_eval_budget_us_for(js);
+    js->eval_deadline_us = ns_time_monotonic_us() + ns_js_eval_budget_us_for(js);
     js->eval_depth++;
     JSValue fn = ns_js_compile_module_cached(ctx, copy, len,
                                              origin ? origin : "module");
@@ -60161,7 +60143,7 @@ ns_js_eval_module(ns_js *js, const char *src, gsize len, const char *origin)
                       origin ? origin : "module");
     if (profile)
         g_printerr("[profile] js module   %6.1fms  %zub  %s\n",
-                   (g_get_monotonic_time() - t0) / 1000.0, (size_t)len,
+                   (ns_time_monotonic_us() - t0) / 1000.0, (size_t)len,
                    origin ? origin : "module");
     if (JS_IsException(v)) {
         JSValue ex = JS_GetException(ctx);
@@ -60409,7 +60391,7 @@ ns_js_eval_script_source(ns_js *js, ns_node *script, const char *source,
         js->module_ctx = previous_module_ctx;
     } else {
         g_autofree char *copy = g_strndup(source ? source : "", length);
-        js->eval_deadline_us = g_get_monotonic_time() + ns_js_eval_budget_us_for(js);
+        js->eval_deadline_us = ns_time_monotonic_us() + ns_js_eval_budget_us_for(js);
         js->eval_depth++;
         JSValue value = ns_js_eval_realm_classic(realm, previous_url, copy,
                                                  length,
@@ -61489,7 +61471,7 @@ ns_js_sweep_orphans(ns_js *js)
     if (!js) return;
     ns_js_discard_removed_frames(js);
     if (!js->orphan_nodes || g_hash_table_size(js->orphan_nodes) == 0) return;
-    gint64 now = g_get_monotonic_time();
+    gint64 now = ns_time_monotonic_us();
     if (js->last_orphan_sweep_us != 0 && now - js->last_orphan_sweep_us < 250000)
         return;
     js->last_orphan_sweep_us = now;
@@ -62269,9 +62251,9 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
 
     if (classic_sources->len > 0 && fctx && JS_IsObject(fwin)) {
         gint64 iframe_deadline_us =
-            g_get_monotonic_time() + ns_js_eval_budget_us();
+            ns_time_monotonic_us() + ns_js_eval_budget_us();
         for (guint i = 0; i < classic_sources->len; i++) {
-            if (g_get_monotonic_time() >= iframe_deadline_us) break;
+            if (ns_time_monotonic_us() >= iframe_deadline_us) break;
             ns_iframe_classic_source *source =
                 g_ptr_array_index(classic_sources, i);
             ns_node *previous_script = js->current_script;
@@ -62337,7 +62319,7 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
             if (!JS_IsObject(shist)) { JS_FreeValue(js->ctx, shist); shist = JS_GetPropertyStr(js->ctx, g, "history"); }
             JSValueConst args[8] = { swin, swin, g, g, swin,
                                      iframe_doc, sloc, shist };
-            js->eval_deadline_us = g_get_monotonic_time() + ns_js_eval_budget_us_for(js);
+            js->eval_deadline_us = ns_time_monotonic_us() + ns_js_eval_budget_us_for(js);
             js->eval_depth++;
             JSValue v = JS_Call(js->ctx, fn, swin, 8, args);
             js->eval_depth--;
@@ -63195,7 +63177,7 @@ static void
 ns_js_run_content_scripts(ns_js *js, const char *src)
 {
     if (!js || !src || js->halted || js->in_pump) return;
-    js->eval_deadline_us = g_get_monotonic_time() + ns_js_eval_budget_us_for(js);
+    js->eval_deadline_us = ns_time_monotonic_us() + ns_js_eval_budget_us_for(js);
     JSValue list = JS_Eval(js->ctx, src, strlen(src), "content-script",
                            JS_EVAL_TYPE_GLOBAL);
     if (JS_IsException(list)) {
@@ -63323,7 +63305,7 @@ ns_js_lifecycle_tick(gpointer data)
         ns_js_run_content_scripts(js, content_script);
     if (ns_js_profile_enabled())
         g_printerr("[profile] js lifecycle total=%.1fms\n",
-                   (g_get_monotonic_time() - js->lifecycle_start_us) / 1000.0);
+                   (ns_time_monotonic_us() - js->lifecycle_start_us) / 1000.0);
     ns_js_lifecycle_clear(js);
     return G_SOURCE_REMOVE;
 }
@@ -63345,7 +63327,7 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc,
     js->ready_state = 0;
     ns_js_set_navigation_milestone(js,
         &js->navigation_timing.dom_loading_ms, "domLoading");
-    gint64 t0 = g_get_monotonic_time();
+    gint64 t0 = ns_time_monotonic_us();
     ns_js_install_document(js, doc, base_url, charset, content_type);
     if (js->platform_globals) g_hash_table_destroy(js->platform_globals);
     js->platform_globals = ns_js_snapshot_globals(js);
@@ -63374,7 +63356,7 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc,
         if (cs) ns_js_run_content_scripts(js, cs);
     }
     ns_js_schedule_static_iframes(js, doc);
-    gint64 t_install = profile ? g_get_monotonic_time() : 0;
+    gint64 t_install = profile ? ns_time_monotonic_us() : 0;
     const char *origin = base_url && *base_url ? base_url : "inline";
     GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
     ns_js_register_import_maps(js, doc);
@@ -63389,7 +63371,7 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc,
     if (profile)
         g_printerr("[profile] js parser install=%.1f blocking=%.1fms; lifecycle queued\n",
                    (t_install - t0) / 1000.0,
-                   (g_get_monotonic_time() - t_install) / 1000.0);
+                   (ns_time_monotonic_us() - t_install) / 1000.0);
 }
 
 void
@@ -63686,7 +63668,7 @@ ns_js_flush_layout_from(ns_js *js, const char *api)
     js->in_layout_flush = TRUE;
     js->layout_flush_cb(js->layout_flush_user_data);
     js->in_layout_flush = FALSE;
-    if (start && g_get_monotonic_time() - start >= 50)
+    if (start && ns_time_monotonic_us() - start >= 50)
         ns_trace_complete("layout", "forced reflow", start, api);
 }
 
@@ -63874,7 +63856,7 @@ ns_js_eval_source(ns_js *js, const char *src, const char *origin)
 {
     if (!js || !src) return NULL;
     if (js->halted || js->in_pump) return NULL;
-    js->eval_deadline_us = g_get_monotonic_time() + ns_js_eval_budget_us_for(js);
+    js->eval_deadline_us = ns_time_monotonic_us() + ns_js_eval_budget_us_for(js);
     JSValue v = JS_Eval(js->ctx, src, strlen(src), origin ? origin : "console", JS_EVAL_TYPE_GLOBAL);
     js->eval_deadline_us = 0;
     char *out = NULL;

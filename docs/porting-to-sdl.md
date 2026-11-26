@@ -56,7 +56,9 @@ So the shell goes first, and Cairo after it:
    1. *Threads, locks, condition variables, thread-local data and time*
       move from GLib to a small layer over SDL3 (`src/plat/`): SDL's
       mutexes, condition variables, read-write locks, threads, TLS and
-      clocks. (In progress.)
+      clocks. (Done for Weststar's own code; web-text-lib, the Pango fork,
+      still uses GLib's. GLib's GTask worker threads remain until the
+      main loop moves.)
    2. *The main loop and timers* move from GLib's `GMainContext` to an
       SDL-based loop with SDL timers; the engine thread gets the same.
    3. *A portable build profile*: fontconfig optional (fonts found in the

@@ -6,6 +6,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "quickjs_compat.h"
+#include "plat/ns_plat.h"
 #include "js_internal.h"
 
 #include <math.h>
@@ -936,7 +937,7 @@ ns_wa_rt_time(ns_wa_rt *rt)
     }
     double t = rt->wall_time;
     if (rt->running && rt->wall_start)
-        t += (double)(g_get_monotonic_time() - rt->wall_start) / 1e6;
+        t += (double)(ns_time_monotonic_us() - rt->wall_start) / 1e6;
     return t;
 }
 
@@ -1018,7 +1019,7 @@ ns_wa_rt_start(ns_wa_rt *rt)
         if (rt->stream_ok) ns_audio_context_stream_end(audio, rt->token, FALSE);
     }
     rt->running = TRUE;
-    rt->wall_start = g_get_monotonic_time();
+    rt->wall_start = ns_time_monotonic_us();
     ns_wa_set_state(rt, "running");
     ns_js *js = rt->js;
     ns_wa_poll_ensure(js);
@@ -1031,7 +1032,7 @@ static void
 ns_wa_rt_stop(ns_wa_rt *rt, const char *state)
 {
     if (rt->running) {
-        rt->wall_time += (double)(g_get_monotonic_time() - rt->wall_start) / 1e6;
+        rt->wall_time += (double)(ns_time_monotonic_us() - rt->wall_start) / 1e6;
         rt->wall_start = 0;
         rt->running = FALSE;
         if (rt->stream_ok)

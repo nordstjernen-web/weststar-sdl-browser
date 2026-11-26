@@ -5,6 +5,7 @@
  */
 
 #include "ext.h"
+#include "plat/ns_plat.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -1200,10 +1201,10 @@ ns_ext_content_script_helpers(JSContext *ctx, const char *ext_id)
 static void
 ns_ext_init(void)
 {
-    static gsize once;
-    if (g_once_init_enter(&once)) {
+    static NsOnce once;
+    if (ns_once_enter(&once)) {
         ns_ext_do_init();
-        g_once_init_leave(&once, 1);
+        ns_once_leave(&once);
     }
 }
 

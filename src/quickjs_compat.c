@@ -5,6 +5,7 @@
  */
 
 #include "quickjs_compat.h"
+#include "plat/ns_plat.h"
 
 #include <glib.h>
 #include <string.h>
@@ -368,10 +369,10 @@ static void ns_quickjs_learn_class_ids(JSContext *ctx)
 /* Runs ns_quickjs_learn_class_ids once per process. */
 static void ns_quickjs_learn_class_ids_once(JSContext *ctx)
 {
-    static gsize learned;
-    if (g_once_init_enter(&learned)) {
+    static NsOnce learned;
+    if (ns_once_enter(&learned)) {
         ns_quickjs_learn_class_ids(ctx);
-        g_once_init_leave(&learned, 1);
+        ns_once_leave(&learned);
     }
 }
 

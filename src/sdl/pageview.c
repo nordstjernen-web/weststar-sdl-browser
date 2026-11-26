@@ -6,6 +6,7 @@
  */
 
 #include "pageview.h"
+#include "plat/ns_plat.h"
 
 #include "enginethread.h"
 #include "keys.h"
@@ -664,7 +665,7 @@ start_render(NsPageView *v)
     req->caret_active = v->focused;
     req->force_full = v->frame_force_full || !v->have_frame;
     v->frame_force_full = FALSE;
-    req->frame_time_us = g_get_monotonic_time();
+    req->frame_time_us = ns_time_monotonic_us();
     push_req(v, req);
 }
 
@@ -2048,7 +2049,7 @@ ns_page_view_save_image(NsPageView *v, const char *dest)
         return;
     static int counter;
     char *base = g_strdup_printf("weststar-export-%" G_GINT64_FORMAT "-%d.png",
-                                 g_get_monotonic_time(), ++counter);
+                                 ns_time_monotonic_us(), ++counter);
     Req *req = g_new0(Req, 1);
     req->type = REQ_EXPORT;
     req->url = g_build_filename(g_get_user_runtime_dir(), base, NULL);
@@ -2132,9 +2133,9 @@ ns_page_view_save_page(NsPageView *v, const char *dest)
     c->view = pv_ref(v);
     c->url = g_strdup(url);
     c->dest = g_strdup(dest);
-    GThread *t = g_thread_new("ns-save-page", save_page_worker, c);
+    NsThread *t = ns_thread_new("ns-save-page", save_page_worker, c);
     if (t)
-        g_thread_unref(t);
+        ns_thread_unref(t);
 }
 
 static char *

@@ -6,6 +6,7 @@
  */
 
 #include "js_internal.h"
+#include "plat/ns_plat.h"
 
 #include <math.h>
 #include <string.h>
@@ -568,7 +569,7 @@ media_internal_play(ns_media_player *p)
         media_queue_settle(p, NULL, NULL);
     }
     if (p->ready_state >= HAVE_METADATA) media_backend_play(p);
-    p->last_timeupdate_us = g_get_monotonic_time();
+    p->last_timeupdate_us = ns_time_monotonic_us();
     media_poll_ensure(p->js);
     media_controls_dirty(p);
 }
@@ -696,7 +697,7 @@ media_poll(gpointer data)
         js->media_poll_source = 0;
         return G_SOURCE_REMOVE;
     }
-    gint64 now = g_get_monotonic_time();
+    gint64 now = ns_time_monotonic_us();
     gboolean active = FALSE;
     GHashTableIter it;
     gpointer value;

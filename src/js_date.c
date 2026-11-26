@@ -5,6 +5,7 @@
  */
 
 #include "quickjs_compat.h"
+#include "plat/ns_plat.h"
 #include "js_date.h"
 
 #include <math.h>
@@ -1285,7 +1286,7 @@ tmp_duration_abs(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
 static JSValue
 tmp_now_make_dt(JSContext *ctx, const char *ctor_name, int kind)
 {
-    gint64 us = g_get_real_time();
+    gint64 us = ns_time_real_us();
     int64_t epoch_sec = us / 1000000;
     int32_t nanos = (int32_t)((us % 1000000) * 1000);
     JSValue glob = JS_GetGlobalObject(ctx);

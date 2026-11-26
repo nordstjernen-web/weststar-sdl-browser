@@ -5,6 +5,7 @@
  */
 
 #include "svg.h"
+#include "plat/ns_plat.h"
 
 #include <math.h>
 #include <string.h>
@@ -2377,7 +2378,7 @@ ns_svg_doc_parse(const guchar *data, gsize len)
     ns_svg_doc *d = g_new0(ns_svg_doc, 1);
     d->doc = doc;
     d->root = root;
-    d->smil = ns_smil_new(doc, g_get_monotonic_time());
+    d->smil = ns_smil_new(doc, ns_time_monotonic_us());
     svg_image_pixel_size(root, &d->width, &d->height);
     return d;
 }

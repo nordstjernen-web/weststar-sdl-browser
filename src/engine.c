@@ -5,6 +5,7 @@
  */
 
 #include "mainctx.h"
+#include "plat/ns_plat.h"
 #include "engine.h"
 
 #include <glib/gstdio.h>
@@ -265,7 +266,7 @@ css_handoff_put(const char *url, const char *top_url, ns_response *resp,
     if (!g_css_handoff)
         g_css_handoff = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
                                               css_handoff_free);
-    gint64 now = g_get_monotonic_time();
+    gint64 now = ns_time_monotonic_us();
     if (g_hash_table_size(g_css_handoff) >= NS_CSS_HANDOFF_MAX) {
         GHashTableIter it;
         gpointer v;
@@ -289,7 +290,7 @@ css_handoff_lookup(const char *key)
 {
     css_handoff *h = g_css_handoff ? g_hash_table_lookup(g_css_handoff, key)
                                    : NULL;
-    if (h && g_get_monotonic_time() - h->at_us > NS_CSS_HANDOFF_TTL_US) {
+    if (h && ns_time_monotonic_us() - h->at_us > NS_CSS_HANDOFF_TTL_US) {
         g_hash_table_remove(g_css_handoff, key);
         return NULL;
     }
@@ -1064,21 +1065,21 @@ ns_engine_compute_cascade(ns_node *doc, const char *page_url,
     ns_css_set_doc_base(document_base);
     ns_css_style_element_cache_begin();
     gboolean profile = g_getenv("NS_PROFILE") != NULL;
-    gint64 t0 = profile ? g_get_monotonic_time() : 0;
+    gint64 t0 = profile ? ns_time_monotonic_us() : 0;
     GPtrArray *page_sheets = g_ptr_array_new();
     GPtrArray *sheet_docs = g_ptr_array_new();
     ns_engine_collect_stylesheets(doc, base_url, page_sheets, sheet_docs,
                                   css_cache);
-    gint64 t1 = profile ? g_get_monotonic_time() : 0;
+    gint64 t1 = profile ? ns_time_monotonic_us() : 0;
     if (anim)
         for (guint i = 0; i < page_sheets->len; i++)
             ns_anim_load_from_stylesheet(anim, g_ptr_array_index(page_sheets, i));
-    gint64 t2 = profile ? g_get_monotonic_time() : 0;
+    gint64 t2 = profile ? ns_time_monotonic_us() : 0;
     GHashTable *styles = ns_css_compute_scoped(doc,
         (const ns_css_stylesheet *const *)page_sheets->pdata,
         (const ns_node *const *)sheet_docs->pdata,
         page_sheets->len);
-    gint64 t3 = profile ? g_get_monotonic_time() : 0;
+    gint64 t3 = profile ? ns_time_monotonic_us() : 0;
     for (guint i = 0; i < page_sheets->len; i++)
         ns_css_stylesheet_free(g_ptr_array_index(page_sheets, i));
     if (profile)
@@ -1086,7 +1087,7 @@ ns_engine_compute_cascade(ns_node *doc, const char *page_url,
                    "compute=%.1fms free=%.1fms\n", page_sheets->len,
                    (t1 - t0) / 1000.0, (t2 - t1) / 1000.0,
                    (t3 - t2) / 1000.0,
-                   (g_get_monotonic_time() - t3) / 1000.0);
+                   (ns_time_monotonic_us() - t3) / 1000.0);
     g_ptr_array_free(page_sheets, TRUE);
     g_ptr_array_free(sheet_docs, TRUE);
     ns_css_relayout_leave();
@@ -1148,12 +1149,12 @@ ns_engine_relayout(ns_node *doc, const char *page_url,
     if (profile_env < 0)
         profile_env = g_getenv("NS_PROFILE") != NULL ? 1 : 0;
     GHashTable *styles;
-    gint64 relayout_t0 = g_get_monotonic_time();
+    gint64 relayout_t0 = ns_time_monotonic_us();
     if (profile_env) {
         ns_render_profile prof;
-        gint64 t0 = g_get_monotonic_time();
+        gint64 t0 = ns_time_monotonic_us();
         styles = ns_render_relayout_profile(&rc, out_layout, &prof);
-        gint64 total = g_get_monotonic_time() - t0;
+        gint64 total = ns_time_monotonic_us() - t0;
         guint nstyles = styles ? g_hash_table_size(styles) : 0u;
         g_printerr("[profile] relayout vw=%d nodes=%u total=%.2fms "
                    "css=%.2f style=%.2f layout=%.2f",
@@ -1192,7 +1193,7 @@ ns_engine_relayout(ns_node *doc, const char *page_url,
         rc.n_sheets   = sheets->len;
         styles = ns_render_relayout(&rc, out_layout);
     }
-    ns_engine_perf_add_relayout(g_get_monotonic_time() - relayout_t0);
+    ns_engine_perf_add_relayout(ns_time_monotonic_us() - relayout_t0);
     ns_debug_log_emit(NS_DLOG_RENDER, "relayout", "styles=%u vw=%d",
                       styles ? g_hash_table_size(styles) : 0u, viewport_width);
 

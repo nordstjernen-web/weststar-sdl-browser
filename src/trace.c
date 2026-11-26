@@ -4,6 +4,7 @@
  */
 
 #include "trace.h"
+#include "plat/ns_plat.h"
 #include "html.h"
 
 #include <stdarg.h>
@@ -11,9 +12,9 @@
 #include <glib/gstdio.h>
 
 static FILE   *g_trace_file;
-static GMutex  g_trace_lock;
+static NsMutex g_trace_lock;
 static gint    g_trace_next_tid;
-static GPrivate g_trace_tid;
+static NsPrivate g_trace_tid;
 static gint64  g_trace_origin_us;
 
 gboolean
@@ -26,17 +27,17 @@ ns_trace_enabled(void)
 gint64
 ns_trace_now(void)
 {
-    return ns_trace_enabled() ? g_get_monotonic_time() : 0;
+    return ns_trace_enabled() ? ns_time_monotonic_us() : 0;
 }
 
 /* Returns a small per-thread trace id, assigned on first use. */
 static int
 trace_tid(void)
 {
-    int tid = GPOINTER_TO_INT(g_private_get(&g_trace_tid));
+    int tid = GPOINTER_TO_INT(ns_private_get(&g_trace_tid));
     if (tid == 0) {
         tid = g_atomic_int_add(&g_trace_next_tid, 1) + 1;
-        g_private_set(&g_trace_tid, GINT_TO_POINTER(tid));
+        ns_private_set(&g_trace_tid, GINT_TO_POINTER(tid));
     }
     return tid;
 }
@@ -54,13 +55,13 @@ trace_append_json_string(GString *out, const char *s)
 static void
 trace_write(GString *event)
 {
-    g_mutex_lock(&g_trace_lock);
+    ns_mutex_lock(&g_trace_lock);
     if (g_trace_file) {
         fputs(event->str, g_trace_file);
         fputs(",\n", g_trace_file);
         fflush(g_trace_file);
     }
-    g_mutex_unlock(&g_trace_lock);
+    ns_mutex_unlock(&g_trace_lock);
 }
 
 /* Starts a Chrome trace-event JSON file at path and names the main thread. */
@@ -70,11 +71,11 @@ ns_trace_open(const char *path)
     if (!path || !*path) return FALSE;
     FILE *f = g_fopen(path, "w");
     if (!f) return FALSE;
-    g_trace_origin_us = g_get_monotonic_time();
+    g_trace_origin_us = ns_time_monotonic_us();
     fputs("[\n", f);
-    g_mutex_lock(&g_trace_lock);
+    ns_mutex_lock(&g_trace_lock);
     g_atomic_pointer_set(&g_trace_file, f);
-    g_mutex_unlock(&g_trace_lock);
+    ns_mutex_unlock(&g_trace_lock);
     ns_trace_thread_name("main");
     return TRUE;
 }
@@ -83,10 +84,10 @@ ns_trace_open(const char *path)
 void
 ns_trace_close(void)
 {
-    g_mutex_lock(&g_trace_lock);
+    ns_mutex_lock(&g_trace_lock);
     FILE *f = g_trace_file;
     g_atomic_pointer_set(&g_trace_file, NULL);
-    g_mutex_unlock(&g_trace_lock);
+    ns_mutex_unlock(&g_trace_lock);
     if (!f) return;
     fputs("{}]\n", f);
     fclose(f);
@@ -96,7 +97,7 @@ ns_trace_close(void)
 void
 ns_trace_thread_name_once(const char *name)
 {
-    if (!ns_trace_enabled() || g_private_get(&g_trace_tid)) return;
+    if (!ns_trace_enabled() || ns_private_get(&g_trace_tid)) return;
     ns_trace_thread_name(name);
 }
 
@@ -132,7 +133,7 @@ ns_trace_complete(const char *category, const char *name, gint64 start_us,
                   const char *detail)
 {
     if (!ns_trace_enabled() || !name || start_us <= 0) return;
-    gint64 end_us = g_get_monotonic_time();
+    gint64 end_us = ns_time_monotonic_us();
     GString *e = g_string_new("{\"name\":");
     trace_append_json_string(e, name);
     g_string_append(e, ",\"cat\":");

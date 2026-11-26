@@ -5,6 +5,7 @@
  */
 
 #include "cache.h"
+#include "plat/ns_plat.h"
 #include "config.h"
 #include "sqlite_db.h"
 #include "net.h"
@@ -21,7 +22,7 @@
 static char    *g_cache_dir;
 static sqlite3 *g_cache_db;
 static gboolean g_cache_disabled;
-static GMutex   g_cache_mutex;
+static NsMutex  g_cache_mutex;
 
 #ifdef G_OS_WIN32
 /* Windows: replaces the path's DACL with a protected full-access ACE for the current user. */
@@ -351,8 +352,7 @@ ns_cache_shutdown(void)
 void
 ns_cache_clear(void)
 {
-    G_GNUC_UNUSED g_autoptr(GMutexLocker) locker =
-        g_mutex_locker_new(&g_cache_mutex);
+    NS_MUTEX_AUTO_LOCK(locker, &g_cache_mutex);
     if (g_cache_db)
         cache_exec("DELETE FROM entries");
     if (g_cache_dir) {
@@ -455,11 +455,11 @@ freshness_from_headers(const char *cache_control, const char *expires_header)
                 gint64 ma = g_ascii_strtoll(p + 1, NULL, 10);
                 if (ma < 0) ma = 0;
                 if (ma > 86400LL * 3650) ma = 86400LL * 3650;
-                return g_get_real_time() / G_USEC_PER_SEC + ma;
+                return ns_time_real_us() / G_USEC_PER_SEC + ma;
             }
         }
         if (strstr(cache_control, "immutable"))
-            return g_get_real_time() / G_USEC_PER_SEC + 86400 * 30;
+            return ns_time_real_us() / G_USEC_PER_SEC + 86400 * 30;
     }
     if (expires_header) {
         gint64 t = parse_http_date(expires_header);
@@ -478,7 +478,7 @@ is_cacheable_status(long s)
 static gint64
 now_seconds(void)
 {
-    return g_get_real_time() / G_USEC_PER_SEC;
+    return ns_time_real_us() / G_USEC_PER_SEC;
 }
 
 /* Returns a copy of a text column, or NULL. */
@@ -526,7 +526,7 @@ ns_cache_entry *
 ns_cache_get(const char *url, const char *partition,
              const char *const *request_headers)
 {
-    G_GNUC_UNUSED g_autoptr(GMutexLocker) locker = g_mutex_locker_new(&g_cache_mutex);
+    NS_MUTEX_AUTO_LOCK(locker, &g_cache_mutex);
     if (!ns_cache_enabled() || !url) return NULL;
     g_autofree char *base = base_key_for_url(url, partition);
     g_autofree char *key = find_row_key(base, request_headers);
@@ -643,7 +643,7 @@ ns_cache_put(const char *url,
              const char *const *request_headers,
              const void *body, gsize body_len)
 {
-    G_GNUC_UNUSED g_autoptr(GMutexLocker) locker = g_mutex_locker_new(&g_cache_mutex);
+    NS_MUTEX_AUTO_LOCK(locker, &g_cache_mutex);
     if (!ns_cache_enabled() || !url_should_cache(url)) return;
     if (cache_control && (strstr(cache_control, "no-store") ||
                           strstr(cache_control, "private"))) return;
@@ -729,7 +729,7 @@ ns_cache_promote_304(const char *url,
                      const char *cache_control,
                      const char *expires_header)
 {
-    G_GNUC_UNUSED g_autoptr(GMutexLocker) locker = g_mutex_locker_new(&g_cache_mutex);
+    NS_MUTEX_AUTO_LOCK(locker, &g_cache_mutex);
     if (!ns_cache_enabled() || !url_should_cache(url)) return;
     g_autofree char *base = base_key_for_url(url, partition);
     g_autofree char *key = find_row_key(base, request_headers);

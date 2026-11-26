@@ -5,6 +5,7 @@
  */
 
 #include "history.h"
+#include "plat/ns_plat.h"
 #include "config.h"
 #include "i18n.h"
 #include "sqlite_db.h"
@@ -18,7 +19,7 @@
 
 static sqlite3 *g_history_db;
 static gboolean g_history_disabled;
-static GMutex   g_history_mutex;
+static NsMutex  g_history_mutex;
 
 static gboolean
 history_exec(const char *sql)
@@ -73,9 +74,9 @@ history_prune(void)
 void
 ns_history_init(void)
 {
-    g_mutex_lock(&g_history_mutex);
+    ns_mutex_lock(&g_history_mutex);
     if (g_history_db || g_history_disabled) {
-        g_mutex_unlock(&g_history_mutex);
+        ns_mutex_unlock(&g_history_mutex);
         return;
     }
     char *dir = g_build_filename(g_get_user_data_dir(), NS_APP_DIR_NAME, NULL);
@@ -89,7 +90,7 @@ ns_history_init(void)
     if (!g_history_db) {
         g_history_disabled = TRUE;
         g_free(path);
-        g_mutex_unlock(&g_history_mutex);
+        ns_mutex_unlock(&g_history_mutex);
         return;
     }
     if (!history_schema()) {
@@ -97,24 +98,24 @@ ns_history_init(void)
         g_history_db = NULL;
         g_history_disabled = TRUE;
         g_free(path);
-        g_mutex_unlock(&g_history_mutex);
+        ns_mutex_unlock(&g_history_mutex);
         return;
     }
     g_chmod(path, 0600);
     g_free(path);
     history_prune();
-    g_mutex_unlock(&g_history_mutex);
+    ns_mutex_unlock(&g_history_mutex);
 }
 
 void
 ns_history_shutdown(void)
 {
-    g_mutex_lock(&g_history_mutex);
+    ns_mutex_lock(&g_history_mutex);
     if (g_history_db) {
         sqlite3_close(g_history_db);
         g_history_db = NULL;
     }
-    g_mutex_unlock(&g_history_mutex);
+    ns_mutex_unlock(&g_history_mutex);
 }
 
 /* Upserts a visit, bumping its count and time and keeping the old title if new is empty. */
@@ -122,9 +123,9 @@ void
 ns_history_record(const char *url, const char *title)
 {
     if (!history_is_recordable(url)) return;
-    g_mutex_lock(&g_history_mutex);
+    ns_mutex_lock(&g_history_mutex);
     if (!g_history_db) {
-        g_mutex_unlock(&g_history_mutex);
+        ns_mutex_unlock(&g_history_mutex);
         return;
     }
     sqlite3_stmt *st = NULL;
@@ -135,24 +136,24 @@ ns_history_record(const char *url, const char *title)
             "visit_count=visit_count+1,last_visit=excluded.last_visit,"
             "title=COALESCE(NULLIF(excluded.title,''),title)",
             -1, &st, NULL) != SQLITE_OK) {
-        g_mutex_unlock(&g_history_mutex);
+        ns_mutex_unlock(&g_history_mutex);
         return;
     }
     sqlite3_bind_text (st, 1, url, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text (st, 2, (title && *title) ? title : NULL, -1,
                        SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st, 3, g_get_real_time() / G_USEC_PER_SEC);
+    sqlite3_bind_int64(st, 3, ns_time_real_us() / G_USEC_PER_SEC);
     sqlite3_step(st);
     sqlite3_finalize(st);
-    g_mutex_unlock(&g_history_mutex);
+    ns_mutex_unlock(&g_history_mutex);
 }
 
 void
 ns_history_clear(void)
 {
-    g_mutex_lock(&g_history_mutex);
+    ns_mutex_lock(&g_history_mutex);
     history_exec("DELETE FROM visits");
-    g_mutex_unlock(&g_history_mutex);
+    ns_mutex_unlock(&g_history_mutex);
 }
 
 static const char k_history_style[] =
@@ -210,7 +211,7 @@ ns_history_search(const char *query, guint limit)
     if (!query || !*query || !limit)
         return out;
     char *pattern = history_like_pattern(query);
-    g_mutex_lock(&g_history_mutex);
+    ns_mutex_lock(&g_history_mutex);
     sqlite3_stmt *st = NULL;
     if (g_history_db &&
         sqlite3_prepare_v2(g_history_db,
@@ -231,7 +232,7 @@ ns_history_search(const char *query, guint limit)
         }
         sqlite3_finalize(st);
     }
-    g_mutex_unlock(&g_history_mutex);
+    ns_mutex_unlock(&g_history_mutex);
     g_free(pattern);
     return out;
 }
@@ -251,7 +252,7 @@ ns_history_html_page(void)
     g_string_append(s, intro);
     g_free(intro);
 
-    g_mutex_lock(&g_history_mutex);
+    ns_mutex_lock(&g_history_mutex);
     sqlite3_stmt *st = NULL;
     int have = 0;
     if (g_history_db &&
@@ -284,7 +285,7 @@ ns_history_html_page(void)
         }
         sqlite3_finalize(st);
     }
-    g_mutex_unlock(&g_history_mutex);
+    ns_mutex_unlock(&g_history_mutex);
 
     if (have) g_string_append(s, "</ul>");
     else {

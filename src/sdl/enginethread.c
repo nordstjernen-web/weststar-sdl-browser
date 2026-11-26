@@ -4,18 +4,12 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
 #include "enginethread.h"
+#include "plat/ns_plat.h"
 #include "audio/audio.h"
 #include "mainctx.h"
 #include "security.h"
 #include "trace.h"
-
-#ifndef G_OS_WIN32
-#include <pthread.h>
-#endif
 
 #define NS_ENGINE_STACK_BYTES ((size_t)8 * 1024 * 1024)
 
@@ -70,23 +64,12 @@ static GSourceFuncs jobs_funcs = {
     .dispatch = jobs_dispatch,
 };
 
-static void
-engine_set_os_thread_name(void)
-{
-#if defined(__APPLE__)
-    pthread_setname_np("ns-engine");
-#elif defined(__linux__)
-    pthread_setname_np(pthread_self(), "ns-engine");
-#endif
-}
-
-/* Engine thread body: W^X setup, thread naming, job source and main loop on its context. */
+/* Engine thread body: W^X setup, trace name, job source and main loop on its context. */
 static gpointer
 engine_main(gpointer data)
 {
     (void)data;
     ns_security_deny_exec_memory(FALSE, FALSE);
-    engine_set_os_thread_name();
     g_main_context_push_thread_default(g_ctx);
     ns_engine_context_set(g_ctx);
     ns_trace_thread_name("ns-engine");
@@ -100,36 +83,29 @@ engine_main(gpointer data)
     return NULL;
 }
 
-/* Starts the detached engine thread with an 8 MiB stack, falling back to GThread. */
+/* Starts the detached engine thread (named by SDL) with an 8 MiB stack, else the default one. */
 static void
 engine_spawn(void)
 {
     /* The engine thread may not create UNIX sockets, so the audio device
      * is opened by a helper started from this unconfined thread. */
     ns_audio_start_device_helper();
-#ifndef G_OS_WIN32
-    pthread_attr_t attr;
-    pthread_t thread;
-    pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, NS_ENGINE_STACK_BYTES);
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    int rc = pthread_create(&thread, &attr, engine_main, NULL);
-    pthread_attr_destroy(&attr);
-    if (rc == 0) return;
-#endif
-    g_thread_unref(g_thread_new("ns-engine", engine_main, NULL));
+    NsThread *t = ns_thread_try_new("ns-engine", engine_main, NULL,
+                                    NS_ENGINE_STACK_BYTES);
+    if (!t) t = ns_thread_new("ns-engine", engine_main, NULL);
+    ns_thread_unref(t);
 }
 
 /* Creates the engine context and job queue and spawns the thread exactly once. */
 static void
 engine_start(void)
 {
-    static gsize started;
-    if (g_once_init_enter(&started)) {
+    static NsOnce started;
+    if (ns_once_enter(&started)) {
         g_ctx = g_main_context_new();
         g_jobs = g_async_queue_new();
         engine_spawn();
-        g_once_init_leave(&started, 1);
+        ns_once_leave(&started);
     }
 }
 

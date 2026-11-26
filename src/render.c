@@ -5,6 +5,7 @@
  */
 
 #include "render.h"
+#include "plat/ns_plat.h"
 #include "trace.h"
 
 #include <math.h>
@@ -53,7 +54,7 @@ render_feed_animations(const ns_render_ctx *c, GHashTable *styles)
 {
     if (!c->anim) return;
     ns_anim_load_from_stylesheets(c->anim, c->sheets, c->n_sheets);
-    ns_anim_observe_all(c->anim, styles, g_get_monotonic_time());
+    ns_anim_observe_all(c->anim, styles, ns_time_monotonic_us());
 }
 
 #define NS_FONT_REQUEST_REPEAT_US G_USEC_PER_SEC
@@ -76,7 +77,7 @@ render_font_requests_current(const ns_render_ctx *c)
     sig ^= g_str_hash(c->base_url ? c->base_url : "");
     sig *= 1099511628211ULL;
     sig ^= (guint64)(guintptr)c->js;
-    gint64 now = g_get_monotonic_time();
+    gint64 now = ns_time_monotonic_us();
     if (issued_us && sig == issued_sig &&
         now - issued_us < NS_FONT_REQUEST_REPEAT_US)
         return TRUE;
@@ -453,7 +454,7 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
         uses_active = ns_css_stylesheet_has_active_rules(c->sheets[i]);
     g_render_page_uses_active = uses_active;
 
-    gint64 t0 = profile ? g_get_monotonic_time() : 0;
+    gint64 t0 = profile ? ns_time_monotonic_us() : 0;
     ns_css_set_render_zoom(c->zoom > 0 ? c->zoom : 1.0);
     gboolean container_rules = FALSE;
     for (guint i = 0; i < c->n_sheets && !container_rules; i++)
@@ -473,12 +474,12 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
         ns_css_set_container_map(NULL);
     }
     ns_trace_complete("style", "cascade", trace_start, NULL);
-    gint64 t1 = profile ? g_get_monotonic_time() : 0;
+    gint64 t1 = profile ? ns_time_monotonic_us() : 0;
 
     trace_start = ns_trace_now();
     render_style_pass(c, styles);
     ns_trace_complete("style", "style pass", trace_start, NULL);
-    gint64 t2 = profile ? g_get_monotonic_time() : 0;
+    gint64 t2 = profile ? ns_time_monotonic_us() : 0;
 
     trace_start = ns_trace_now();
     ns_paint_list_ordinals_begin();
@@ -488,17 +489,17 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
                                      c->images, c->base_url);
     ns_paint_list_ordinals_end();
     ns_trace_complete("layout", "layout", trace_start, NULL);
-    gint64 t3 = profile ? g_get_monotonic_time() : 0;
+    gint64 t3 = profile ? ns_time_monotonic_us() : 0;
     if (profile) {
         profile->css1_us = t1 - t0;
         profile->style1_us = t2 - t1;
         profile->layout1_us = t3 - t2;
     }
 
-    gint64 tc0 = profile ? g_get_monotonic_time() : 0;
+    gint64 tc0 = profile ? ns_time_monotonic_us() : 0;
     GHashTable *measured = render_measure_containers(
         layout, container_rules || seed || ns_css_container_units_seen());
-    gint64 tc1 = profile ? g_get_monotonic_time() : 0;
+    gint64 tc1 = profile ? ns_time_monotonic_us() : 0;
     if (profile) {
         profile->container_us = tc1 - tc0;
         profile->containers = g_hash_table_size(measured);
@@ -511,13 +512,13 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
         if (profile) profile->container_pass = TRUE;
         ns_css_set_container_map(measured);
         ns_css_container_features_begin();
-        gint64 t4 = profile ? g_get_monotonic_time() : 0;
+        gint64 t4 = profile ? ns_time_monotonic_us() : 0;
         trace_start = ns_trace_now();
         GHashTable *styles2 = ns_css_compute_scoped(c->doc, c->sheets,
                                                     c->sheet_docs, c->n_sheets);
         ns_trace_complete("style", "cascade for container queries",
                           trace_start, NULL);
-        gint64 t5 = profile ? g_get_monotonic_time() : 0;
+        gint64 t5 = profile ? ns_time_monotonic_us() : 0;
         gboolean container_features_used = ns_css_container_features_used();
         ns_css_set_container_map(NULL);
         if (styled_with != seed) g_hash_table_destroy(styled_with);
@@ -530,7 +531,7 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
             break;
         }
         render_style_pass(c, styles2);
-        gint64 t6 = profile ? g_get_monotonic_time() : 0;
+        gint64 t6 = profile ? ns_time_monotonic_us() : 0;
         trace_start = ns_trace_now();
         ns_paint_list_ordinals_begin();
         ns_box *layout2 = ns_layout_build(c->doc, styles2, viewport_width,
@@ -540,7 +541,7 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
         ns_paint_list_ordinals_end();
         ns_trace_complete("layout", "layout for container queries",
                           trace_start, NULL);
-        gint64 t7 = profile ? g_get_monotonic_time() : 0;
+        gint64 t7 = profile ? ns_time_monotonic_us() : 0;
         if (profile) {
             profile->style2_us += t6 - t5;
             profile->layout2_us += t7 - t6;

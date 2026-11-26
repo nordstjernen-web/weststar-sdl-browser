@@ -8,6 +8,7 @@
  */
 
 #include "shared_buffer.h"
+#include "plat/ns_plat.h"
 
 typedef struct {
     gint64 ref;
@@ -16,7 +17,7 @@ typedef struct {
     gpointer user;
 } ns_shared_buffer_entry;
 
-static GMutex ns_shared_buffer_lock;
+static NsMutex ns_shared_buffer_lock;
 static GHashTable *ns_shared_buffer_entries; /* data pointer -> entry */
 
 static GHashTable *
@@ -31,25 +32,25 @@ void
 ns_shared_buffer_retain(void *data)
 {
     if (!data) return;
-    g_mutex_lock(&ns_shared_buffer_lock);
+    ns_mutex_lock(&ns_shared_buffer_lock);
     ns_shared_buffer_entry *e = g_hash_table_lookup(ns_shared_buffer_table(),
                                                     data);
     if (e) e->ref++;
-    g_mutex_unlock(&ns_shared_buffer_lock);
+    ns_mutex_unlock(&ns_shared_buffer_lock);
 }
 
 void
 ns_shared_buffer_release(void *data)
 {
     if (!data) return;
-    g_mutex_lock(&ns_shared_buffer_lock);
+    ns_mutex_lock(&ns_shared_buffer_lock);
     ns_shared_buffer_entry *e = g_hash_table_lookup(ns_shared_buffer_table(),
                                                     data);
     if (e && --e->ref <= 0)
         g_hash_table_remove(ns_shared_buffer_table(), data);
     else
         e = NULL;
-    g_mutex_unlock(&ns_shared_buffer_lock);
+    ns_mutex_unlock(&ns_shared_buffer_lock);
     if (!e) return;
     if (e->release)
         e->release(e->user);
@@ -66,9 +67,9 @@ ns_shared_buffer_alloc_hook(void *opaque, size_t size)
     if (!data) return NULL;
     ns_shared_buffer_entry *e = g_new0(ns_shared_buffer_entry, 1);
     e->ref = 1;
-    g_mutex_lock(&ns_shared_buffer_lock);
+    ns_mutex_lock(&ns_shared_buffer_lock);
     g_hash_table_insert(ns_shared_buffer_table(), data, e);
-    g_mutex_unlock(&ns_shared_buffer_lock);
+    ns_mutex_unlock(&ns_shared_buffer_lock);
     return data;
 }
 
@@ -106,7 +107,7 @@ ns_shared_buffer_new_external(JSContext *ctx, guint8 *base, size_t len,
                               gboolean *took_user)
 {
     gboolean took = FALSE;
-    g_mutex_lock(&ns_shared_buffer_lock);
+    ns_mutex_lock(&ns_shared_buffer_lock);
     ns_shared_buffer_entry *e = g_hash_table_lookup(ns_shared_buffer_table(),
                                                     base);
     if (e) {
@@ -119,7 +120,7 @@ ns_shared_buffer_new_external(JSContext *ctx, guint8 *base, size_t len,
         g_hash_table_insert(ns_shared_buffer_table(), base, e);
         took = TRUE;
     }
-    g_mutex_unlock(&ns_shared_buffer_lock);
+    ns_mutex_unlock(&ns_shared_buffer_lock);
     if (took_user) *took_user = took;
     /* the buffer takes its own reference through the dup hook */
     JSValue buf = JS_NewArrayBuffer(ctx, base, len, 0, NULL, NULL, true);

@@ -5,6 +5,7 @@
  */
 
 #include "idb.h"
+#include "plat/ns_plat.h"
 
 #include <glib.h>
 #include <glib/gstdio.h>
@@ -40,7 +41,7 @@ static guint64     g_idb_clock;
  * pinned for the duration of the outermost backend call and only freed
  * once unpinned.  The lock serialises the shared cache between the page
  * and worker threads; it is recursive because of that re-entry. */
-static GRecMutex   g_idb_lock;
+static NsRecMutex  g_idb_lock;
 static int         g_idb_depth;
 static GPtrArray  *g_idb_call_pins;
 
@@ -799,7 +800,7 @@ ns_idb_origin_pages(JSContext *ctx, sqlite3 *current, const char *current_path)
     gint64 total = current ? ns_idb_db_pages(current) : 0;
     g_autofree char *dir = ns_idb_partition_dir(ctx);
     if (!dir) return total;
-    gint64 now = g_get_monotonic_time();
+    gint64 now = ns_time_monotonic_us();
     if (!g_idb_sibling_pages)
         g_idb_sibling_pages = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                     g_free, g_free);
@@ -1264,13 +1265,13 @@ ns_idb_backend_call(JSContext *ctx, JSValueConst this_val, int argc,
             return JS_EXCEPTION;
         }
     }
-    g_rec_mutex_lock(&g_idb_lock);
+    ns_rec_mutex_lock(&g_idb_lock);
     g_idb_depth++;
     JSValue r = ns_idb_backend_fns[magic](ctx, this_val, argc,
                                           (JSValueConst *)args);
     if (--g_idb_depth == 0)
         ns_idb_release_pins();
-    g_rec_mutex_unlock(&g_idb_lock);
+    ns_rec_mutex_unlock(&g_idb_lock);
     for (int i = 0; i < argc; i++) JS_FreeValue(ctx, args[i]);
     g_free(args);
     return r;

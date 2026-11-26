@@ -5,6 +5,7 @@
  */
 
 #include "headless.h"
+#include "plat/ns_plat.h"
 #include "gfx.h"
 
 #include <stdio.h>
@@ -458,8 +459,8 @@ rdrv_run_actions(ns_page_session *s, const char *spec, int vw, int vh,
         } else if (g_str_has_prefix(a, "wait ")) {
             gint64 ms = g_ascii_strtoll(a + 5, NULL, 10);
             fprintf(stderr, "[headless] wait %" G_GINT64_FORMAT "ms\n", ms);
-            gint64 end = g_get_monotonic_time() + ms * 1000;
-            while (g_get_monotonic_time() < end) {
+            gint64 end = ns_time_monotonic_us() + ms * 1000;
+            while (ns_time_monotonic_us() < end) {
                 ns_page_frame fr;
                 if (ns_page_session_render(s, vw, vh, 0, 0, 1.0, 0, &fr) == 0) {
                     char *nav = (fr.nav && *fr.nav) ? g_strdup(fr.nav) : NULL;
@@ -469,7 +470,7 @@ rdrv_run_actions(ns_page_session *s, const char *spec, int vw, int vh,
                         continue;
                     }
                     }
-                g_usleep(33000);
+                ns_sleep_us(33000);
             }
         }
     }
@@ -667,7 +668,7 @@ headless_flush_style(gpointer ud)
     *c->styles = ns_engine_compute_cascade(c->doc, c->base, c->css_cache, c->anim);
     ns_css_set_focus_node(prev_focus);
     if (c->anim)
-        ns_engine_anim_observe(c->anim, *c->styles, g_get_monotonic_time());
+        ns_engine_anim_observe(c->anim, *c->styles, ns_time_monotonic_us());
     ns_js_set_style_table(c->js, *c->styles);
     g_headless_styles_stale = FALSE;
     if (headless_styles_have_containers(*c->styles)) {
@@ -696,7 +697,7 @@ settle_raf_tick(gpointer user_data)
 {
     settle_state *s = user_data;
     headless_flush_ctx *fc = s->fc;
-    gint64 now = g_get_monotonic_time();
+    gint64 now = ns_time_monotonic_us();
     if (fc->image_cache) ns_image_cache_tick(fc->image_cache, now);
     if (fc->anim && ns_anim_tick(fc->anim, now)) {
         g_headless_styles_stale = TRUE;
@@ -714,7 +715,7 @@ settle_raf_tick(gpointer user_data)
         g_headless_layout_dirty = FALSE;
         headless_relayout(fc);
         s->pending_mutation = FALSE;
-        s->last_flush_us = g_get_monotonic_time();
+        s->last_flush_us = ns_time_monotonic_us();
     }
     return G_SOURCE_CONTINUE;
 }
@@ -726,7 +727,7 @@ settle_main_loop(int ms, headless_flush_ctx *fc)
     if (ms <= 0 || !fc) return;
     GMainLoop *loop = g_main_loop_new(NULL, FALSE);
     g_timeout_add(ms, settle_quit_cb, loop);
-    settle_state st = { .fc = fc, .last_flush_us = g_get_monotonic_time() };
+    settle_state st = { .fc = fc, .last_flush_us = ns_time_monotonic_us() };
     guint raf_id = g_timeout_add(16, settle_raf_tick, &st);
     g_main_loop_run(loop);
     g_source_remove(raf_id);
@@ -791,7 +792,7 @@ headless_wpt_finish(headless_flush_ctx *fc, const ns_headless_opts *opts)
     if (!done) {
         GMainLoop *loop = g_main_loop_new(NULL, FALSE);
         wpt_wait_state w = { .loop = loop, .fc = fc };
-        settle_state st = { .fc = fc, .last_flush_us = g_get_monotonic_time() };
+        settle_state st = { .fc = fc, .last_flush_us = ns_time_monotonic_us() };
         guint raf_id = g_timeout_add(16, settle_raf_tick, &st);
         guint poll_id = g_timeout_add(50, wpt_poll_cb, &w);
         guint stop_id = g_timeout_add(timeout_ms, settle_quit_cb, loop);
@@ -1960,8 +1961,8 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
 
     ns_anim *anim = ns_anim_new();
     ns_engine_load_keyframes(anim, doc, page_url, css_cache);
-    ns_engine_anim_observe(anim, styles, g_get_monotonic_time());
-    gint64 smil_origin_us = g_get_monotonic_time();
+    ns_engine_anim_observe(anim, styles, ns_time_monotonic_us());
+    gint64 smil_origin_us = ns_time_monotonic_us();
     ns_smil *smil = ns_smil_new(doc, smil_origin_us);
 
     headless_nav_capture nav_cap = {0};

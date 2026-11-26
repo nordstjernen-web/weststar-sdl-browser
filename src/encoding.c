@@ -5,6 +5,7 @@
  */
 
 #include "encoding.h"
+#include "plat/ns_plat.h"
 
 #include <string.h>
 
@@ -540,13 +541,13 @@ const ns_encoding *
 ns_encoding_locale_default(void)
 {
     static const ns_encoding *dflt;
-    static gsize once;
-    if (g_once_init_enter(&once)) {
+    static NsOnce once;
+    if (ns_once_enter(&once)) {
         const char *const *names = g_get_language_names();
         const char *locale = names && names[0] ? names[0] : "C";
         dflt = ns_encoding_for_label(locale_default_label(locale));
         if (!dflt) dflt = ns_encoding_for_name("windows-1252");
-        g_once_init_leave(&once, 1);
+        ns_once_leave(&once);
     }
     return dflt;
 }
@@ -1213,7 +1214,7 @@ typedef struct {
 } ns_rev_map;
 
 static ns_rev_map ns_rev_maps[NS_REV_COUNT];
-static gsize ns_rev_ready[NS_REV_COUNT];
+static NsOnce ns_rev_ready[NS_REV_COUNT];
 
 /* Orders reverse-index entries by code point, then pointer. */
 static int
@@ -1281,9 +1282,9 @@ rev_map_build(ns_rev_id id, ns_rev_map *map)
 static gboolean
 rev_pointer(ns_rev_id id, guint32 cp, guint32 *pointer)
 {
-    if (g_once_init_enter(&ns_rev_ready[id])) {
+    if (ns_once_enter(&ns_rev_ready[id])) {
         rev_map_build(id, &ns_rev_maps[id]);
-        g_once_init_leave(&ns_rev_ready[id], 1);
+        ns_once_leave(&ns_rev_ready[id]);
     }
     const ns_rev_map *map = &ns_rev_maps[id];
     gsize lo = 0, hi = map->len;

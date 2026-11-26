@@ -6,6 +6,7 @@
  */
 
 #include "mainloop.h"
+#include "plat/ns_plat.h"
 
 /* The longest the loop sleeps without a wake: GLib work queued from a thread
  * that does not call ns_sdl_wake() still runs within this many ms. */
@@ -18,10 +19,10 @@ static gboolean g_quit;
 Uint32
 ns_sdl_wake_event_type(void)
 {
-    static gsize once;
-    if (g_once_init_enter(&once)) {
+    static NsOnce once;
+    if (ns_once_enter(&once)) {
         g_wake_type = SDL_RegisterEvents(1);
-        g_once_init_leave(&once, 1);
+        ns_once_leave(&once);
     }
     return g_wake_type;
 }

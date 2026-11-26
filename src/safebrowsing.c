@@ -8,6 +8,7 @@
 #define _GNU_SOURCE
 #endif
 #include "safebrowsing.h"
+#include "plat/ns_plat.h"
 #include "safebrowsing_google.h"
 #include "config.h"
 #include "net.h"
@@ -20,7 +21,7 @@ static GHashTable *g_blocked;
 static GHashTable *g_allow;
 static gboolean    g_loaded;
 /* Queried from the network and engine threads; guards the three above. */
-static GMutex      g_sb_lock;
+static NsMutex     g_sb_lock;
 static gint        g_checks;
 static gint        g_local_blocks;
 
@@ -132,10 +133,10 @@ ns_safebrowsing_allow_host(const char *host)
 {
     if (!host || !*host)
         return;
-    g_mutex_lock(&g_sb_lock);
+    ns_mutex_lock(&g_sb_lock);
     ensure_loaded();
     g_hash_table_add(g_allow, g_ascii_strdown(host, -1));
-    g_mutex_unlock(&g_sb_lock);
+    ns_mutex_unlock(&g_sb_lock);
 }
 
 /* True if the host or any parent domain's SHA-256 is blocklisted and not allowed. */
@@ -145,17 +146,17 @@ ns_safebrowsing_blocked(const char *host)
     const ns_config *cfg = ns_config_get();
     if (!host || !*host || (cfg && !cfg->safe_browsing))
         return FALSE;
-    g_mutex_lock(&g_sb_lock);
+    ns_mutex_lock(&g_sb_lock);
     ensure_loaded();
     if (g_hash_table_size(g_blocked) == 0) {
-        g_mutex_unlock(&g_sb_lock);
+        ns_mutex_unlock(&g_sb_lock);
         return FALSE;
     }
     char *low = g_ascii_strdown(host, -1);
     for (gsize ln = strlen(low); ln > 0 && low[ln - 1] == '.'; ln--)
         low[ln - 1] = '\0';
     if (g_hash_table_contains(g_allow, low)) {
-        g_mutex_unlock(&g_sb_lock);
+        ns_mutex_unlock(&g_sb_lock);
         g_free(low);
         return FALSE;
     }
@@ -168,7 +169,7 @@ ns_safebrowsing_blocked(const char *host)
         if (hit)
             break;
     }
-    g_mutex_unlock(&g_sb_lock);
+    ns_mutex_unlock(&g_sb_lock);
     g_free(low);
     return hit;
 }
@@ -180,10 +181,10 @@ ns_safebrowsing_host_allowed(const char *host)
     char *low = g_ascii_strdown(host, -1);
     for (gsize ln = strlen(low); ln > 0 && low[ln - 1] == '.'; ln--)
         low[ln - 1] = '\0';
-    g_mutex_lock(&g_sb_lock);
+    ns_mutex_lock(&g_sb_lock);
     ensure_loaded();
     gboolean allowed = g_hash_table_contains(g_allow, low);
-    g_mutex_unlock(&g_sb_lock);
+    ns_mutex_unlock(&g_sb_lock);
     g_free(low);
     return allowed;
 }
@@ -213,10 +214,10 @@ ns_safebrowsing_get_stats(ns_sb_stats *out)
     memset(out, 0, sizeof *out);
     const ns_config *cfg = ns_config_get();
     out->enabled = !cfg || cfg->safe_browsing;
-    g_mutex_lock(&g_sb_lock);
+    ns_mutex_lock(&g_sb_lock);
     ensure_loaded();
     out->local_hosts = g_hash_table_size(g_blocked);
-    g_mutex_unlock(&g_sb_lock);
+    ns_mutex_unlock(&g_sb_lock);
     out->checks = (guint)g_atomic_int_get(&g_checks);
     out->local_blocks = (guint)g_atomic_int_get(&g_local_blocks);
     ns_sbg_get_stats(out);

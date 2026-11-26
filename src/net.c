@@ -5,6 +5,7 @@
  */
 
 #include "net.h"
+#include "plat/ns_plat.h"
 #include "content_decode.h"
 #include "trace.h"
 #include "cache.h"
@@ -58,11 +59,11 @@ static char *g_cookie_dir;
 typedef struct {
     CURLSH *share;
     CURL   *holder;
-    GMutex  lock;
+    NsMutex lock;
 } ns_cookie_partition;
 
 static GHashTable *g_cookie_partitions;
-static GMutex      g_cookie_partitions_lock;
+static NsMutex     g_cookie_partitions_lock;
 static char *g_hsts_curl_path;
 static char *g_altsvc_path;
 
@@ -74,7 +75,7 @@ typedef struct ns_hsts_entry {
 
 static GHashTable *g_hsts_cache;
 static gint64      g_hsts_cache_mtime_us;
-static GMutex      g_hsts_lock;
+static NsMutex     g_hsts_lock;
 static char *g_ca_bundle;
 static const char *g_ec_curves = "X25519:P-256:P-384";
 static char *g_accept_encoding;
@@ -84,38 +85,38 @@ static gint        g_ignore_cert_errors;
 /* Hosts (lower case) whose top-level navigation proceeded past a
  * certificate error this run under --ignore-certificate-errors. */
 static GHashTable *g_tls_accepted_hosts;
-static GMutex      g_tls_accepted_lock;
+static NsMutex     g_tls_accepted_lock;
 static CURLSH *g_share;
-static GMutex g_fetch_throttle_mutex;
-static GCond  g_fetch_idle_cond;
+static NsMutex g_fetch_throttle_mutex;
+static NsCond g_fetch_idle_cond;
 static int    g_fetch_active;
 static int    g_preconnect_active;
 static gint   g_net_aborting;
 static GQueue g_fetch_queue = G_QUEUE_INIT;
-static GMutex g_share_locks[CURL_LOCK_DATA_LAST];
-static GMutex      g_conn_stats_lock;
+static NsMutex g_share_locks[CURL_LOCK_DATA_LAST];
+static NsMutex     g_conn_stats_lock;
 static GHashTable *g_conn_stats;
 
 #define NS_DEAD_HOST_TTL_US ((gint64)120 * G_USEC_PER_SEC)
 static GHashTable *g_dead_hosts;
-static GMutex      g_dead_hosts_lock;
+static NsMutex     g_dead_hosts_lock;
 
 /* TRUE if the host failed within the dead-host TTL; prunes expired entries. */
 static gboolean
 ns_net_host_recently_dead(const char *host)
 {
     gboolean dead = FALSE;
-    g_mutex_lock(&g_dead_hosts_lock);
+    ns_mutex_lock(&g_dead_hosts_lock);
     if (g_dead_hosts) {
         gint64 *expiry = g_hash_table_lookup(g_dead_hosts, host);
         if (expiry) {
-            if (g_get_monotonic_time() < *expiry)
+            if (ns_time_monotonic_us() < *expiry)
                 dead = TRUE;
             else
                 g_hash_table_remove(g_dead_hosts, host);
         }
     }
-    g_mutex_unlock(&g_dead_hosts_lock);
+    ns_mutex_unlock(&g_dead_hosts_lock);
     return dead;
 }
 
@@ -123,40 +124,40 @@ ns_net_host_recently_dead(const char *host)
 static void
 ns_net_host_mark_dead(const char *host)
 {
-    g_mutex_lock(&g_dead_hosts_lock);
+    ns_mutex_lock(&g_dead_hosts_lock);
     if (!g_dead_hosts)
         g_dead_hosts = g_hash_table_new_full(g_str_hash, g_str_equal,
                                              g_free, g_free);
     gint64 *expiry = g_new(gint64, 1);
-    *expiry = g_get_monotonic_time() + NS_DEAD_HOST_TTL_US;
+    *expiry = ns_time_monotonic_us() + NS_DEAD_HOST_TTL_US;
     g_hash_table_replace(g_dead_hosts, g_strdup(host), expiry);
-    g_mutex_unlock(&g_dead_hosts_lock);
+    ns_mutex_unlock(&g_dead_hosts_lock);
 }
 
 static void
 ns_net_host_mark_alive(const char *host)
 {
-    g_mutex_lock(&g_dead_hosts_lock);
+    ns_mutex_lock(&g_dead_hosts_lock);
     if (g_dead_hosts)
         g_hash_table_remove(g_dead_hosts, host);
-    g_mutex_unlock(&g_dead_hosts_lock);
+    ns_mutex_unlock(&g_dead_hosts_lock);
 }
 
 #define NS_NET_MAX_PER_ORIGIN 6
 
 typedef struct ns_origin_slot {
     int   in_use;
-    GCond cond;
+    NsCond cond;
 } ns_origin_slot;
 
-static GMutex      g_origin_slots_lock;
+static NsMutex     g_origin_slots_lock;
 static GHashTable *g_origin_slots;
 
 static void
 ns_origin_slot_free(gpointer p)
 {
     ns_origin_slot *s = p;
-    g_cond_clear(&s->cond);
+    ns_cond_clear(&s->cond);
     g_free(s);
 }
 
@@ -172,28 +173,28 @@ ns_net_acquire_origin_slot(const char *origin, GCancellable *cancellable)
 {
     char *key = origin_slot_key(origin);
     if (!key) return FALSE;
-    g_mutex_lock(&g_origin_slots_lock);
+    ns_mutex_lock(&g_origin_slots_lock);
     if (!g_origin_slots)
         g_origin_slots = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                g_free, ns_origin_slot_free);
     ns_origin_slot *s = g_hash_table_lookup(g_origin_slots, key);
     if (!s) {
         s = g_new0(ns_origin_slot, 1);
-        g_cond_init(&s->cond);
+        ns_cond_init(&s->cond);
         g_hash_table_insert(g_origin_slots, key, s);
         key = NULL;
     }
     while (s->in_use >= NS_NET_MAX_PER_ORIGIN) {
         if (cancellable && g_cancellable_is_cancelled(cancellable)) {
-            g_mutex_unlock(&g_origin_slots_lock);
+            ns_mutex_unlock(&g_origin_slots_lock);
             g_free(key);
             return FALSE;
         }
-        gint64 wakeup = g_get_monotonic_time() + 250 * G_TIME_SPAN_MILLISECOND;
-        g_cond_wait_until(&s->cond, &g_origin_slots_lock, wakeup);
+        gint64 wakeup = ns_time_monotonic_us() + 250 * G_TIME_SPAN_MILLISECOND;
+        ns_cond_wait_until(&s->cond, &g_origin_slots_lock, wakeup);
     }
     s->in_use++;
-    g_mutex_unlock(&g_origin_slots_lock);
+    ns_mutex_unlock(&g_origin_slots_lock);
     g_free(key);
     return TRUE;
 }
@@ -204,29 +205,29 @@ ns_net_release_origin_slot(const char *origin)
 {
     char *key = origin_slot_key(origin);
     if (!key) return;
-    g_mutex_lock(&g_origin_slots_lock);
+    ns_mutex_lock(&g_origin_slots_lock);
     if (g_origin_slots) {
         ns_origin_slot *s = g_hash_table_lookup(g_origin_slots, key);
         if (s && s->in_use > 0) {
             s->in_use--;
-            g_cond_signal(&s->cond);
+            ns_cond_signal(&s->cond);
         }
     }
-    g_mutex_unlock(&g_origin_slots_lock);
+    ns_mutex_unlock(&g_origin_slots_lock);
     g_free(key);
 }
 
 typedef struct ns_multi_xfer {
     CURL     *easy;
-    GCond     cond;
+    NsCond    cond;
     gboolean  done;
     CURLcode  result;
 } ns_multi_xfer;
 
 static CURLM      *g_multi;
-static GThread    *g_multi_thread;
+static NsThread   *g_multi_thread;
 static gboolean    g_multi_quit;
-static GMutex      g_multi_lock;
+static NsMutex     g_multi_lock;
 static GQueue      g_multi_incoming = G_QUEUE_INIT;
 static GHashTable *g_multi_active;
 
@@ -236,7 +237,7 @@ ns_net_multi_finish_locked(ns_multi_xfer *x, CURLcode result)
 {
     x->result = result;
     x->done = TRUE;
-    g_cond_signal(&x->cond);
+    ns_cond_signal(&x->cond);
 }
 
 /* Multi-handle thread: adds queued easy handles, drives transfers, signals completions. */
@@ -245,7 +246,7 @@ ns_net_multi_loop(gpointer data)
 {
     (void)data;
     for (;;) {
-        g_mutex_lock(&g_multi_lock);
+        ns_mutex_lock(&g_multi_lock);
         if (g_multi_quit) {
             GHashTableIter it;
             gpointer key, val;
@@ -258,7 +259,7 @@ ns_net_multi_loop(gpointer data)
             g_hash_table_remove_all(g_multi_active);
             for (ns_multi_xfer *x; (x = g_queue_pop_head(&g_multi_incoming)); )
                 ns_net_multi_finish_locked(x, CURLE_ABORTED_BY_CALLBACK);
-            g_mutex_unlock(&g_multi_lock);
+            ns_mutex_unlock(&g_multi_lock);
             break;
         }
         for (ns_multi_xfer *x; (x = g_queue_pop_head(&g_multi_incoming)); ) {
@@ -267,7 +268,7 @@ ns_net_multi_loop(gpointer data)
             else
                 ns_net_multi_finish_locked(x, CURLE_FAILED_INIT);
         }
-        g_mutex_unlock(&g_multi_lock);
+        ns_mutex_unlock(&g_multi_lock);
 
         int running = 0;
         curl_multi_perform(g_multi, &running);
@@ -279,13 +280,13 @@ ns_net_multi_loop(gpointer data)
             CURL *easy = m->easy_handle;
             CURLcode res = m->data.result;
             curl_multi_remove_handle(g_multi, easy);
-            g_mutex_lock(&g_multi_lock);
+            ns_mutex_lock(&g_multi_lock);
             ns_multi_xfer *x = g_hash_table_lookup(g_multi_active, easy);
             if (x) {
                 g_hash_table_remove(g_multi_active, easy);
                 ns_net_multi_finish_locked(x, res);
             }
-            g_mutex_unlock(&g_multi_lock);
+            ns_mutex_unlock(&g_multi_lock);
         }
 
         long timeo = -1;
@@ -300,18 +301,18 @@ ns_net_multi_loop(gpointer data)
 static void
 ns_net_multi_start(void)
 {
-    g_mutex_lock(&g_multi_lock);
+    ns_mutex_lock(&g_multi_lock);
     if (!g_multi_thread) {
         g_multi = curl_multi_init();
         if (g_multi) {
             curl_multi_setopt(g_multi, CURLMOPT_PIPELINING,
                               (long)CURLPIPE_MULTIPLEX);
             g_multi_active = g_hash_table_new(g_direct_hash, g_direct_equal);
-            g_multi_thread = g_thread_new("ns-net-multi",
+            g_multi_thread = ns_thread_new("ns-net-multi",
                                           ns_net_multi_loop, NULL);
         }
     }
-    g_mutex_unlock(&g_multi_lock);
+    ns_mutex_unlock(&g_multi_lock);
 }
 
 /* Runs an easy handle on the shared multi thread and waits; falls back to easy_perform. */
@@ -322,23 +323,23 @@ ns_net_multi_perform(CURL *easy)
     if (!g_multi) return curl_easy_perform(easy);
 
     ns_multi_xfer x = { .easy = easy, .done = FALSE, .result = CURLE_OK };
-    g_cond_init(&x.cond);
+    ns_cond_init(&x.cond);
 
-    g_mutex_lock(&g_multi_lock);
+    ns_mutex_lock(&g_multi_lock);
     if (g_multi_quit) {
-        g_mutex_unlock(&g_multi_lock);
-        g_cond_clear(&x.cond);
+        ns_mutex_unlock(&g_multi_lock);
+        ns_cond_clear(&x.cond);
         return curl_easy_perform(easy);
     }
     g_queue_push_tail(&g_multi_incoming, &x);
     curl_multi_wakeup(g_multi);
     while (!x.done) {
-        gint64 wakeup = g_get_monotonic_time() + 250 * G_TIME_SPAN_MILLISECOND;
-        g_cond_wait_until(&x.cond, &g_multi_lock, wakeup);
+        gint64 wakeup = ns_time_monotonic_us() + 250 * G_TIME_SPAN_MILLISECOND;
+        ns_cond_wait_until(&x.cond, &g_multi_lock, wakeup);
     }
-    g_mutex_unlock(&g_multi_lock);
+    ns_mutex_unlock(&g_multi_lock);
 
-    g_cond_clear(&x.cond);
+    ns_cond_clear(&x.cond);
     return x.result;
 }
 
@@ -346,15 +347,15 @@ ns_net_multi_perform(CURL *easy)
 static void
 ns_net_multi_shutdown(void)
 {
-    g_mutex_lock(&g_multi_lock);
-    GThread *t = g_multi_thread;
+    ns_mutex_lock(&g_multi_lock);
+    NsThread *t = g_multi_thread;
     if (t) {
         g_multi_quit = TRUE;
         curl_multi_wakeup(g_multi);
     }
-    g_mutex_unlock(&g_multi_lock);
+    ns_mutex_unlock(&g_multi_lock);
     if (t) {
-        g_thread_join(t);
+        ns_thread_join(t);
         g_multi_thread = NULL;
     }
     if (g_multi) { curl_multi_cleanup(g_multi); g_multi = NULL; }
@@ -470,7 +471,7 @@ ns_hsts_cache_reload_locked(const char *path)
         return;
     }
 
-    gint64 now = g_get_real_time() / G_USEC_PER_SEC;
+    gint64 now = ns_time_real_us() / G_USEC_PER_SEC;
     char **lines = g_strsplit(content, "\n", -1);
     for (int i = 0; lines[i]; i++) {
         char *line = g_strstrip(lines[i]);
@@ -504,7 +505,7 @@ file_mtime_us(const char *path)
 static gboolean
 ns_hsts_lookup_locked(const char *lower_host)
 {
-    gint64 now = g_get_real_time() / G_USEC_PER_SEC;
+    gint64 now = ns_time_real_us() / G_USEC_PER_SEC;
     const ns_hsts_entry *e = g_hash_table_lookup(g_hsts_cache, lower_host);
     if (e && e->expires > now) return TRUE;
     const char *dot = lower_host;
@@ -688,13 +689,13 @@ ns_url_parser_destroy_tls(gpointer p)
     lxb_url_parser_destroy(parser, true);
 }
 
-static GPrivate g_url_parser_tls = G_PRIVATE_INIT(ns_url_parser_destroy_tls);
+static NsPrivate g_url_parser_tls = NS_PRIVATE_INIT(ns_url_parser_destroy_tls);
 
 /* Returns this thread's cached lexbor URL parser, creating it on first use. */
 static lxb_url_parser_t *
 ns_url_parser_open(void)
 {
-    lxb_url_parser_t *parser = g_private_get(&g_url_parser_tls);
+    lxb_url_parser_t *parser = ns_private_get(&g_url_parser_tls);
     if (parser) {
         lxb_url_parser_clean(parser);
         return parser;
@@ -705,7 +706,7 @@ ns_url_parser_open(void)
         lxb_url_parser_destroy(parser, true);
         return NULL;
     }
-    g_private_set(&g_url_parser_tls, parser);
+    ns_private_set(&g_url_parser_tls, parser);
     return parser;
 }
 
@@ -1294,7 +1295,7 @@ static GPtrArray *
 ns_hsts_snapshot(const char *path)
 {
     GPtrArray *out = g_ptr_array_new_with_free_func(ns_hsts_feed_item_free);
-    g_mutex_lock(&g_hsts_lock);
+    ns_mutex_lock(&g_hsts_lock);
     gint64 mtime = file_mtime_us(path);
     if (!g_hsts_cache || mtime != g_hsts_cache_mtime_us) {
         ns_hsts_cache_reload_locked(path);
@@ -1315,7 +1316,7 @@ ns_hsts_snapshot(const char *path)
                   sizeof item->expire);
         g_ptr_array_add(out, item);
     }
-    g_mutex_unlock(&g_hsts_lock);
+    ns_mutex_unlock(&g_hsts_lock);
     return out;
 }
 
@@ -1341,7 +1342,7 @@ ns_net_hsts_should_upgrade(const char *host)
     if (!host || !*host) return FALSE;
     char *path = ns_net_hsts_curl_path();
     if (!path) return FALSE;
-    g_mutex_lock(&g_hsts_lock);
+    ns_mutex_lock(&g_hsts_lock);
     gint64 mtime = file_mtime_us(path);
     if (!g_hsts_cache || mtime != g_hsts_cache_mtime_us) {
         ns_hsts_cache_reload_locked(path);
@@ -1352,7 +1353,7 @@ ns_net_hsts_should_upgrade(const char *host)
         lower[ln - 1] = '\0';
     gboolean hit = ns_hsts_lookup_locked(lower);
     g_free(lower);
-    g_mutex_unlock(&g_hsts_lock);
+    ns_mutex_unlock(&g_hsts_lock);
     return hit;
 }
 
@@ -1475,7 +1476,7 @@ ns_net_empty_dir(const char *dir)
 static void
 ns_net_cookies_clear(void)
 {
-    g_mutex_lock(&g_cookie_partitions_lock);
+    ns_mutex_lock(&g_cookie_partitions_lock);
     if (g_cookie_partitions) {
         GHashTableIter it;
         gpointer v;
@@ -1483,12 +1484,12 @@ ns_net_cookies_clear(void)
         while (g_hash_table_iter_next(&it, NULL, &v)) {
             ns_cookie_partition *p = v;
             if (!p->holder) continue;
-            g_mutex_lock(&p->lock);
+            ns_mutex_lock(&p->lock);
             curl_easy_setopt(p->holder, CURLOPT_COOKIELIST, "ALL");
-            g_mutex_unlock(&p->lock);
+            ns_mutex_unlock(&p->lock);
         }
     }
-    g_mutex_unlock(&g_cookie_partitions_lock);
+    ns_mutex_unlock(&g_cookie_partitions_lock);
     ns_net_empty_dir(ns_net_cookie_dir());
 }
 
@@ -1530,7 +1531,7 @@ cookie_partition_free(gpointer data)
     ns_cookie_partition *p = data;
     if (p->holder) curl_easy_cleanup(p->holder);
     if (p->share) curl_share_cleanup(p->share);
-    g_mutex_clear(&p->lock);
+    ns_mutex_clear(&p->lock);
     g_free(p);
 }
 
@@ -1565,7 +1566,7 @@ cookie_partition_open_jar(ns_cookie_partition *p, const char *site)
 static ns_cookie_partition *
 cookie_partition_get(const char *site)
 {
-    g_mutex_lock(&g_cookie_partitions_lock);
+    ns_mutex_lock(&g_cookie_partitions_lock);
     if (!g_cookie_partitions)
         g_cookie_partitions = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                     g_free,
@@ -1573,14 +1574,14 @@ cookie_partition_get(const char *site)
     ns_cookie_partition *p = g_hash_table_lookup(g_cookie_partitions, site);
     if (!p) {
         p = g_new0(ns_cookie_partition, 1);
-        g_mutex_init(&p->lock);
+        ns_mutex_init(&p->lock);
         p->share = ns_net_share_new(TRUE);
         p->holder = p->share ? curl_easy_init() : NULL;
         if (p->holder)
             cookie_partition_open_jar(p, site);
         g_hash_table_insert(g_cookie_partitions, g_strdup(site), p);
     }
-    g_mutex_unlock(&g_cookie_partitions_lock);
+    ns_mutex_unlock(&g_cookie_partitions_lock);
     return p;
 }
 
@@ -1591,10 +1592,10 @@ static void
 cookie_partition_flush(ns_cookie_partition *p)
 {
     if (!p || !p->holder) return;
-    g_mutex_lock(&p->lock);
+    ns_mutex_lock(&p->lock);
     curl_easy_setopt(p->holder, CURLOPT_COOKIELIST, "FLUSH");
     g_atomic_int_inc(&ns_cookie_writes);
-    g_mutex_unlock(&p->lock);
+    ns_mutex_unlock(&p->lock);
 }
 
 /* Returns a partition's cookies as Netscape-format lines; caller frees the slist. */
@@ -1603,9 +1604,9 @@ cookie_partition_list(ns_cookie_partition *p)
 {
     struct curl_slist *list = NULL;
     if (!p || !p->holder) return NULL;
-    g_mutex_lock(&p->lock);
+    ns_mutex_lock(&p->lock);
     curl_easy_getinfo(p->holder, CURLINFO_COOKIELIST, &list);
-    g_mutex_unlock(&p->lock);
+    ns_mutex_unlock(&p->lock);
     return list;
 }
 
@@ -1614,11 +1615,11 @@ static void
 cookie_partition_add(ns_cookie_partition *p, const char *line)
 {
     if (!p || !p->holder) return;
-    g_mutex_lock(&p->lock);
+    ns_mutex_lock(&p->lock);
     curl_easy_setopt(p->holder, CURLOPT_COOKIELIST, line);
     curl_easy_setopt(p->holder, CURLOPT_COOKIELIST, "FLUSH");
     g_atomic_int_inc(&ns_cookie_writes);
-    g_mutex_unlock(&p->lock);
+    ns_mutex_unlock(&p->lock);
 }
 
 /* Reports a cookie change counter for document.cookie caching; FALSE without a site. */
@@ -1635,10 +1636,10 @@ ns_net_cookie_jar_version(const char *url, guint64 *version)
 static void
 ns_net_cookie_partitions_free(void)
 {
-    g_mutex_lock(&g_cookie_partitions_lock);
+    ns_mutex_lock(&g_cookie_partitions_lock);
     GHashTable *partitions = g_cookie_partitions;
     g_cookie_partitions = NULL;
-    g_mutex_unlock(&g_cookie_partitions_lock);
+    ns_mutex_unlock(&g_cookie_partitions_lock);
     if (partitions) g_hash_table_destroy(partitions);
 }
 
@@ -1694,7 +1695,7 @@ ns_net_cookie_string(const char *url, const char *site, gboolean with_httponly)
                         g_ascii_strcasecmp(parts->protocol, "https:") == 0;
 
     struct curl_slist *list = cookie_partition_list(cookie_partition_get(site));
-    gint64 now = g_get_real_time() / G_USEC_PER_SEC;
+    gint64 now = ns_time_real_us() / G_USEC_PER_SEC;
     GPtrArray *order = g_ptr_array_new_with_free_func(g_free);
     GHashTable *vals = g_hash_table_new_full(g_str_hash, g_str_equal,
                                              g_free, g_free);
@@ -1849,7 +1850,7 @@ ns_net_cookie_store_from_js(const char *url, const char *top_url,
 
     char *domain_attr = NULL, *path_attr = NULL;
     gboolean secure = FALSE, has_expiry = FALSE, expired = FALSE;
-    gint64 now = g_get_real_time() / G_USEC_PER_SEC;
+    gint64 now = ns_time_real_us() / G_USEC_PER_SEC;
     gint64 expiry = 0;
     for (const char *p = semi; p && *p; ) {
         while (*p == ';' || *p == ' ' || *p == '\t') p++;
@@ -1972,14 +1973,14 @@ static long
 ns_net_http_version(void)
 {
 #ifdef CURL_VERSION_HTTP3
-    static gsize once = 0;
+    static NsOnce once;
     static long version = CURL_HTTP_VERSION_2TLS;
-    if (g_once_init_enter(&once)) {
+    if (ns_once_enter(&once)) {
         const curl_version_info_data *info = curl_version_info(CURLVERSION_NOW);
         if (info && (info->features & CURL_VERSION_HTTP3) &&
             g_getenv("NS_FORCE_HTTP3"))
             version = CURL_HTTP_VERSION_3;
-        g_once_init_leave(&once, 1);
+        ns_once_leave(&once);
     }
     return version;
 #else
@@ -2100,7 +2101,7 @@ ns_share_lock(CURL *handle, curl_lock_data data,
 {
     (void)handle; (void)access; (void)user_data;
     if (data < CURL_LOCK_DATA_LAST)
-        g_mutex_lock(&g_share_locks[data]);
+        ns_mutex_lock(&g_share_locks[data]);
 }
 
 static void
@@ -2108,7 +2109,7 @@ ns_share_unlock(CURL *handle, curl_lock_data data, void *user_data)
 {
     (void)handle; (void)user_data;
     if (data < CURL_LOCK_DATA_LAST)
-        g_mutex_unlock(&g_share_locks[data]);
+        ns_mutex_unlock(&g_share_locks[data]);
 }
 
 /* Creates a locked curl share for DNS, TLS sessions, connections and optionally cookies. */
@@ -2145,20 +2146,20 @@ ns_rng_warmup_thread(gpointer data)
     return NULL;
 }
 
-static GThread *g_rng_warmup_thread;
+static NsThread *g_rng_warmup_thread;
 
 static void
 ns_net_warm_rng(void)
 {
-    g_rng_warmup_thread = g_thread_try_new("nd-rng-warmup",
-                                           ns_rng_warmup_thread, NULL, NULL);
+    g_rng_warmup_thread = ns_thread_try_new("nd-rng-warmup",
+                                            ns_rng_warmup_thread, NULL, 0);
 }
 
 static void
 ns_net_join_rng(void)
 {
     if (g_rng_warmup_thread) {
-        g_thread_join(g_rng_warmup_thread);
+        ns_thread_join(g_rng_warmup_thread);
         g_rng_warmup_thread = NULL;
     }
 }
@@ -2193,9 +2194,9 @@ ns_net_init(void)
 gboolean
 ns_net_idle(void)
 {
-    g_mutex_lock(&g_fetch_throttle_mutex);
+    ns_mutex_lock(&g_fetch_throttle_mutex);
     gboolean idle = g_fetch_active == 0 && g_preconnect_active == 0;
-    g_mutex_unlock(&g_fetch_throttle_mutex);
+    ns_mutex_unlock(&g_fetch_throttle_mutex);
     return idle;
 }
 
@@ -2207,27 +2208,27 @@ ns_net_drain(int timeout_ms)
 {
     g_atomic_int_set(&g_net_aborting, 1);
     GQueue dropped = G_QUEUE_INIT;
-    g_mutex_lock(&g_fetch_throttle_mutex);
+    ns_mutex_lock(&g_fetch_throttle_mutex);
     for (GTask *t; (t = g_queue_pop_head(&g_fetch_queue)); )
         g_queue_push_tail(&dropped, t);
-    g_mutex_unlock(&g_fetch_throttle_mutex);
+    ns_mutex_unlock(&g_fetch_throttle_mutex);
     for (GTask *t; (t = g_queue_pop_head(&dropped)); ) {
         GError *err = g_error_new_literal(NS_NET_DOMAIN, 1, "shutting down");
         ns_fetch_task_abandon(t, err);
         g_task_return_error(t, err);
         g_object_unref(t);
     }
-    g_mutex_lock(&g_fetch_throttle_mutex);
-    gint64 deadline = g_get_monotonic_time() + (gint64)timeout_ms * 1000;
+    ns_mutex_lock(&g_fetch_throttle_mutex);
+    gint64 deadline = ns_time_monotonic_us() + (gint64)timeout_ms * 1000;
     gboolean drained = TRUE;
     while (g_fetch_active > 0 || g_preconnect_active > 0) {
-        if (!g_cond_wait_until(&g_fetch_idle_cond, &g_fetch_throttle_mutex,
+        if (!ns_cond_wait_until(&g_fetch_idle_cond, &g_fetch_throttle_mutex,
                                deadline)) {
             drained = g_fetch_active == 0 && g_preconnect_active == 0;
             break;
         }
     }
-    g_mutex_unlock(&g_fetch_throttle_mutex);
+    ns_mutex_unlock(&g_fetch_throttle_mutex);
     return drained;
 }
 
@@ -2250,12 +2251,12 @@ ns_net_shutdown(void)
     g_accept_encoding = NULL;
     g_free(g_proxy_override);
     g_proxy_override = NULL;
-    g_mutex_lock(&g_tls_accepted_lock);
+    ns_mutex_lock(&g_tls_accepted_lock);
     if (g_tls_accepted_hosts) {
         g_hash_table_destroy(g_tls_accepted_hosts);
         g_tls_accepted_hosts = NULL;
     }
-    g_mutex_unlock(&g_tls_accepted_lock);
+    ns_mutex_unlock(&g_tls_accepted_lock);
     g_free(g_cookie_dir);
     g_cookie_dir = NULL;
     g_free(g_hsts_curl_path);
@@ -2302,12 +2303,12 @@ static void
 ns_net_tls_accept_host(const char *host)
 {
     if (!host || !*host) return;
-    g_mutex_lock(&g_tls_accepted_lock);
+    ns_mutex_lock(&g_tls_accepted_lock);
     if (!g_tls_accepted_hosts)
         g_tls_accepted_hosts = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                      g_free, NULL);
     g_hash_table_add(g_tls_accepted_hosts, g_ascii_strdown(host, -1));
-    g_mutex_unlock(&g_tls_accepted_lock);
+    ns_mutex_unlock(&g_tls_accepted_lock);
 }
 
 /* TRUE when --ignore-certificate-errors is on and host was accepted this run. */
@@ -2316,10 +2317,10 @@ ns_net_tls_host_accepted(const char *host)
 {
     if (!host || !*host || !ns_net_ignore_cert_errors()) return FALSE;
     char *lower = g_ascii_strdown(host, -1);
-    g_mutex_lock(&g_tls_accepted_lock);
+    ns_mutex_lock(&g_tls_accepted_lock);
     gboolean hit = g_tls_accepted_hosts &&
                    g_hash_table_contains(g_tls_accepted_hosts, lower);
-    g_mutex_unlock(&g_tls_accepted_lock);
+    ns_mutex_unlock(&g_tls_accepted_lock);
     g_free(lower);
     return hit;
 }
@@ -2384,7 +2385,7 @@ ns_net_http_version_name(long v)
     }
 }
 
-static GMutex   g_perf_lock;
+static NsMutex  g_perf_lock;
 static guint64  g_perf_fetch_count;
 static guint64  g_perf_fetch_bytes;
 static gint64   g_perf_fetch_sum_us;
@@ -2396,7 +2397,7 @@ static void
 ns_net_perf_record(gint64 start_us, gint64 end_us, guint64 bytes)
 {
     if (!g_log_fetches) return;
-    g_mutex_lock(&g_perf_lock);
+    ns_mutex_lock(&g_perf_lock);
     if (g_perf_fetch_count == 0 || start_us < g_perf_fetch_first_us)
         g_perf_fetch_first_us = start_us;
     if (end_us > g_perf_fetch_last_us)
@@ -2404,7 +2405,7 @@ ns_net_perf_record(gint64 start_us, gint64 end_us, guint64 bytes)
     g_perf_fetch_count++;
     g_perf_fetch_bytes += bytes;
     g_perf_fetch_sum_us += end_us - start_us;
-    g_mutex_unlock(&g_perf_lock);
+    ns_mutex_unlock(&g_perf_lock);
 }
 
 /* Reads accumulated fetch statistics; span is first start to last end. */
@@ -2412,14 +2413,14 @@ void
 ns_net_perf_snapshot(guint64 *fetches, guint64 *bytes,
                      double *sum_ms, double *span_ms)
 {
-    g_mutex_lock(&g_perf_lock);
+    ns_mutex_lock(&g_perf_lock);
     if (fetches) *fetches = g_perf_fetch_count;
     if (bytes)   *bytes   = g_perf_fetch_bytes;
     if (sum_ms)  *sum_ms  = g_perf_fetch_sum_us / 1000.0;
     if (span_ms) *span_ms = g_perf_fetch_count
                             ? (g_perf_fetch_last_us - g_perf_fetch_first_us) / 1000.0
                             : 0.0;
-    g_mutex_unlock(&g_perf_lock);
+    ns_mutex_unlock(&g_perf_lock);
 }
 
 /* Counts requests and new connections per origin and logs them when enabled. */
@@ -2430,7 +2431,7 @@ ns_net_conn_stat_record(const char *url, long http_version, long new_connections
     char *origin = ns_url_origin_from(url);
     if (!origin) return;
 
-    g_mutex_lock(&g_conn_stats_lock);
+    ns_mutex_lock(&g_conn_stats_lock);
     if (!g_conn_stats)
         g_conn_stats = g_hash_table_new_full(g_str_hash, g_str_equal,
                                              g_free, g_free);
@@ -2443,7 +2444,7 @@ ns_net_conn_stat_record(const char *url, long http_version, long new_connections
     if (new_connections > 0)
         s->connections += (guint64)new_connections;
     guint64 reqs = s->requests, conns = s->connections;
-    g_mutex_unlock(&g_conn_stats_lock);
+    ns_mutex_unlock(&g_conn_stats_lock);
 
     ns_debug_log_emit(NS_DLOG_NET, "conn", "%s new=%ld origin=%s reqs=%"
                       G_GUINT64_FORMAT " conns=%" G_GUINT64_FORMAT,
@@ -2601,7 +2602,7 @@ typedef struct {
 
 #define NS_NET_LOG_CAP 256
 
-static GMutex      ns_net_log_lock;
+static NsMutex     ns_net_log_lock;
 static GPtrArray  *ns_net_log;
 
 static void
@@ -2641,22 +2642,22 @@ ns_net_log_record(const char *method, const char *url, long status,
     e->resp_headers = g_strdup(resp_headers ? resp_headers : "");
     e->error = error && *error ? g_strdup(error) : NULL;
 
-    g_mutex_lock(&ns_net_log_lock);
+    ns_mutex_lock(&ns_net_log_lock);
     if (!ns_net_log)
         ns_net_log = g_ptr_array_new_with_free_func(ns_net_log_entry_free);
     if (ns_net_log->len >= NS_NET_LOG_CAP)
         g_ptr_array_remove_index(ns_net_log, 0);
     g_ptr_array_add(ns_net_log, e);
-    g_mutex_unlock(&ns_net_log_lock);
+    ns_mutex_unlock(&ns_net_log_lock);
 }
 
 void
 ns_net_log_clear(void)
 {
-    g_mutex_lock(&ns_net_log_lock);
+    ns_mutex_lock(&ns_net_log_lock);
     if (ns_net_log)
         g_ptr_array_set_size(ns_net_log, 0);
-    g_mutex_unlock(&ns_net_log_lock);
+    ns_mutex_unlock(&ns_net_log_lock);
 }
 
 static void
@@ -2678,7 +2679,7 @@ char *
 ns_net_log_dump(void)
 {
     GString *out = g_string_new(NULL);
-    g_mutex_lock(&ns_net_log_lock);
+    ns_mutex_lock(&ns_net_log_lock);
     guint n = ns_net_log ? ns_net_log->len : 0;
     g_string_append_printf(out, "%u network request%s\n\n", n,
                            n == 1 ? "" : "s");
@@ -2707,7 +2708,7 @@ ns_net_log_dump(void)
         }
         g_string_append_c(out, '\n');
     }
-    g_mutex_unlock(&ns_net_log_lock);
+    ns_mutex_unlock(&ns_net_log_lock);
     return g_string_free(out, FALSE);
 }
 
@@ -3181,7 +3182,7 @@ diag_safe_browsing(GString *s)
     };
     ns_sb_stats st;
     ns_safebrowsing_get_stats(&st);
-    gint64 now = g_get_real_time() / G_USEC_PER_SEC;
+    gint64 now = ns_time_real_us() / G_USEC_PER_SEC;
     diag_heading(s, "Safe Browsing");
     gboolean google = st.enabled && st.have_key;
     diag_kv(s, "Google Safe Browsing",
@@ -6023,8 +6024,8 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, ns_xferinfo_cb);
     curl_easy_setopt(curl, CURLOPT_XFERINFODATA, cancellable);
 
-    gint64 fetch_start_us = g_get_monotonic_time();
-    double fetch_start_real_ms = (double)g_get_real_time() / 1000.0;
+    gint64 fetch_start_us = ns_time_monotonic_us();
+    double fetch_start_real_ms = (double)ns_time_real_us() / 1000.0;
     CURLcode rc = ns_net_multi_perform(curl);
 
     if (tls_exception) {
@@ -6258,7 +6259,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     ns_cache_entry_free(cached);
 
     {
-        gint64 fetch_end_us = g_get_monotonic_time();
+        gint64 fetch_end_us = ns_time_monotonic_us();
         ns_net_perf_record(fetch_start_us, fetch_end_us,
                            resp->body ? (guint64)resp->body->len : 0);
         char *req_hdrs = ns_net_slist_serialize(headers);
@@ -6819,8 +6820,8 @@ typedef struct {
     GPtrArray *syncs;
 } ns_coalesce_group;
 
-static GMutex      g_fetch_mutex;
-static GCond       g_fetch_cond;
+static NsMutex     g_fetch_mutex;
+static NsCond      g_fetch_cond;
 static GHashTable *g_fetch_coalesce;
 static GHashTable *g_preload_expected;
 static GHashTable *g_preload_store;
@@ -6851,24 +6852,24 @@ void
 ns_net_preload_expect(const char *key)
 {
     if (!key) return;
-    g_mutex_lock(&g_fetch_mutex);
+    ns_mutex_lock(&g_fetch_mutex);
     if (!g_preload_expected)
         g_preload_expected = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                    g_free, NULL);
     if (g_hash_table_size(g_preload_expected) < NS_PRELOAD_MAX_ENTRIES)
         g_hash_table_add(g_preload_expected, g_strdup(key));
-    g_mutex_unlock(&g_fetch_mutex);
+    ns_mutex_unlock(&g_fetch_mutex);
 }
 
 /* Drops all expected and stored preload responses. */
 void
 ns_net_preload_clear(void)
 {
-    g_mutex_lock(&g_fetch_mutex);
+    ns_mutex_lock(&g_fetch_mutex);
     if (g_preload_expected) g_hash_table_remove_all(g_preload_expected);
     if (g_preload_store) g_hash_table_remove_all(g_preload_store);
     g_preload_bytes = 0;
-    g_mutex_unlock(&g_fetch_mutex);
+    ns_mutex_unlock(&g_fetch_mutex);
 }
 
 /* Removes and returns a stored preload response for key; caller owns it. */
@@ -6945,7 +6946,7 @@ ns_fetch_join_async(const char *key, ns_fetch_ctx *gate,
     ns_response *preloaded = NULL;
     ns_coalesce_group *grp = NULL;
     *joined = FALSE;
-    g_mutex_lock(&g_fetch_mutex);
+    ns_mutex_lock(&g_fetch_mutex);
     ns_fetch_claim claim = ns_fetch_claim_locked(key, &preloaded, &grp);
     if (claim == NS_FETCH_JOINED) {
         GTask *joiner = g_task_new(NULL, NULL, callback, user_data);
@@ -6956,7 +6957,7 @@ ns_fetch_join_async(const char *key, ns_fetch_ctx *gate,
         g_ptr_array_add(grp->tasks, joiner);
         *joined = TRUE;
     }
-    g_mutex_unlock(&g_fetch_mutex);
+    ns_mutex_unlock(&g_fetch_mutex);
     if (gate) ns_fetch_ctx_free(gate);
     if (claim == NS_FETCH_PRELOADED) *joined = TRUE;
     return preloaded;
@@ -6969,34 +6970,34 @@ ns_fetch_join_sync(const char *key, gboolean *joined, GError **error)
     ns_response *preloaded = NULL;
     ns_coalesce_group *grp = NULL;
     *joined = FALSE;
-    g_mutex_lock(&g_fetch_mutex);
+    ns_mutex_lock(&g_fetch_mutex);
     ns_fetch_claim claim = ns_fetch_claim_locked(key, &preloaded, &grp);
     if (claim == NS_FETCH_JOINED) {
         ns_sync_waiter waiter = {0};
         if (!grp->syncs) grp->syncs = g_ptr_array_new();
         g_ptr_array_add(grp->syncs, &waiter);
-        gint64 deadline = g_get_monotonic_time() +
+        gint64 deadline = ns_time_monotonic_us() +
             (gint64)NS_FETCH_JOIN_MAX_WAIT_S * G_TIME_SPAN_SECOND;
         while (!waiter.done) {
             if (g_atomic_int_get(&g_net_aborting) ||
-                !g_cond_wait_until(&g_fetch_cond, &g_fetch_mutex, deadline))
+                !ns_cond_wait_until(&g_fetch_cond, &g_fetch_mutex, deadline))
                 break;
         }
         if (!waiter.done) {
             g_ptr_array_remove_fast(grp->syncs, &waiter);
-            g_mutex_unlock(&g_fetch_mutex);
+            ns_mutex_unlock(&g_fetch_mutex);
             g_set_error_literal(error, NS_NET_DOMAIN, 0,
                                 "shared fetch abandoned");
             *joined = TRUE;
             return NULL;
         }
-        g_mutex_unlock(&g_fetch_mutex);
+        ns_mutex_unlock(&g_fetch_mutex);
         if (error) *error = waiter.err;
         else g_clear_error(&waiter.err);
         *joined = TRUE;
         return waiter.resp;
     }
-    g_mutex_unlock(&g_fetch_mutex);
+    ns_mutex_unlock(&g_fetch_mutex);
     if (claim == NS_FETCH_PRELOADED) *joined = TRUE;
     return preloaded;
 }
@@ -7006,7 +7007,7 @@ static void
 ns_fetch_coalesce_deliver(const char *key, ns_response *resp, const GError *err)
 {
     if (!key) return;
-    g_mutex_lock(&g_fetch_mutex);
+    ns_mutex_lock(&g_fetch_mutex);
     if (resp) ns_preload_store_locked(key, resp);
     else if (g_preload_expected) g_hash_table_remove(g_preload_expected, key);
     ns_coalesce_group *grp = g_fetch_coalesce
@@ -7022,9 +7023,9 @@ ns_fetch_coalesce_deliver(const char *key, ns_response *resp, const GError *err)
                     : g_error_new_literal(NS_NET_DOMAIN, 0, "fetch failed");
             waiter->done = TRUE;
         }
-        g_cond_broadcast(&g_fetch_cond);
+        ns_cond_broadcast(&g_fetch_cond);
     }
-    g_mutex_unlock(&g_fetch_mutex);
+    ns_mutex_unlock(&g_fetch_mutex);
     if (!grp) return;
     if (grp->tasks) {
         for (guint i = 0; i < grp->tasks->len; i++) {
@@ -7096,10 +7097,10 @@ static void
 ns_fetch_throttle_dispatch(void)
 {
     for (;;) {
-        g_mutex_lock(&g_fetch_throttle_mutex);
+        ns_mutex_lock(&g_fetch_throttle_mutex);
         if (g_fetch_active >= NS_MAX_CONCURRENT_FETCHES ||
             g_queue_is_empty(&g_fetch_queue)) {
-            g_mutex_unlock(&g_fetch_throttle_mutex);
+            ns_mutex_unlock(&g_fetch_throttle_mutex);
             return;
         }
         GTask *chosen = NULL;
@@ -7117,13 +7118,13 @@ ns_fetch_throttle_dispatch(void)
             g_free(host);
         }
         if (!chosen) {
-            g_mutex_unlock(&g_fetch_throttle_mutex);
+            ns_mutex_unlock(&g_fetch_throttle_mutex);
             return;
         }
         g_fetch_active++;
         ns_fetch_host_adjust_locked(chosen_host, 1);
         g_free(chosen_host);
-        g_mutex_unlock(&g_fetch_throttle_mutex);
+        ns_mutex_unlock(&g_fetch_throttle_mutex);
         g_task_run_in_thread(chosen, ns_fetch_thread);
         g_object_unref(chosen);
     }
@@ -7133,9 +7134,9 @@ ns_fetch_throttle_dispatch(void)
 static void
 ns_fetch_throttle_submit(GTask *task)
 {
-    g_mutex_lock(&g_fetch_throttle_mutex);
+    ns_mutex_lock(&g_fetch_throttle_mutex);
     g_queue_push_tail(&g_fetch_queue, task);
-    g_mutex_unlock(&g_fetch_throttle_mutex);
+    ns_mutex_unlock(&g_fetch_throttle_mutex);
     ns_fetch_throttle_dispatch();
 }
 
@@ -7178,11 +7179,11 @@ ns_fetch_thread(GTask        *task,
         g_task_return_pointer(task, resp, (GDestroyNotify)ns_response_free);
     {
         char *host = (ctx && ctx->url) ? ns_url_host_from(ctx->url) : NULL;
-        g_mutex_lock(&g_fetch_throttle_mutex);
+        ns_mutex_lock(&g_fetch_throttle_mutex);
         if (g_fetch_active > 0) g_fetch_active--;
         ns_fetch_host_adjust_locked(host, -1);
-        g_cond_broadcast(&g_fetch_idle_cond);
-        g_mutex_unlock(&g_fetch_throttle_mutex);
+        ns_cond_broadcast(&g_fetch_idle_cond);
+        ns_mutex_unlock(&g_fetch_throttle_mutex);
         g_free(host);
     }
     ns_fetch_throttle_dispatch();
@@ -7196,9 +7197,9 @@ ns_preconnect_thread(GTask *task, gpointer source_object, gpointer task_data,
     (void)source_object;
     (void)cancellable;
     const char *url = task_data;
-    g_mutex_lock(&g_fetch_throttle_mutex);
+    ns_mutex_lock(&g_fetch_throttle_mutex);
     g_preconnect_active++;
-    g_mutex_unlock(&g_fetch_throttle_mutex);
+    ns_mutex_unlock(&g_fetch_throttle_mutex);
     CURL *curl = g_atomic_int_get(&g_net_aborting) ? NULL : curl_easy_init();
     if (curl) {
         curl_easy_setopt(curl, CURLOPT_URL, url);
@@ -7214,10 +7215,10 @@ ns_preconnect_thread(GTask *task, gpointer source_object, gpointer task_data,
         curl_easy_perform(curl);
         curl_easy_cleanup(curl);
     }
-    g_mutex_lock(&g_fetch_throttle_mutex);
+    ns_mutex_lock(&g_fetch_throttle_mutex);
     if (g_preconnect_active > 0) g_preconnect_active--;
-    g_cond_broadcast(&g_fetch_idle_cond);
-    g_mutex_unlock(&g_fetch_throttle_mutex);
+    ns_cond_broadcast(&g_fetch_idle_cond);
+    ns_mutex_unlock(&g_fetch_throttle_mutex);
     g_task_return_boolean(task, TRUE);
 }
 

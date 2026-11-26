@@ -5,6 +5,7 @@
  */
 
 #include "image.h"
+#include "plat/ns_plat.h"
 
 /* True if a lowercased bare MIME type is decodable by the built-in decoders. */
 static gboolean
@@ -504,7 +505,7 @@ ns_image_apply_decoded_state(ns_image *img, ns_img_decoded *d,
         for (guint i = 0; i < d->frames->len; i++)
             total += g_array_index(d->frames, ns_image_anim_frame, i).delay_ms;
         img->anim_total_ms = (int)CLAMP(total, 1, G_MAXINT / 2);
-        img->anim_start_us = g_get_monotonic_time();
+        img->anim_start_us = ns_time_monotonic_us();
         img->anim_loop = TRUE;
         img->anim_paused = FALSE;
         img->anim_paused_phase_ms = 0;
@@ -517,7 +518,7 @@ ns_image_apply_decoded_state(ns_image *img, ns_img_decoded *d,
         img->loaded = TRUE;
     } else {
         img->failed = TRUE;
-        img->failed_at_us = g_get_monotonic_time();
+        img->failed_at_us = ns_time_monotonic_us();
         img->error = g_strdup_printf("could not decode image (%s, %u bytes)",
             content_type && *content_type ? content_type : "unknown type",
             (unsigned)body_len);
@@ -600,7 +601,7 @@ on_image_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
     }
     if (!resp) {
         pending->img->failed = TRUE;
-        pending->img->failed_at_us = g_get_monotonic_time();
+        pending->img->failed_at_us = ns_time_monotonic_us();
         pending->img->error = err && err->message
             ? g_strdup(err->message) : g_strdup("fetch failed");
         g_clear_error(&err);
@@ -616,15 +617,15 @@ on_image_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
     pending->img->cors_allow_origin = g_strdup(resp->cors_allow_origin);
     if (resp->error) {
         pending->img->failed = TRUE;
-        pending->img->failed_at_us = g_get_monotonic_time();
+        pending->img->failed_at_us = ns_time_monotonic_us();
         pending->img->error = g_strdup(resp->error);
     } else if (resp->status >= 400) {
         pending->img->failed = TRUE;
-        pending->img->failed_at_us = g_get_monotonic_time();
+        pending->img->failed_at_us = ns_time_monotonic_us();
         pending->img->error = g_strdup_printf("HTTP %ld", resp->status);
     } else if (!resp->body || resp->body->len == 0) {
         pending->img->failed = TRUE;
-        pending->img->failed_at_us = g_get_monotonic_time();
+        pending->img->failed_at_us = ns_time_monotonic_us();
         pending->img->error = g_strdup("empty response");
     } else if (ns_config_get()->async_image_decode) {
         ns_decode_job *job = g_new0(ns_decode_job, 1);
@@ -720,7 +721,7 @@ ns_image_cache_get(ns_image_cache *cache,
                                          policy, cb, user_data);
             return cached;
         }
-        if (ns_image_should_retry(cached, g_get_monotonic_time())) {
+        if (ns_image_should_retry(cached, ns_time_monotonic_us())) {
             cached->failed = FALSE;
             cached->http_status = 0;
             cached->failed_at_us = 0;
@@ -904,7 +905,7 @@ ns_image_cache_animating(const ns_image_cache *cache)
     GHashTableIter it;
     gpointer key, value;
     g_hash_table_iter_init(&it, cache->by_url);
-    gint64 now = g_get_monotonic_time();
+    gint64 now = ns_time_monotonic_us();
     while (g_hash_table_iter_next(&it, &key, &value)) {
         const ns_image *img = value;
         if (ns_image_is_animation(img) && !img->anim_paused &&

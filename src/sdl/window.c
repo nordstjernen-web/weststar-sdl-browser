@@ -6,6 +6,7 @@
  */
 
 #include "window.h"
+#include "plat/ns_plat.h"
 
 #include "icons.h"
 #include "mainloop.h"
@@ -448,9 +449,9 @@ start_download(NsWindow *w, const char *url, const char *suggested)
     d->url = g_strdup(url);
     d->path = path;
     d->name = name;
-    GThread *t = g_thread_new("ns-download", download_worker, d);
+    NsThread *t = ns_thread_new("ns-download", download_worker, d);
     if (t)
-        g_thread_unref(t);
+        ns_thread_unref(t);
 }
 
 /* ---- save dialogs -------------------------------------------------------- */
@@ -1710,7 +1711,7 @@ clear_cache_dir(const char *name, gint64 min_age_s)
 {
     char *dir = g_build_filename(g_get_user_cache_dir(), NS_APP_DIR_NAME, name,
                                  NULL);
-    gint64 cutoff = g_get_real_time() / G_USEC_PER_SEC - min_age_s;
+    gint64 cutoff = ns_time_real_us() / G_USEC_PER_SEC - min_age_s;
     GQueue *stack = g_queue_new();
     GPtrArray *dirs = g_ptr_array_new_with_free_func(g_free);
     g_queue_push_head(stack, g_strdup(dir));

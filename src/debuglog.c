@@ -5,6 +5,7 @@
  */
 
 #include "debuglog.h"
+#include "plat/ns_plat.h"
 #include "brand.h"
 #include "security.h"
 
@@ -21,7 +22,7 @@ typedef struct ns_dlog_sub {
     gpointer           user_data;
 } ns_dlog_sub;
 
-static GMutex   g_dlog_mutex;
+static NsMutex  g_dlog_mutex;
 static GQueue  *g_dlog_entries;
 static GArray  *g_dlog_subs;
 static guint    g_dlog_next_id = 1;
@@ -73,7 +74,7 @@ ns_dlog_file_write(const ns_dlog_entry *e)
         }
     }
     if (!g_dlog_file) return;
-    gint64 t = g_get_real_time() / 1000;
+    gint64 t = ns_time_real_us() / 1000;
     fprintf(g_dlog_file, "%" G_GINT64_FORMAT " %-5s %s: %s\n",
             t, ns_dlog_level_name(e->level),
             e->category ? e->category : "", e->message ? e->message : "");
@@ -93,13 +94,13 @@ ns_dlog_entry_free(gpointer p)
 void
 ns_debug_log_init(void)
 {
-    g_mutex_lock(&g_dlog_mutex);
+    ns_mutex_lock(&g_dlog_mutex);
     if (!g_dlog_inited) {
         g_dlog_entries = g_queue_new();
         g_dlog_subs = g_array_new(FALSE, FALSE, sizeof(ns_dlog_sub));
         g_dlog_inited = TRUE;
     }
-    g_mutex_unlock(&g_dlog_mutex);
+    ns_mutex_unlock(&g_dlog_mutex);
 }
 
 const char *
@@ -121,13 +122,13 @@ static void
 ns_dlog_dispatch(const ns_dlog_entry *snap)
 {
     GArray *subs_copy = NULL;
-    g_mutex_lock(&g_dlog_mutex);
+    ns_mutex_lock(&g_dlog_mutex);
     if (g_dlog_subs && g_dlog_subs->len > 0) {
         subs_copy = g_array_sized_new(FALSE, FALSE, sizeof(ns_dlog_sub),
                                       g_dlog_subs->len);
         g_array_append_vals(subs_copy, g_dlog_subs->data, g_dlog_subs->len);
     }
-    g_mutex_unlock(&g_dlog_mutex);
+    ns_mutex_unlock(&g_dlog_mutex);
     if (!subs_copy) return;
     for (guint i = 0; i < subs_copy->len; i++) {
         ns_dlog_sub s = g_array_index(subs_copy, ns_dlog_sub, i);
@@ -150,14 +151,14 @@ ns_debug_log_emit_v(ns_dlog_level level, const char *category,
 
     ns_dlog_dispatch(e);
 
-    g_mutex_lock(&g_dlog_mutex);
+    ns_mutex_lock(&g_dlog_mutex);
     ns_dlog_file_write(e);
     g_queue_push_tail(g_dlog_entries, e);
     while (g_queue_get_length(g_dlog_entries) > NS_DLOG_CAPACITY) {
         ns_dlog_entry *drop = g_queue_pop_head(g_dlog_entries);
         ns_dlog_entry_free(drop);
     }
-    g_mutex_unlock(&g_dlog_mutex);
+    ns_mutex_unlock(&g_dlog_mutex);
 }
 
 void
@@ -176,11 +177,11 @@ ns_debug_log_subscribe(ns_dlog_listener cb, gpointer user_data)
 {
     if (!cb) return 0;
     if (!g_dlog_inited) ns_debug_log_init();
-    g_mutex_lock(&g_dlog_mutex);
+    ns_mutex_lock(&g_dlog_mutex);
     ns_dlog_sub s = { g_dlog_next_id++, cb, user_data };
     g_array_append_val(g_dlog_subs, s);
     guint id = s.id;
-    g_mutex_unlock(&g_dlog_mutex);
+    ns_mutex_unlock(&g_dlog_mutex);
     return id;
 }
 
@@ -188,13 +189,13 @@ void
 ns_debug_log_unsubscribe(guint id)
 {
     if (id == 0 || !g_dlog_inited) return;
-    g_mutex_lock(&g_dlog_mutex);
+    ns_mutex_lock(&g_dlog_mutex);
     for (guint i = 0; i < g_dlog_subs->len; i++) {
         if (g_array_index(g_dlog_subs, ns_dlog_sub, i).id == id) {
             g_array_remove_index(g_dlog_subs, i);
             break;
         }
     }
-    g_mutex_unlock(&g_dlog_mutex);
+    ns_mutex_unlock(&g_dlog_mutex);
 }
 

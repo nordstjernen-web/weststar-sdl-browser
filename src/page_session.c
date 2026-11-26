@@ -5,6 +5,7 @@
  */
 
 #include "page_session.h"
+#include "plat/ns_plat.h"
 #include "damage.h"
 #include "libnorthstar.h"
 #include "mainctx.h"
@@ -78,7 +79,7 @@ session_wake_prepare(GSource *source, gint *timeout)
     gint64 due = s->cur && !s->wake_posted ? ns_browser_next_wake_us(s->cur)
                                            : 0;
     if (due > 0) {
-        gint64 wait_ms = (due - g_get_monotonic_time() + 999) / 1000;
+        gint64 wait_ms = (due - ns_time_monotonic_us() + 999) / 1000;
         *timeout = (gint)CLAMP(wait_ms, 0, G_MAXINT);
     }
     return FALSE;
@@ -243,10 +244,10 @@ scrub_line_breaks(char *s)
 static void
 engine_init_once(void)
 {
-    static gsize inited;
-    if (g_once_init_enter(&inited)) {
+    static NsOnce inited;
+    if (ns_once_enter(&inited)) {
         ns_browser_init();
-        g_once_init_leave(&inited, 1);
+        ns_once_leave(&inited);
     }
 }
 

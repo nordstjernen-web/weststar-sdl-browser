@@ -5,6 +5,7 @@
  */
 
 #include "libnorthstar.h"
+#include "plat/ns_plat.h"
 #include "mainctx.h"
 
 #include "gfx.h"
@@ -305,7 +306,7 @@ static void
 browser_relayout_impl(ns_browser *b)
 {
     if (b->relaying) { b->dirty = TRUE; return; }
-    gint64 relayout_t0 = g_get_monotonic_time();
+    gint64 relayout_t0 = ns_time_monotonic_us();
     gboolean rapid = b->last_layout_us > 0 &&
                      relayout_t0 - b->last_layout_us < NS_LAYOUT_RAPID_US;
     b->relaying = TRUE;
@@ -376,7 +377,7 @@ browser_relayout_impl(ns_browser *b)
         browser_schedule_media_events(b);
     }
 
-    gint64 now = g_get_monotonic_time();
+    gint64 now = ns_time_monotonic_us();
     b->relayout_cost_us = now - relayout_t0;
     b->last_layout_us = now;
     guint64 sig = layout_signature(b->layout);
@@ -404,7 +405,7 @@ static gboolean
 browser_relayout_from_mutation(ns_browser *b)
 {
     if (b->layout && b->layout_osc >= NS_LAYOUT_OSC_THRESHOLD) {
-        gint64 now = g_get_monotonic_time();
+        gint64 now = ns_time_monotonic_us();
         if (!b->damp_logged) {
             b->damp_logged = TRUE;
             g_message("weststar: layout dampener engaged "
@@ -478,7 +479,7 @@ static gboolean
 browser_load_waits_for_images(gpointer user_data)
 {
     ns_browser *b = user_data;
-    if (g_get_monotonic_time() >= b->load_delay_deadline_us) return FALSE;
+    if (ns_time_monotonic_us() >= b->load_delay_deadline_us) return FALSE;
     return b->media_events_source != 0 || b->images_arrived_since_layout ||
            browser_images_outstanding(b) > 0;
 }
@@ -550,9 +551,9 @@ static void
 browser_wait_images(ns_browser *browser)
 {
     browser_ensure_images(browser);
-    gint64 deadline = g_get_monotonic_time() + (gint64)15 * G_USEC_PER_SEC;
+    gint64 deadline = ns_time_monotonic_us() + (gint64)15 * G_USEC_PER_SEC;
     while (browser_images_outstanding(browser) > 0 &&
-           g_get_monotonic_time() < deadline)
+           ns_time_monotonic_us() < deadline)
         g_main_context_iteration(ns_engine_context(), TRUE);
     if (browser->dirty) {
         browser_relayout(browser);
@@ -716,7 +717,7 @@ static gboolean
 browser_restyle_impl(ns_browser *b, GPtrArray *targets)
 {
     b->restyle_pending = FALSE;
-    gint64 t0 = g_get_monotonic_time();
+    gint64 t0 = ns_time_monotonic_us();
     GHashTable *containers = ns_render_container_map(b->doc);
     if (!b->layout || b->relaying || !b->styles ||
         (!containers &&
@@ -746,7 +747,7 @@ browser_restyle_impl(ns_browser *b, GPtrArray *targets)
     ns_css_set_container_map(NULL);
     ns_css_set_hover_node(prev_hover);
     ns_css_set_focus_node(prev_focus);
-    gint64 t1 = g_get_monotonic_time();
+    gint64 t1 = ns_time_monotonic_us();
     GHashTable *old_to_new = g_hash_table_new(g_direct_hash, g_direct_equal);
     GHashTable *moved = g_hash_table_new(g_direct_hash, g_direct_equal);
     GPtrArray *changed_nodes = g_ptr_array_new();
@@ -826,7 +827,7 @@ browser_restyle_impl(ns_browser *b, GPtrArray *targets)
         if (g_getenv("NS_PROFILE"))
             g_printerr("[profile] restyle needs relayout styles=%u %.2fms "
                        "cascade=%.2f\n", changed,
-                       (g_get_monotonic_time() - t0) / 1000.0,
+                       (ns_time_monotonic_us() - t0) / 1000.0,
                        (t1 - t0) / 1000.0);
         g_array_free(rects, TRUE);
         g_ptr_array_free(changed_nodes, TRUE);
@@ -857,7 +858,7 @@ browser_restyle_impl(ns_browser *b, GPtrArray *targets)
     b->styles_serial_valid = TRUE;
     if (b->anim)
         ns_anim_observe_nodes(b->anim, b->styles, changed_nodes,
-                              g_get_monotonic_time());
+                              ns_time_monotonic_us());
     g_ptr_array_free(changed_nodes, TRUE);
     if (b->js) ns_js_set_style_table(b->js, b->styles);
     b->cascade_dirty = FALSE;
@@ -873,7 +874,7 @@ browser_restyle_impl(ns_browser *b, GPtrArray *targets)
     if (g_getenv("NS_PROFILE"))
         g_printerr("[profile] restyle kept layout styles=%u %.2fms "
                    "cascade=%.2f%s\n", changed,
-                   (g_get_monotonic_time() - t0) / 1000.0, (t1 - t0) / 1000.0,
+                   (ns_time_monotonic_us() - t0) / 1000.0, (t1 - t0) / 1000.0,
                    was_delta ? " (changes only)" : "");
     for (guint i = 0; structural && i < targets->len; i++) {
         const ns_node *svg = node_svg_painter(g_ptr_array_index(targets, i));
@@ -931,7 +932,7 @@ browser_flush_style(gpointer user_data)
     b->styles = ns_engine_compute_cascade(b->doc, b->base_url, b->css_cache, b->anim);
     b->damage_full = TRUE;
     if (b->anim)
-        ns_engine_anim_observe(b->anim, b->styles, g_get_monotonic_time());
+        ns_engine_anim_observe(b->anim, b->styles, ns_time_monotonic_us());
     ns_js_set_style_table(b->js, b->styles);
     b->cascade_dirty = FALSE;
 }
@@ -1136,7 +1137,7 @@ settle_tick_cb(gpointer user_data)
 {
     settle_ctx *ctx = user_data;
     ns_browser *b = ctx->b;
-    gint64 now = g_get_monotonic_time();
+    gint64 now = ns_time_monotonic_us();
     if (b->images) ns_image_cache_tick(b->images, now);
     if (b->anim && ns_anim_tick(b->anim, now)) {
         b->cascade_dirty = TRUE;
@@ -1462,7 +1463,7 @@ browser_arm_declarative_refresh(ns_browser *b, const char *header_value)
     } else {
         b->refresh_url = g_strdup(b->base_url);
     }
-    b->refresh_due_us = g_get_monotonic_time() + (gint64)(seconds * 1e6);
+    b->refresh_due_us = ns_time_monotonic_us() + (gint64)(seconds * 1e6);
 }
 
 /* Wraps plain text in an HTML <pre> document titled with the URL; caller frees. */
@@ -1607,8 +1608,8 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
 
     b->anim = ns_anim_new();
     ns_engine_load_keyframes(b->anim, doc, base, b->css_cache);
-    ns_engine_anim_observe(b->anim, b->styles, g_get_monotonic_time());
-    b->smil = ns_smil_new(doc, g_get_monotonic_time());
+    ns_engine_anim_observe(b->anim, b->styles, ns_time_monotonic_us());
+    b->smil = ns_smil_new(doc, ns_time_monotonic_us());
 
     b->js = ns_js_new(browser_js_log, b,
                       browser_js_mutated, b,
@@ -1616,7 +1617,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
                       navigation_timing);
     if (b->js) {
         b->load_delay_deadline_us =
-            g_get_monotonic_time() + (gint64)10 * G_USEC_PER_SEC;
+            ns_time_monotonic_us() + (gint64)10 * G_USEC_PER_SEC;
         ns_js_set_load_delay_cb(b->js, browser_load_waits_for_images, b);
         ns_js_set_style_table(b->js, b->styles);
         ns_js_set_image_cache(b->js, b->images);
@@ -2064,7 +2065,7 @@ ns_browser_render_image(ns_browser *browser, const char *path)
 static gint64
 browser_frame_now(ns_browser *browser)
 {
-    gint64 now = g_get_monotonic_time();
+    gint64 now = ns_time_monotonic_us();
     gint64 t = browser->frame_time_us;
     if (t <= 0 || t > now || now - t > NS_FRAME_TIME_MAX_LAG_US) t = now;
     if (t < browser->last_frame_now_us) t = browser->last_frame_now_us;
@@ -2141,13 +2142,13 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
     if (budget_ms < 0) budget_ms = 0;
 
     if (browser->refresh_due_us && !browser->pending_nav &&
-        g_get_monotonic_time() >= browser->refresh_due_us) {
+        ns_time_monotonic_us() >= browser->refresh_due_us) {
         browser->refresh_due_us = 0;
         browser->pending_nav = browser->refresh_url;
         browser->refresh_url = NULL;
     }
 
-    gint64 deadline = g_get_monotonic_time() + (gint64)budget_ms * 1000;
+    gint64 deadline = ns_time_monotonic_us() + (gint64)budget_ms * 1000;
     gboolean changed = browser->repaint_pending;
     browser->repaint_pending = FALSE;
     if (browser->js)
@@ -2164,7 +2165,7 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
                                    browser->cur_scroll_y);
     }
     if (browser->hover_restyle_pending) {
-        gint64 now = g_get_monotonic_time();
+        gint64 now = ns_time_monotonic_us();
         gint64 min_gap = browser->relayout_cost_us * 2;
         if (min_gap < 60000) min_gap = 60000;
         if (now - browser->hover_relayout_us >= min_gap) {
@@ -2214,12 +2215,12 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
             g_main_context_iteration(ns_engine_context(), FALSE);
             did_iter = TRUE;
             changed = TRUE;
-            if (g_get_monotonic_time() >= deadline) break;
+            if (ns_time_monotonic_us() >= deadline) break;
         }
 
         if (!did_iter) break;
         if (++guard >= 4096) break;
-        if (g_get_monotonic_time() >= deadline) break;
+        if (ns_time_monotonic_us() >= deadline) break;
     }
     browser_absorb_js_mutation(browser);
     if (!browser->dirty && browser->restyle_pending) {
@@ -2294,7 +2295,7 @@ ns_browser_needs_frame(ns_browser *browser)
         return 1;
     if (ns_camera_has_pending_origin()) return 1;
     if (browser->refresh_url && browser->refresh_due_us &&
-        g_get_monotonic_time() >= browser->refresh_due_us)
+        ns_time_monotonic_us() >= browser->refresh_due_us)
         return 1;
     if (browser->js && ns_js_wants_frame(browser->js)) return 1;
     if (browser->anim && ns_anim_has_active(browser->anim)) return 1;
@@ -2531,7 +2532,7 @@ ns_browser_render_argb32_rects(ns_browser *browser, int scroll_x, int scroll_y,
     ns_paint_set_anim(browser->anim);
     ns_paint_set_search(browser->search_case, browser->search_active);
     ns_paint_set_caret_visible(browser->caret_paint_visible);
-    gint64 paint_t0 = g_get_monotonic_time();
+    gint64 paint_t0 = ns_time_monotonic_us();
     if (rects && n_rects > 0) {
         for (int i = 0; i < n_rects; i++)
             browser_paint_rect(browser, surf, scroll_x, scroll_y, scale,
@@ -2543,7 +2544,7 @@ ns_browser_render_argb32_rects(ns_browser *browser, int scroll_x, int scroll_y,
     }
     if (g_getenv("NS_PROFILE"))
         g_printerr("[profile] paint %6.1fms %dx%d\n",
-                   (double)(g_get_monotonic_time() - paint_t0) / 1000.0,
+                   (double)(ns_time_monotonic_us() - paint_t0) / 1000.0,
                    width, height);
     ns_paint_set_search(FALSE, NULL);
     ns_paint_set_anim(NULL);
@@ -2984,7 +2985,7 @@ ns_browser_hover(ns_browser *browser, int x, int y)
         return 1;
     }
     if (hover_restyle) {
-        gint64 now = g_get_monotonic_time();
+        gint64 now = ns_time_monotonic_us();
         gint64 min_gap = browser->relayout_cost_us * 2;
         if (min_gap < 60000) min_gap = 60000;
         if (now - browser->hover_relayout_us >= min_gap) {
@@ -4322,7 +4323,7 @@ ns_browser_set_caret_blink_active(ns_browser *browser, int active)
                            ? ns_js_focused_node(browser->js) : NULL;
     gsize caret = focused ? browser->caret_byte : 0;
     gsize anchor = focused ? browser->sel_anchor_byte : 0;
-    gint64 now = g_get_monotonic_time();
+    gint64 now = ns_time_monotonic_us();
     if (focused != browser->caret_blink_node)
         browser->damage_full = TRUE;
     if (focused != browser->caret_blink_node ||

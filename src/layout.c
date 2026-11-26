@@ -5,6 +5,7 @@
  */
 
 #include "layout.h"
+#include "plat/ns_plat.h"
 #include "media_types.h"
 
 #include <math.h>
@@ -15169,7 +15170,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
     static int profile_env = -1;
     if (profile_env < 0)
         profile_env = g_getenv("NS_PROFILE") != NULL ? 1 : 0;
-    gint64 profile_start = profile_env ? g_get_monotonic_time() : 0;
+    gint64 profile_start = profile_env ? ns_time_monotonic_us() : 0;
     gint64 build_us = 0;
     gint64 static_us = 0;
     gint64 flow_us = 0;
@@ -15197,7 +15198,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
     if (static_y_count > 0)
         static_abs_y_precompute(root, box_map, styles, batch_y,
                                 batch_resolved);
-    gint64 loop_start = profile_env ? g_get_monotonic_time() : 0;
+    gint64 loop_start = profile_env ? ns_time_monotonic_us() : 0;
     /* In-flow boxes do not move while the absolutes are placed, and the
      * boxes placed here are absolutes, which the cache leaves out. */
     g_static_bottom_cache = g_hash_table_new_full(g_direct_hash,
@@ -15254,7 +15255,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             if (++pp_depth >= NS_LAYOUT_MAX_DEPTH) break;
         if (pp_depth >= NS_LAYOUT_MAX_DEPTH) continue;
 
-        gint64 phase_start = profile_env ? g_get_monotonic_time() : 0;
+        gint64 phase_start = profile_env ? ns_time_monotonic_us() : 0;
         ns_box *abox;
         if (e.pseudo) {
             abox = box_new(NS_BOX_BLOCK);
@@ -15270,7 +15271,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         }
         if (!abox) continue;
         if (profile_env) {
-            gint64 now = g_get_monotonic_time();
+            gint64 now = ns_time_monotonic_us();
             build_us += now - phase_start;
             phase_start = now;
         }
@@ -15330,7 +15331,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             }
         }
         if (profile_env) {
-            gint64 now = g_get_monotonic_time();
+            gint64 now = ns_time_monotonic_us();
             static_us += now - phase_start;
             phase_start = now;
         }
@@ -15447,7 +15448,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             abox->content_height = stretched_h;
         }
         if (profile_env) {
-            gint64 now = g_get_monotonic_time();
+            gint64 now = ns_time_monotonic_us();
             flow_us += now - phase_start;
             phase_start = now;
         }
@@ -15473,7 +15474,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         else
             position_absolute_box(abox, cb, cb_is_icb);
         if (profile_env)
-            position_us += g_get_monotonic_time() - phase_start;
+            position_us += ns_time_monotonic_us() - phase_start;
     }
     if (profile_env)
         g_printerr("[profile] absolute setup=%.2fms build=%.2fms "
@@ -15482,7 +15483,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
                    (loop_start - profile_start) / 1000.0,
                    build_us / 1000.0, static_us / 1000.0,
                    flow_us / 1000.0, position_us / 1000.0,
-                   (g_get_monotonic_time() - loop_start - build_us -
+                   (ns_time_monotonic_us() - loop_start - build_us -
                     static_us - flow_us - position_us) / 1000.0,
                    batch_len, static_y_count);
     g_free(batch_y);
@@ -15819,7 +15820,7 @@ ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width)
     static int profile_env = -1;
     if (profile_env < 0)
         profile_env = g_getenv("NS_PROFILE") != NULL ? 1 : 0;
-    gint64 t0 = profile_env ? g_get_monotonic_time() : 0;
+    gint64 t0 = profile_env ? ns_time_monotonic_us() : 0;
     g_abs_pending = g_array_new(FALSE, FALSE, sizeof(ns_abs_entry));
     g_abs_seen = g_hash_table_new(g_direct_hash, g_direct_equal);
     g_abs_ph_set = g_hash_table_new(g_direct_hash, g_direct_equal);
@@ -15830,7 +15831,7 @@ ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width)
     ns_css_set_container_dims(0, 0);
     ns_box *root = build_block(doc, styles);
     guint absolute_count = g_abs_pending ? g_abs_pending->len : 0;
-    gint64 t1 = profile_env ? g_get_monotonic_time() : 0;
+    gint64 t1 = profile_env ? ns_time_monotonic_us() : 0;
     if (!root) {
         g_array_free(g_abs_pending, TRUE);
         g_abs_pending = NULL;
@@ -15846,14 +15847,14 @@ ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width)
 
     g_bfc_floats = NULL;
     layout_block(root, viewport_width, NULL);
-    gint64 t2 = profile_env ? g_get_monotonic_time() : 0;
+    gint64 t2 = profile_env ? ns_time_monotonic_us() : 0;
     apply_position_offsets(root, viewport_width, root->content_height);
-    gint64 t3 = profile_env ? g_get_monotonic_time() : 0;
+    gint64 t3 = profile_env ? ns_time_monotonic_us() : 0;
     process_absolute_boxes(root, styles, viewport_width);
-    gint64 t4 = profile_env ? g_get_monotonic_time() : 0;
+    gint64 t4 = profile_env ? ns_time_monotonic_us() : 0;
     ns_paint_sync_inline_atomic_offsets(root);
     compute_paint_bounds(root);
-    gint64 t5 = profile_env ? g_get_monotonic_time() : 0;
+    gint64 t5 = profile_env ? ns_time_monotonic_us() : 0;
 
     if (profile_env)
         g_printerr("[profile] layout tree=%.2fms flow=%.2fms offsets=%.2fms "

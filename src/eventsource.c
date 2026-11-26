@@ -5,6 +5,7 @@
  */
 
 #include "mainctx.h"
+#include "plat/ns_plat.h"
 #include "eventsource.h"
 #include "net.h"
 
@@ -21,8 +22,8 @@ struct ns_es {
     ns_fetch_policy *policy;
     char     *last_event_id;
     gint64    reconnect_ms;
-    GThread  *thread;
-    GMutex    lock;
+    NsThread *thread;
+    NsMutex   lock;
     volatile gint exit_requested;
     volatile gint detached;
     volatile gint pending;
@@ -45,7 +46,7 @@ ns_es_destroy(ns_es *es)
     g_free(es->origin);
     ns_fetch_policy_unref(es->policy);
     g_free(es->last_event_id);
-    g_mutex_clear(&es->lock);
+    ns_mutex_clear(&es->lock);
     g_free(es);
 }
 
@@ -94,7 +95,7 @@ ns_es_post(ns_es *es, void (*invoke)(ns_es *, gpointer), gpointer payload,
     while (!g_atomic_int_get(&es->detached) &&
            !g_atomic_int_get(&es->exit_requested) &&
            g_atomic_int_get(&es->pending) >= NS_ES_MAX_PENDING)
-        g_usleep(2000);
+        ns_sleep_us(2000);
     if (g_atomic_int_get(&es->detached)) {
         if (payload && payload_free) payload_free(payload);
         return;
@@ -182,9 +183,9 @@ ns_es_dispatch_event(ns_es_parse *p)
     ns_es_msg *m = g_new0(ns_es_msg, 1);
     m->event = p->event_type ? p->event_type : g_strdup("message");
     m->data = g_strdup(p->data->str);
-    g_mutex_lock(&p->es->lock);
+    ns_mutex_lock(&p->es->lock);
     m->last_id = g_strdup(p->es->last_event_id ? p->es->last_event_id : "");
-    g_mutex_unlock(&p->es->lock);
+    ns_mutex_unlock(&p->es->lock);
     p->event_type = NULL;
     g_string_truncate(p->data, 0);
     ns_es_post(p->es, ns_es_invoke_message, m, ns_es_msg_free);
@@ -219,10 +220,10 @@ ns_es_process_line(ns_es_parse *p, const char *line)
         p->event_type = *value ? g_strdup(value) : NULL;
     } else if (!strcmp(field, "id") && !strpbrk(value, "\r\n")) {
         /* The id is echoed back as a request header on reconnect. */
-        g_mutex_lock(&p->es->lock);
+        ns_mutex_lock(&p->es->lock);
         g_free(p->es->last_event_id);
         p->es->last_event_id = g_strdup(value);
-        g_mutex_unlock(&p->es->lock);
+        ns_mutex_unlock(&p->es->lock);
     } else if (!strcmp(field, "retry")) {
         gboolean digits = *value != '\0';
         for (const char *c = value; *c; c++)
@@ -230,9 +231,9 @@ ns_es_process_line(ns_es_parse *p, const char *line)
         if (digits) {
             gint64 ms = g_ascii_strtoll(value, NULL, 10);
             if (ms > 0) {
-                g_mutex_lock(&p->es->lock);
+                ns_mutex_lock(&p->es->lock);
                 p->es->reconnect_ms = MIN(ms, 86400000);
-                g_mutex_unlock(&p->es->lock);
+                ns_mutex_unlock(&p->es->lock);
             }
         }
     }
@@ -410,14 +411,14 @@ ns_es_connect_once(ns_es *es, gboolean *opened_out)
         hdrs = curl_slist_append(hdrs, h);
         g_free(h);
     }
-    g_mutex_lock(&es->lock);
+    ns_mutex_lock(&es->lock);
     if (es->last_event_id && *es->last_event_id &&
         !strpbrk(es->last_event_id, "\r\n")) {
         char *h = g_strconcat("Last-Event-ID: ", es->last_event_id, NULL);
         hdrs = curl_slist_append(hdrs, h);
         g_free(h);
     }
-    g_mutex_unlock(&es->lock);
+    ns_mutex_unlock(&es->lock);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
 
     curl_easy_perform(curl);
@@ -447,13 +448,13 @@ ns_es_worker(gpointer data)
             break;
         }
         ns_es_emit_error(es, FALSE);
-        g_mutex_lock(&es->lock);
+        ns_mutex_lock(&es->lock);
         gint64 wait_ms = es->reconnect_ms;
-        g_mutex_unlock(&es->lock);
+        ns_mutex_unlock(&es->lock);
         if (wait_ms <= 0) wait_ms = 3000;
         gint64 waited = 0;
         while (waited < wait_ms && !g_atomic_int_get(&es->exit_requested)) {
-            g_usleep(50 * 1000);
+            ns_sleep_us(50 * 1000);
             waited += 50;
         }
     }
@@ -480,9 +481,9 @@ ns_es_new(const char *url, const char *origin, const char *last_event_id,
     es->refcount = 1;
     if (cbs) es->cbs = *cbs;
     es->user_data = user_data;
-    g_mutex_init(&es->lock);
+    ns_mutex_init(&es->lock);
     ns_es_ref(es);
-    es->thread = g_thread_new("nd-eventsource", ns_es_worker, es);
+    es->thread = ns_thread_new("nd-eventsource", ns_es_worker, es);
     return es;
 }
 
@@ -502,7 +503,7 @@ ns_es_free(ns_es *es)
     g_atomic_int_set(&es->detached, 1);
     g_atomic_int_set(&es->exit_requested, 1);
     if (es->thread) {
-        g_thread_join(es->thread);
+        ns_thread_join(es->thread);
         es->thread = NULL;
     }
     ns_es_unref(es);

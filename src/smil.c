@@ -6,6 +6,7 @@
  */
 
 #include "smil.h"
+#include "plat/ns_plat.h"
 
 #include <math.h>
 #include <string.h>
@@ -1582,7 +1583,7 @@ ns_smil_refresh(const ns_node *n)
 {
     ns_smil *s = smil_for_node(n);
     if (!s || !s->dirty) return;
-    if (ns_smil_tick(s, g_get_monotonic_time())) {
+    if (ns_smil_tick(s, ns_time_monotonic_us())) {
         s->unreported = TRUE;
         s->dirty = TRUE;
     }
@@ -1671,7 +1672,7 @@ ns_smil_dom_event(const ns_node *target, const char *type)
     if (!s || !s->has_event_specs) return;
     smil_sync(s);
     if (!s->has_event_specs) return;
-    gint64 now = g_get_monotonic_time();
+    gint64 now = ns_time_monotonic_us();
     for (guint i = 0; i < s->els->len; i++) {
         smil_el *el = g_ptr_array_index(s->els, i);
         double t = smil_time_at(s, el->svg, now);
@@ -1708,7 +1709,7 @@ ns_smil_pause(const ns_node *svg, gboolean paused)
     if (!s || !outer) return;
     smil_clock *c = smil_clock_for(s, outer);
     if (c->paused == paused) return;
-    gint64 now = g_get_monotonic_time();
+    gint64 now = ns_time_monotonic_us();
     if (paused) c->paused_at_us = now;
     else        c->offset_us += now - c->paused_at_us;
     c->paused = paused;
@@ -1727,7 +1728,7 @@ ns_smil_current_time(const ns_node *el)
 {
     ns_smil *s = smil_for_node(el);
     if (!s) return 0;
-    return smil_time_at(s, smil_outer_svg(el), g_get_monotonic_time());
+    return smil_time_at(s, smil_outer_svg(el), ns_time_monotonic_us());
 }
 
 void
@@ -1737,7 +1738,7 @@ ns_smil_set_current_time(const ns_node *svg, double seconds)
     const ns_node *outer = smil_outer_svg(svg);
     if (!s || !outer || !isfinite(seconds)) return;
     smil_clock *c = smil_clock_for(s, outer);
-    gint64 at = c->paused ? c->paused_at_us : g_get_monotonic_time();
+    gint64 at = c->paused ? c->paused_at_us : ns_time_monotonic_us();
     c->offset_us = at - s->origin_us - (gint64)(MAX(seconds, 0.0) * 1e6);
     s->dirty = TRUE;
 }
@@ -1758,7 +1759,7 @@ ns_smil_begin_element(const ns_node *anim, double offset)
     ns_smil *s;
     smil_el *el = smil_el_for(anim, &s);
     if (!el || !isfinite(offset)) return FALSE;
-    double t = smil_time_at(s, el->svg, g_get_monotonic_time());
+    double t = smil_time_at(s, el->svg, ns_time_monotonic_us());
     smil_instance_add(el, t + offset);
     s->dirty = TRUE;
     return TRUE;
@@ -1770,7 +1771,7 @@ ns_smil_end_element(const ns_node *anim, double offset)
     ns_smil *s;
     smil_el *el = smil_el_for(anim, &s);
     if (!el || !isfinite(offset)) return FALSE;
-    double t = smil_time_at(s, el->svg, g_get_monotonic_time());
+    double t = smil_time_at(s, el->svg, ns_time_monotonic_us());
     double begin;
     if (!smil_current_begin(el, t, &begin)) return FALSE;
     el->has_forced_end = TRUE;
@@ -1786,7 +1787,7 @@ ns_smil_start_time(const ns_node *anim, double *out)
     ns_smil *s;
     smil_el *el = smil_el_for(anim, &s);
     if (!el) return FALSE;
-    double t = smil_time_at(s, el->svg, g_get_monotonic_time());
+    double t = smil_time_at(s, el->svg, ns_time_monotonic_us());
     if (smil_current_begin(el, t, out) && t < smil_interval_end(el, *out))
         return TRUE;
     for (guint i = 0; i < el->instances->len; i++) {

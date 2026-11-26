@@ -5,6 +5,7 @@
  */
 
 #include "watchdog.h"
+#include "plat/ns_plat.h"
 #include "debuglog.h"
 
 #include <stdio.h>
@@ -61,11 +62,11 @@ ns_watchdog_hang_thread(gpointer user_data)
 {
     (void)user_data;
     gint   last = g_atomic_int_get(&g_beat);
-    gint64 last_change = g_get_monotonic_time();
+    gint64 last_change = ns_time_monotonic_us();
     for (;;) {
-        g_usleep((gulong)NS_WATCHDOG_CHECK_SECS * G_USEC_PER_SEC);
+        ns_sleep_us((gulong)NS_WATCHDOG_CHECK_SECS * G_USEC_PER_SEC);
         gint   cur = g_atomic_int_get(&g_beat);
-        gint64 now = g_get_monotonic_time();
+        gint64 now = ns_time_monotonic_us();
         if (cur != last) {
             last = cur;
             last_change = now;
@@ -103,7 +104,7 @@ ns_watchdog_child_arm_hang_monitor(int js_budget_ms)
     g_message("ns_watchdog: hang monitor armed, exit after %ds unresponsive",
               g_hang_secs);
     g_timeout_add_seconds(NS_WATCHDOG_BEAT_SECS, ns_watchdog_beat, NULL);
-    g_thread_unref(g_thread_new("nd-watchdog", ns_watchdog_hang_thread, NULL));
+    ns_thread_unref(ns_thread_new("nd-watchdog", ns_watchdog_hang_thread, NULL));
 }
 
 /* Returns the text after prefix in the first matching argv entry, or NULL. */
@@ -382,7 +383,7 @@ ns_watchdog_respawn_cb(gpointer user_data)
 static void
 ns_watchdog_schedule_restart(ns_watchdog *wd)
 {
-    gint64 now = g_get_monotonic_time();
+    gint64 now = ns_time_monotonic_us();
     if (now - wd->burst_start_us > (gint64)NS_WATCHDOG_BURST_SECS * G_USEC_PER_SEC) {
         wd->burst_start_us = now;
         wd->burst_count = 0;
@@ -409,7 +410,7 @@ ns_watchdog_child_exited(GPid pid, gint status, gpointer user_data)
     g_spawn_close_pid(pid);
     wd->have_pid = FALSE;
     wd->watch_id = 0;
-    if (g_get_monotonic_time() - wd->spawned_us >
+    if (ns_time_monotonic_us() - wd->spawned_us >
         (gint64)NS_WATCHDOG_STABLE_SECS * G_USEC_PER_SEC)
         wd->recover_streak = 0;
 
@@ -483,7 +484,7 @@ ns_watchdog_spawn(ns_watchdog *wd, gboolean recover)
         return FALSE;
     }
     wd->pid = pid;
-    wd->spawned_us = g_get_monotonic_time();
+    wd->spawned_us = ns_time_monotonic_us();
     wd->have_pid = TRUE;
     wd->watch_id = g_child_watch_add(pid, ns_watchdog_child_exited, wd);
     return TRUE;
@@ -555,7 +556,7 @@ ns_watchdog_run_supervisor(const char *self_exe, int argc, char **argv)
     wd.child_argv = ns_watchdog_build_child_argv(self_exe, argc, argv,
                                                  wd.session_path);
     wd.loop = g_main_loop_new(NULL, FALSE);
-    wd.burst_start_us = g_get_monotonic_time();
+    wd.burst_start_us = ns_time_monotonic_us();
 
 #ifndef G_OS_WIN32
     g_unix_signal_add(SIGINT, ns_watchdog_signal_cb, &wd);

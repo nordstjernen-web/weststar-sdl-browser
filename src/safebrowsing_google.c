@@ -7,6 +7,7 @@
 #define _GNU_SOURCE
 #endif
 #include "safebrowsing_google.h"
+#include "plat/ns_plat.h"
 #include "config.h"
 #include "net.h"
 #include "ns_sb_key.h"
@@ -89,7 +90,7 @@ typedef struct {
     gboolean      bad;
 } pb_reader;
 
-static GMutex      g_sbg_lock;
+static NsMutex     g_sbg_lock;
 static GHashTable *g_sbg_full_hits;
 static GHashTable *g_sbg_prefix_misses;
 static gint64      g_sbg_retry_at[G_N_ELEMENTS(sbg_lists)];
@@ -128,7 +129,7 @@ ns_sbg_available(void)
 static gint64
 sbg_now(void)
 {
-    return g_get_real_time() / G_USEC_PER_SEC;
+    return ns_time_real_us() / G_USEC_PER_SEC;
 }
 
 static char *
@@ -551,7 +552,7 @@ sbg_list_save(const char *name, const sbg_list *l)
     for (int attempt = 0; attempt < 5 && !ok; attempt++) {
         ok = g_file_set_contents(path, (const char *)buf, (gssize)size, NULL);
         if (!ok)
-            g_usleep(200 * 1000);
+            ns_sleep_us(200 * 1000);
     }
     g_free(buf);
     return ok;
@@ -718,7 +719,7 @@ sbg_updater(gpointer data)
     (void)data;
     for (;;) {
         gint64 wait = ns_sbg_available() ? sbg_update_due_lists() : 1800;
-        g_usleep((gulong)CLAMP(wait, 60, 1800) * G_USEC_PER_SEC);
+        ns_sleep_us((gulong)CLAMP(wait, 60, 1800) * G_USEC_PER_SEC);
     }
     return NULL;
 }
@@ -726,21 +727,21 @@ sbg_updater(gpointer data)
 void
 ns_sbg_start(void)
 {
-    static gsize started = 0;
-    if (!g_once_init_enter(&started))
+    static NsOnce started;
+    if (!ns_once_enter(&started))
         return;
     g_autofree char *dir = sbg_dir();
     g_mkdir_with_parents(dir, 0700);
-    g_mutex_lock(&g_sbg_lock);
+    ns_mutex_lock(&g_sbg_lock);
     g_sbg_full_hits = g_hash_table_new_full(g_bytes_hash, g_bytes_equal,
                                             (GDestroyNotify)g_bytes_unref,
                                             g_free);
     g_sbg_prefix_misses = g_hash_table_new(g_direct_hash, g_direct_equal);
-    g_mutex_unlock(&g_sbg_lock);
-    GThread *t = g_thread_try_new("safebrowsing", sbg_updater, NULL, NULL);
+    ns_mutex_unlock(&g_sbg_lock);
+    NsThread *t = ns_thread_try_new("safebrowsing", sbg_updater, NULL, 0);
     if (t)
-        g_thread_unref(t);
-    g_once_init_leave(&started, 1);
+        ns_thread_unref(t);
+    ns_once_leave(&started);
 }
 
 static gboolean
@@ -1141,7 +1142,7 @@ sbg_store_search_response(const guint8 *p, gsize n, const guint32 *queried,
         return;
     }
     gint64 expires = sbg_now() + CLAMP(cache_s, 60, SBG_MAX_WAIT_S);
-    g_mutex_lock(&g_sbg_lock);
+    ns_mutex_lock(&g_sbg_lock);
     for (guint i = 0; i + 1 < found->len; i += 2) {
         const guint8 *fh = g_ptr_array_index(found, i);
         gsize fl = GPOINTER_TO_SIZE(g_ptr_array_index(found, i + 1));
@@ -1164,7 +1165,7 @@ sbg_store_search_response(const guint8 *p, gsize n, const guint32 *queried,
     for (gsize i = 0; i < queried_n; i++)
         g_hash_table_replace(g_sbg_prefix_misses, GUINT_TO_POINTER(queried[i]),
                              GSIZE_TO_POINTER((gsize)expires));
-    g_mutex_unlock(&g_sbg_lock);
+    ns_mutex_unlock(&g_sbg_lock);
     g_ptr_array_free(found, TRUE);
 }
 
@@ -1199,7 +1200,7 @@ sbg_cached_verdict(guint8 (*hashes)[32], gsize n, const guint32 *prefixes,
     ns_sb_verdict verdict = NS_SB_SAFE;
     gint64 now = sbg_now();
     *need_search = FALSE;
-    g_mutex_lock(&g_sbg_lock);
+    ns_mutex_lock(&g_sbg_lock);
     for (gsize i = 0; i < n; i++) {
         if (!hit[i])
             continue;
@@ -1216,7 +1217,7 @@ sbg_cached_verdict(guint8 (*hashes)[32], gsize n, const guint32 *prefixes,
         if ((gint64)miss_until <= now)
             *need_search = TRUE;
     }
-    g_mutex_unlock(&g_sbg_lock);
+    ns_mutex_unlock(&g_sbg_lock);
     return verdict;
 }
 

@@ -8,6 +8,7 @@
 #define _GNU_SOURCE
 #endif
 #include "security.h"
+#include "plat/ns_plat.h"
 #include "brand.h"
 
 #include <stddef.h>
@@ -1378,7 +1379,7 @@ ns_security_mark_download_origin(const char *path, const char *url)
     (void)url;
     char value[96];
     g_snprintf(value, sizeof value, "0001;%08x;Weststar SDL Browser;",
-               (unsigned)(g_get_real_time() / G_USEC_PER_SEC));
+               (unsigned)(ns_time_real_us() / G_USEC_PER_SEC));
     setxattr(path, "com.apple.quarantine", value, strlen(value), 0, 0);
 #elif defined(__linux__)
     if (url && *url)

@@ -5,6 +5,7 @@
  */
 
 #include "css.h"
+#include "plat/ns_plat.h"
 #include "css_syntax.h"
 
 #include "image.h"
@@ -36531,11 +36532,11 @@ ns_css_compute(ns_node *doc,
     const ns_css_stylesheet *cached_ua = ua_sheet_for(doc);
 
     gboolean profile = g_getenv("NS_PROFILE") != NULL;
-    gint64 t0 = profile ? g_get_monotonic_time() : 0;
+    gint64 t0 = profile ? ns_time_monotonic_us() : 0;
     (void)ns_css_rule_index_ensure(cached_ua);
     for (gsize i = 0; i < n_sheets; i++)
         (void)ns_css_rule_index_ensure(author_sheets[i]);
-    gint64 t_idx = profile ? g_get_monotonic_time() : 0;
+    gint64 t_idx = profile ? ns_time_monotonic_us() : 0;
 
     GHashTable *layer_ranks = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                     g_free, NULL);
@@ -36767,7 +36768,7 @@ ns_css_compute(ns_node *doc,
     g_hash_table_destroy(layer_ranks);
     g_hash_table_destroy(g_registered_props);
     g_registered_props = NULL;
-    gint64 t_cascade = profile ? g_get_monotonic_time() : 0;
+    gint64 t_cascade = profile ? ns_time_monotonic_us() : 0;
     if (profile)
         g_printerr("[profile]   css.idx=%.1fms css.cascade=%.1fms\n",
                    (t_idx - t0) / 1000.0,
