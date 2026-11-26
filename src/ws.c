@@ -110,7 +110,7 @@ ns_ws_dispatch_run(gpointer data)
     if (!g_atomic_int_get(&ws->detached) && ws->cbs.busy &&
         ws->cbs.busy(ws->user_data)) {
         ns_engine_timeout_add(4, ns_ws_dispatch_run, d);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     if (!g_atomic_int_get(&ws->detached) && d->invoke)
         d->invoke(ws, d->payload);
@@ -118,7 +118,7 @@ ns_ws_dispatch_run(gpointer data)
     g_atomic_int_add(&ws->pending, -1);
     ns_ws_unref(ws);
     g_free(d);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* Queues a callback to the engine thread.  Called on the worker thread:

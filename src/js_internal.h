@@ -13,6 +13,7 @@
 #include "quickjs_compat.h"
 
 #include "js.h"
+#include "plat/ns_loop.h"
 #include "audio/audio.h"
 #include "dom.h"
 #include "image.h"
@@ -118,7 +119,7 @@ struct ns_js {
     gboolean      layout_mutated;
     const char   *layout_mutated_by;
     GHashTable   *timers;
-    GMainContext *main_context;
+    NsLoop       *main_context;
     GPtrArray    *workers;
     ns_worker_host *worker_host;
     int           next_timer_id;

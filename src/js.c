@@ -160,9 +160,9 @@ struct ns_worker_host {
     JSValue       owner_obj;
     NsThread    *thread;
     gint          joined;
-    GMainContext *context;
-    GMainContext *owner_context;
-    GMainLoop    *loop;
+    NsLoop       *context;
+    NsLoop       *owner_context;
+    NsMainLoop   *loop;
     ns_js        *worker_js;
     char         *url;
     char         *base_url;
@@ -749,7 +749,7 @@ ns_js_credit_pumped_time(ns_js *js, gint64 pump_start_us)
 }
 
 typedef struct {
-    GMainLoop   *loop;
+    NsMainLoop  *loop;
     ns_response *resp;
     GError      *err;
     gboolean     done;
@@ -775,13 +775,12 @@ ns_frame_post_free(gpointer p)
 }
 
 static void
-ns_js_pumped_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
+ns_js_pumped_fetch_done(NsTask *result, gpointer user_data)
 {
-    (void)src;
     ns_js_pumped_fetch *pf = user_data;
     pf->resp = ns_net_fetch_finish(result, &pf->err);
     pf->done = TRUE;
-    if (pf->loop) g_main_loop_quit(pf->loop);
+    if (pf->loop) ns_main_loop_quit(pf->loop);
 }
 
 /* Synchronous request; on the main thread pumps a nested loop so the budget isn't charged. */
@@ -799,7 +798,7 @@ ns_js_fetch_resource_with_body(ns_js *js, const char *url, const char *top_url,
                                        NULL, error);
 
     ns_js_pumped_fetch pf = {0};
-    pf.loop = g_main_loop_new(ns_engine_context(), FALSE);
+    pf.loop = ns_main_loop_new(ns_engine_context());
     ns_net_request_async(url, top_url, method, body, body_len, content_type,
                          headers, dest, policy, NULL,
                          ns_js_pumped_fetch_done, &pf);
@@ -807,10 +806,10 @@ ns_js_fetch_resource_with_body(ns_js *js, const char *url, const char *top_url,
     js->in_pump = TRUE;
     gint64 pump_start_us = ns_time_monotonic_us();
     if (!pf.done)
-        g_main_loop_run(pf.loop);
+        ns_main_loop_run(pf.loop);
     ns_js_credit_pumped_time(js, pump_start_us);
     js->in_pump = saved;
-    g_main_loop_unref(pf.loop);
+    ns_main_loop_unref(pf.loop);
     if (pf.err) {
         if (error) *error = pf.err;
         else g_error_free(pf.err);
@@ -1352,18 +1351,15 @@ ns_js_node_in_page(const ns_js *js, const ns_node *node)
     return FALSE;
 }
 
-/* Destroys a GSource by id on the engine's main context. */
+/* Removes a loop source by id (ids are unique across loops). */
 static void
 ns_js_source_remove(ns_js *js, guint id)
 {
-    if (!id) return;
-    GMainContext *context = js && js->main_context ? js->main_context
-                                                   : g_main_context_default();
-    GSource *source = g_main_context_find_source_by_id(context, id);
-    if (source) g_source_destroy(source);
+    (void)js;
+    if (id) ns_loop_source_remove(id);
 }
 
-/* Frees a timer record, its callback, code and extra args, and removes its GSource. */
+/* Frees a timer record, its callback, code and extra args, and removes its loop source. */
 static void
 ns_timer_free(gpointer data)
 {
@@ -1382,23 +1378,15 @@ ns_timer_free(gpointer data)
 }
 
 static guint
-ns_js_attach_timeout(ns_js *js, guint ms, GSourceFunc func, gpointer data)
+ns_js_attach_timeout(ns_js *js, guint ms, NsSourceFunc func, gpointer data)
 {
-    GSource *source = g_timeout_source_new(ms);
-    g_source_set_callback(source, func, data, NULL);
-    guint id = g_source_attach(source, js && js->main_context ? js->main_context : NULL);
-    g_source_unref(source);
-    return id;
+    return ns_loop_timeout_add(js ? js->main_context : NULL, ms, func, data);
 }
 
 static guint
-ns_js_attach_idle(ns_js *js, GSourceFunc func, gpointer data)
+ns_js_attach_idle(ns_js *js, NsSourceFunc func, gpointer data)
 {
-    GSource *source = g_idle_source_new();
-    g_source_set_callback(source, func, data, NULL);
-    guint id = g_source_attach(source, js && js->main_context ? js->main_context : NULL);
-    g_source_unref(source);
-    return id;
+    return ns_loop_idle_add(js ? js->main_context : NULL, func, data);
 }
 
 static void ns_storage_drain_deferred_events(ns_js *js);
@@ -1424,7 +1412,7 @@ ns_microtask_drain_idle(gpointer data)
     ns_js *js = data;
     js->microtask_source = 0;
     ns_drain_microtasks(js);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* Schedules an idle drain of pending QuickJS jobs if none is queued. */
@@ -1589,7 +1577,7 @@ ns_js_run_due_timers(ns_js *js)
         if (!t || !t->glib_source) continue;
         ns_js_source_remove(js, t->glib_source);
         t->glib_source = 0;
-        if (ns_timer_fire(t) == G_SOURCE_CONTINUE) {
+        if (ns_timer_fire(t) == NS_SOURCE_CONTINUE) {
             t = g_hash_table_lookup(js->timers,
                                     GINT_TO_POINTER(due_ids[i]));
             if (t && !t->glib_source)
@@ -1636,11 +1624,9 @@ ns_message_tasks_schedule(ns_js *js, guint delay_ms, int priority)
     if (js->message_task_source || js->running_message_tasks ||
         !js->message_tasks || g_queue_is_empty(js->message_tasks))
         return;
-    GSource *source = g_timeout_source_new(delay_ms);
-    g_source_set_priority(source, priority);
-    g_source_set_callback(source, ns_message_tasks_run, js, NULL);
-    js->message_task_source = g_source_attach(source, js->main_context);
-    g_source_unref(source);
+    js->message_task_source =
+        ns_loop_timeout_add_full(js->main_context, priority, delay_ms,
+                                 ns_message_tasks_run, js, NULL);
 }
 
 /* Queues a job (e.g. postMessage delivery) to run as a separate task with duped args. */
@@ -1658,7 +1644,7 @@ ns_queue_message_task(JSContext *ctx, JSJobFunc *run, int argc,
     for (int i = 0; i < t->argc; i++)
         t->argv[i] = JS_DupValue(ctx, argv[i]);
     g_queue_push_tail(js->message_tasks, t);
-    ns_message_tasks_schedule(js, 0, G_PRIORITY_DEFAULT - 1);
+    ns_message_tasks_schedule(js, 0, NS_PRIORITY_DEFAULT - 1);
 }
 
 static void ns_drain_mutations(ns_js *js);
@@ -1671,12 +1657,12 @@ ns_message_tasks_run(gpointer data)
     if (js->halted) {
         js->message_task_source = 0;
         ns_message_tasks_clear(js);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     js->message_task_source = 0;
     if (js->in_pump || ns_engine_in_blocking_fetch()) {
-        ns_message_tasks_schedule(js, 4, G_PRIORITY_DEFAULT);
-        return G_SOURCE_REMOVE;
+        ns_message_tasks_schedule(js, 4, NS_PRIORITY_DEFAULT);
+        return NS_SOURCE_REMOVE;
     }
     guint queued = g_queue_get_length(js->message_tasks);
     js->running_message_tasks = TRUE;
@@ -1691,8 +1677,8 @@ ns_message_tasks_run(gpointer data)
     }
     js->running_message_tasks = FALSE;
     ns_drain_mutations(js);
-    ns_message_tasks_schedule(js, 0, G_PRIORITY_DEFAULT_IDLE);
-    return G_SOURCE_REMOVE;
+    ns_message_tasks_schedule(js, 0, NS_PRIORITY_DEFAULT_IDLE);
+    return NS_SOURCE_REMOVE;
 }
 
 /* Drains microtasks, notifies the host of DOM mutation, schedules storage flush and timers. */
@@ -1779,7 +1765,7 @@ ns_idle_deadline_time_remaining(JSContext *ctx, JSValueConst this_val,
 
 static gboolean ns_timer_fire_impl(gpointer data);
 
-/* Timer GSource callback; wraps ns_timer_fire_impl with a trace event when tracing. */
+/* Timer source callback; wraps ns_timer_fire_impl with a trace event when tracing. */
 static gboolean
 ns_timer_fire(gpointer data)
 {
@@ -1818,20 +1804,20 @@ ns_timer_fire_impl(gpointer data)
     if (js->halted) {
         t->glib_source = 0;
         g_hash_table_remove(js->timers, GINT_TO_POINTER(t->id));
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     gboolean idle_expired = t->is_idle && t->idle_deadline_us > 0 &&
                             ns_time_monotonic_us() >= t->idle_deadline_us;
     if (js->in_pump)
-        return G_SOURCE_CONTINUE;
+        return NS_SOURCE_CONTINUE;
     if (ns_engine_in_blocking_fetch() && !idle_expired)
-        return G_SOURCE_CONTINUE;
+        return NS_SOURCE_CONTINUE;
     ns_node *timer_frame = t->frame;
     if (timer_frame &&
         ns_node_root(timer_frame) != ns_node_root(js->current_doc)) {
         t->glib_source = 0;
         g_hash_table_remove(js->timers, GINT_TO_POINTER(t->id));
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     JSContext *callback_ctx = t->ctx ? t->ctx : js->ctx;
     if (timer_frame) {
@@ -1930,19 +1916,19 @@ ns_timer_fire_impl(gpointer data)
     js->current_doc = previous_doc;
     js->ctx = previous_ctx;
     t = g_hash_table_lookup(js->timers, GINT_TO_POINTER(timer_id));
-    if (!t) return G_SOURCE_REMOVE;
+    if (!t) return NS_SOURCE_REMOVE;
     t->firing = FALSE;
     if (!is_interval) {
         t->glib_source = 0;
         g_hash_table_remove(js->timers, GINT_TO_POINTER(timer_id));
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     if (t->interval_ms < 4) {
         t->interval_ms = 4;
         t->glib_source = ns_js_attach_timeout(js, 4, ns_timer_fire, t);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
-    return G_SOURCE_CONTINUE;
+    return NS_SOURCE_CONTINUE;
 }
 
 /* True when the timer's this-window has a document no longer in the page. */
@@ -2941,7 +2927,7 @@ ns_storage_flush_timer(gpointer data)
     ns_js *js = data;
     js->local_storage_flush_source = 0;
     ns_storage_flush(js);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* Debounces a localStorage flush to disk one second later. */
@@ -9671,18 +9657,17 @@ ns_on_js_fetch_deliver_idle(gpointer user_data)
     ns_js_fetch_delivery *d = user_data;
     if (d->st && d->st->js && d->st->js->in_pump) {
         ns_engine_timeout_add(4, ns_on_js_fetch_deliver_idle, d);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     ns_on_js_fetch_deliver(d->st, d->resp, d->err);
     g_free(d);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* Network completion callback; delivers now or defers when inside a pump. */
 static void
-ns_on_js_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
+ns_on_js_fetch_done(NsTask *result, gpointer user_data)
 {
-    (void)src;
     ns_js_fetch_state *st = user_data;
     GError *err = NULL;
     ns_response *resp = ns_net_fetch_finish(result, &err);
@@ -19514,18 +19499,17 @@ ns_on_xhr_deliver_idle(gpointer user_data)
     ns_xhr_delivery *d = user_data;
     if (d->st && d->st->js && d->st->js->in_pump) {
         ns_engine_timeout_add(4, ns_on_xhr_deliver_idle, d);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     ns_xhr_deliver(d->st, d->resp, d->err);
     g_free(d);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* Network completion for XHR; delivers now or defers when inside a pump. */
 static void
-ns_on_xhr_done(GObject *src, GAsyncResult *result, gpointer user_data)
+ns_on_xhr_done(NsTask *result, gpointer user_data)
 {
-    (void)src;
     ns_xhr_state *st = user_data;
     GError *err = NULL;
     ns_response *resp = ns_net_fetch_finish(result, &err);
@@ -19576,10 +19560,10 @@ ns_xhr_emit_blocked_idle(gpointer user_data)
     ns_xhr_state *st = user_data;
     if (st->js && st->js->in_pump) {
         ns_engine_timeout_add(4, ns_xhr_emit_blocked_idle, st);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     ns_xhr_emit_blocked_now(st);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* XHR.open(): validates method and URL, normalizes method, resets state. */
@@ -19693,7 +19677,7 @@ ns_xhr_open(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
  * finishes or 60 s pass.  Callers pass a private context: see send(). */
 static void
 ns_xhr_pump_until_done_in(JSContext *ctx, JSValueConst this_val,
-                          GMainContext *mc)
+                          NsLoop *mc)
 {
     ns_js *js = js_from_ctx(ctx);
     if (!mc) mc = js && js->main_context ? js->main_context : NULL;
@@ -19708,7 +19692,7 @@ ns_xhr_pump_until_done_in(JSContext *ctx, JSValueConst this_val,
         JS_FreeValue(ctx, rs);
         if (state >= 4)
             break;
-        g_main_context_iteration(mc, TRUE);
+        ns_loop_iterate(mc, TRUE);
     }
     ns_js_credit_pumped_time(js, pump_start_us);
 }
@@ -19983,10 +19967,10 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
      * embedder's XHR callback remove the frame whose script was waiting. */
     gboolean sync = ns_xhr_is_sync(ctx, this_val);
     st->sync = sync;
-    GMainContext *isolated = NULL;
+    NsLoop *isolated = NULL;
     if (sync) {
-        isolated = g_main_context_new();
-        g_main_context_push_thread_default(isolated);
+        isolated = ns_loop_new();
+        ns_loop_push_thread_default(isolated);
     }
     ns_net_request_async(st->url,
                          st->doc_url,
@@ -20001,8 +19985,8 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     g_free(auto_content_type);
     if (sync) {
         ns_xhr_pump_until_done_in(ctx, this_val, isolated);
-        g_main_context_pop_thread_default(isolated);
-        g_main_context_unref(isolated);
+        ns_loop_pop_thread_default(isolated);
+        ns_loop_unref(isolated);
     }
     return JS_UNDEFINED;
 }
@@ -20785,11 +20769,11 @@ static gboolean
 ns_abort_signal_timeout_fire(gpointer user_data)
 {
     ns_abort_timeout *t = user_data;
-    if (!t || !t->ctx) { g_free(t); return G_SOURCE_REMOVE; }
+    if (!t || !t->ctx) { g_free(t); return NS_SOURCE_REMOVE; }
     ns_js *abort_js = js_from_ctx(t->ctx);
     if (abort_js && abort_js->in_pump) {
         ns_engine_timeout_add(4, ns_abort_signal_timeout_fire, t);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     JSValue aborted = JS_GetPropertyStr(t->ctx, t->sig, "aborted");
     gboolean already = JS_ToBool(t->ctx, aborted);
@@ -20808,7 +20792,7 @@ ns_abort_signal_timeout_fire(gpointer user_data)
         g_ptr_array_remove_fast(abort_js->pending_aborts, t);
     JS_FreeValue(t->ctx, t->sig);
     g_free(t);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* AbortSignal.timeout(ms): signal aborted after the delay. */
@@ -21158,7 +21142,7 @@ ns_filereader_complete(gpointer ud)
     ns_js *js = fr->js;
     if (js && js->in_pump) {
         fr->source = ns_engine_timeout_add(4, ns_filereader_complete, fr);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     JSContext *ctx = js->ctx;
     JSValue self = fr->self;
@@ -21169,7 +21153,7 @@ ns_filereader_complete(gpointer ud)
     if (js->filereader_idles)
         g_ptr_array_remove_fast(js->filereader_idles, fr);
     g_free(fr);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* Schedules asynchronous completion events for a FileReader read. */
@@ -22804,8 +22788,8 @@ ns_worker_host_unref(ns_worker_host *host)
 {
     if (!host || !g_atomic_int_dec_and_test(&host->ref_count)) return;
     ns_mutex_clear(&host->lock);
-    if (host->context) g_main_context_unref(host->context);
-    if (host->owner_context) g_main_context_unref(host->owner_context);
+    if (host->context) ns_loop_unref(host->context);
+    if (host->owner_context) ns_loop_unref(host->owner_context);
     g_free(host->url);
     g_free(host->base_url);
     g_free(host->name);
@@ -22824,9 +22808,9 @@ ns_worker_quit_cb(gpointer data)
     ns_worker_host *host = data;
     ns_mutex_lock(&host->lock);
     if (host->worker_js) host->worker_js->halted = TRUE;
-    if (host->loop) g_main_loop_quit(host->loop);
+    if (host->loop) ns_main_loop_quit(host->loop);
     ns_mutex_unlock(&host->lock);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* Schedules ns_worker_quit_cb on the worker's main context. */
@@ -22834,10 +22818,10 @@ static void
 ns_worker_host_request_quit(ns_worker_host *host)
 {
     if (!host || !host->context) return;
-    g_main_context_invoke_full(host->context, G_PRIORITY_DEFAULT,
-                               ns_worker_quit_cb,
-                               ns_worker_host_ref(host),
-                               (GDestroyNotify)ns_worker_host_unref);
+    ns_loop_invoke_full(host->context, NS_PRIORITY_DEFAULT,
+                        ns_worker_quit_cb,
+                        ns_worker_host_ref(host),
+                        (GDestroyNotify)ns_worker_host_unref);
 }
 
 /* Runs pending worker-context sources, bounded to 1024 iterations. */
@@ -22846,8 +22830,8 @@ ns_worker_context_drain(ns_worker_host *host)
 {
     if (!host || !host->context) return;
     int safety = 1024;
-    while (safety-- > 0 && g_main_context_pending(host->context))
-        g_main_context_iteration(host->context, FALSE);
+    while (safety-- > 0 && ns_loop_pending(host->context))
+        ns_loop_iterate(host->context, FALSE);
 }
 
 /* Marks the worker closing and asks it to quit; with join, joins the thread once. */
@@ -23478,7 +23462,7 @@ ns_worker_deliver_owner(gpointer data)
     if (!host || !g_atomic_int_get(&host->owner_alive) ||
         !host->owner_ctx || JS_IsUndefined(host->owner_obj)) {
         ns_worker_message_free(msg);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
 
     if (msg->is_sw_state) {
@@ -23489,7 +23473,7 @@ ns_worker_deliver_owner(gpointer data)
         ns_drain_mutations(swjs);
         ns_js_budget_pop(swjs, &swbg);
         ns_worker_message_free(msg);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
 
     JSContext *ctx = host->owner_ctx;
@@ -23512,7 +23496,7 @@ ns_worker_deliver_owner(gpointer data)
         ns_drain_mutations(js);
         ns_js_budget_pop(js, &bg);
         ns_worker_message_free(msg);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     JSValue ev = ns_worker_event(ctx, type, data_v, host->origin,
                                  msg->message, msg->filename);
@@ -23539,7 +23523,7 @@ ns_worker_deliver_owner(gpointer data)
     ns_drain_mutations(js);
     ns_js_budget_pop(js, &bg);
     ns_worker_message_free(msg);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* Queues a message for delivery on the owner's main context; takes ownership. */
@@ -23550,8 +23534,8 @@ ns_worker_post_owner_message(ns_worker_host *host, ns_worker_message *msg)
         ns_worker_message_free(msg);
         return;
     }
-    g_main_context_invoke_full(host->owner_context, G_PRIORITY_DEFAULT,
-                               ns_worker_deliver_owner, msg, NULL);
+    ns_loop_invoke_full(host->owner_context, NS_PRIORITY_DEFAULT,
+                        ns_worker_deliver_owner, msg, NULL);
 }
 
 /* Posts an error event with message and filename to the worker's owner. */
@@ -23589,7 +23573,7 @@ ns_worker_log_deliver(gpointer data)
     if (d->host) ns_worker_host_unref(d->host);
     g_free(d->line);
     g_free(d);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* Worker log callback: forwards a copy of the line to the owner's main context. */
@@ -23601,8 +23585,8 @@ ns_worker_log_cb(const char *line, gpointer user_data)
     ns_worker_log_delivery *d = g_new0(ns_worker_log_delivery, 1);
     d->host = ns_worker_host_ref(host);
     d->line = g_strdup(line);
-    g_main_context_invoke_full(host->owner_context, G_PRIORITY_DEFAULT,
-                               ns_worker_log_deliver, d, NULL);
+    ns_loop_invoke_full(host->owner_context, NS_PRIORITY_DEFAULT,
+                        ns_worker_log_deliver, d, NULL);
 }
 
 /* Checks scheme, fetch policy and same-origin rules for a worker script URL. */
@@ -23770,7 +23754,7 @@ ns_worker_deliver_worker(gpointer data)
     ns_mutex_unlock(&host->lock);
     if (!js || !js->ctx || g_atomic_int_get(&host->closing)) {
         ns_worker_message_free(msg);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
 
     JSContext *ctx = js->ctx;
@@ -23789,7 +23773,7 @@ ns_worker_deliver_worker(gpointer data)
         ns_drain_microtasks(js);
         ns_js_budget_pop(js, &bg);
         ns_worker_message_free(msg);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     JSValue global = JS_GetGlobalObject(ctx);
     JSValue ev = ns_worker_event(ctx, type, data_v, host->origin, NULL, NULL);
@@ -23801,7 +23785,7 @@ ns_worker_deliver_worker(gpointer data)
     ns_drain_microtasks(js);
     ns_js_budget_pop(js, &bg);
     ns_worker_message_free(msg);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* Posts a message and its port follow-ups to the owner or the worker thread. */
@@ -23814,16 +23798,16 @@ ns_worker_msg_send(ns_worker_host *host, ns_worker_message *msg,
     if (to_owner)
         ns_worker_post_owner_message(host, msg);
     else
-        g_main_context_invoke_full(host->context, G_PRIORITY_DEFAULT,
-                                   ns_worker_deliver_worker, msg, NULL);
+        ns_loop_invoke_full(host->context, NS_PRIORITY_DEFAULT,
+                            ns_worker_deliver_worker, msg, NULL);
     if (followups) {
         for (guint i = 0; i < followups->len; i++) {
             ns_worker_message *fm = g_ptr_array_index(followups, i);
             if (to_owner)
                 ns_worker_post_owner_message(host, fm);
             else
-                g_main_context_invoke_full(host->context, G_PRIORITY_DEFAULT,
-                                           ns_worker_deliver_worker, fm, NULL);
+                ns_loop_invoke_full(host->context, NS_PRIORITY_DEFAULT,
+                                    ns_worker_deliver_worker, fm, NULL);
         }
         g_ptr_array_free(followups, TRUE);
     }
@@ -24321,7 +24305,7 @@ ns_sw_fetch_result_on_owner(gpointer data)
         g_free(res->body); g_free(res->error);
         if (host) ns_worker_host_unref(host);
         g_free(res);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     ns_js_fetch_state *st = g_hash_table_lookup(js->fetch_states_by_id,
                                                 GUINT_TO_POINTER(res->id));
@@ -24369,7 +24353,7 @@ ns_sw_fetch_result_on_owner(gpointer data)
     g_free(res->body); g_free(res->error);
     ns_worker_host_unref(host);
     g_free(res);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* __nd_sw_fetch_result(id, outcome, ...): packs the SW response and posts it to the owner. */
@@ -24426,8 +24410,8 @@ ns_sw_fetch_result(JSContext *ctx, JSValueConst this_val,
             if (e) { res->error = g_strdup(e); JS_FreeCString(ctx, e); }
         }
     }
-    g_main_context_invoke_full(host->owner_context, G_PRIORITY_DEFAULT,
-                               ns_sw_fetch_result_on_owner, res, NULL);
+    ns_loop_invoke_full(host->owner_context, NS_PRIORITY_DEFAULT,
+                        ns_sw_fetch_result_on_owner, res, NULL);
     return JS_UNDEFINED;
 }
 
@@ -24461,8 +24445,8 @@ ns_sw_report_unhandled(ns_worker_host *host, guint id)
     res->host = ns_worker_host_ref(host);
     res->id = id;
     res->outcome = 0;
-    g_main_context_invoke_full(host->owner_context, G_PRIORITY_DEFAULT,
-                               ns_sw_fetch_result_on_owner, res, NULL);
+    ns_loop_invoke_full(host->owner_context, NS_PRIORITY_DEFAULT,
+                        ns_sw_fetch_result_on_owner, res, NULL);
 }
 
 /* Worker side: calls __nd_sw_dispatch_fetch; reports unhandled if it can't dispatch. */
@@ -24475,7 +24459,7 @@ ns_sw_dispatch_fetch_on_worker(gpointer data)
         !host->worker_js->ctx) {
         ns_sw_report_unhandled(host, r->id);
         ns_sw_freq_free(r);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     ns_js *swjs = host->worker_js;
     JSContext *ctx = swjs->ctx;
@@ -24515,7 +24499,7 @@ ns_sw_dispatch_fetch_on_worker(gpointer data)
     if (!dispatched)
         ns_sw_report_unhandled(host, r->id);
     ns_sw_freq_free(r);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* Copies a fetch request and queues it for FetchEvent dispatch on the SW thread. */
@@ -24537,8 +24521,8 @@ ns_sw_post_fetch_request(ns_worker_host *host, guint id,
         memcpy(r->body, body, body_len);
         r->body_len = body_len;
     }
-    g_main_context_invoke_full(host->context, G_PRIORITY_DEFAULT,
-                               ns_sw_dispatch_fetch_on_worker, r, NULL);
+    ns_loop_invoke_full(host->context, NS_PRIORITY_DEFAULT,
+                        ns_sw_dispatch_fetch_on_worker, r, NULL);
 }
 
 /* clients.claim(): flags the SW to control clients once activated. */
@@ -24937,7 +24921,7 @@ static gpointer
 ns_worker_thread(gpointer data)
 {
     ns_worker_host *host = data;
-    g_main_context_push_thread_default(host->context);
+    ns_loop_push_thread_default(host->context);
 
     char *final_url = NULL;
     char *error = NULL;
@@ -24949,7 +24933,7 @@ ns_worker_thread(gpointer data)
         g_free(error);
         g_atomic_int_set(&host->closing, 1);
         ns_worker_context_drain(host);
-        g_main_context_pop_thread_default(host->context);
+        ns_loop_pop_thread_default(host->context);
         ns_worker_host_unref(host);
         return NULL;
     }
@@ -24961,7 +24945,7 @@ ns_worker_thread(gpointer data)
         g_free(body);
         g_atomic_int_set(&host->closing, 1);
         ns_worker_context_drain(host);
-        g_main_context_pop_thread_default(host->context);
+        ns_loop_pop_thread_default(host->context);
         ns_worker_host_unref(host);
         return NULL;
     }
@@ -24988,16 +24972,16 @@ ns_worker_thread(gpointer data)
         ns_sw_fire_lifecycle(js);
 
     if (ok && !g_atomic_int_get(&host->closing)) {
-        GMainLoop *loop = g_main_loop_new(host->context, FALSE);
+        NsMainLoop *loop = ns_main_loop_new(host->context);
         ns_mutex_lock(&host->lock);
         host->loop = loop;
         ns_mutex_unlock(&host->lock);
         if (!g_atomic_int_get(&host->closing))
-            g_main_loop_run(loop);
+            ns_main_loop_run(loop);
         ns_mutex_lock(&host->lock);
         host->loop = NULL;
         ns_mutex_unlock(&host->lock);
-        g_main_loop_unref(loop);
+        ns_main_loop_unref(loop);
     }
 
     ns_mutex_lock(&host->lock);
@@ -25006,7 +24990,7 @@ ns_worker_thread(gpointer data)
     ns_js_free(js);
     g_atomic_int_set(&host->closing, 1);
     ns_worker_context_drain(host);
-    g_main_context_pop_thread_default(host->context);
+    ns_loop_pop_thread_default(host->context);
     ns_worker_host_unref(host);
     return NULL;
 }
@@ -25088,8 +25072,8 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     host->owner = js;
     host->owner_ctx = ctx;
     host->owner_obj = JS_DupValue(ctx, obj);
-    host->context = g_main_context_new();
-    host->owner_context = g_main_context_ref(js->main_context);
+    host->context = ns_loop_new();
+    host->owner_context = ns_loop_ref(js->main_context);
     host->url = abs_url;
     /* The worker belongs to the document whose script created it: a
      * frame's worker gets the frame's URL and policy, not the page's. */
@@ -25336,8 +25320,8 @@ ns_sw_start_registration(JSContext *ctx, JSValueConst container, ns_js *js,
     host->owner = js;
     host->owner_ctx = ctx;
     host->owner_obj = JS_DupValue(ctx, sw);
-    host->context = g_main_context_new();
-    host->owner_context = g_main_context_ref(js->main_context);
+    host->context = ns_loop_new();
+    host->owner_context = ns_loop_ref(js->main_context);
     host->url = g_strdup(abs_url);
     host->base_url = g_strdup(js->current_url ? js->current_url : abs_url);
     host->name = g_strdup("");
@@ -27864,15 +27848,15 @@ static gboolean
 ns_observer_tick_timer(gpointer data)
 {
     ns_js *js = data;
-    if (!js) return G_SOURCE_REMOVE;
-    if (!js->ctx) { js->observer_tick_source = 0; return G_SOURCE_REMOVE; }
+    if (!js) return NS_SOURCE_REMOVE;
+    if (!js->ctx) { js->observer_tick_source = 0; return NS_SOURCE_REMOVE; }
     if (js->in_pump || js->dispatch_depth > 0)
-        return G_SOURCE_CONTINUE;
+        return NS_SOURCE_CONTINUE;
     js->observer_tick_source = 0;
     ns_intersection_observers_tick(js);
     ns_resize_observers_tick(js);
     ns_drain_microtasks(js);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* Arms a 4 ms observer tick on page contexts (never in workers) if not pending. */
@@ -28036,26 +28020,26 @@ static gboolean
 ns_raf_tick_timer(gpointer data)
 {
     ns_js *js = data;
-    if (!js) return G_SOURCE_REMOVE;
+    if (!js) return NS_SOURCE_REMOVE;
     if (!js->ctx || js->halted) {
         js->raf_tick_source = 0;
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     if (js->in_pump || js->dispatch_depth > 0 || ns_engine_in_blocking_fetch())
-        return G_SOURCE_CONTINUE;
+        return NS_SOURCE_CONTINUE;
     if (!js->raf_pending || js->raf_pending->len == 0) {
         js->raf_tick_source = 0;
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     if (js->raf_host_driven) {
         js->raf_tick_source = 0;
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     ns_js_run_animation_frame_internal(js);
     if (js->raf_pending && js->raf_pending->len > 0)
-        return G_SOURCE_CONTINUE;
+        return NS_SOURCE_CONTINUE;
     js->raf_tick_source = 0;
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* Arms the fallback rAF timer unless in a worker or host-driven. */
@@ -44973,12 +44957,12 @@ ns_js_image_ready_idle(gpointer data)
     ns_js *js = r->js;
     if (js && !js->halted && (js->in_pump || ns_engine_in_blocking_fetch())) {
         r->ready_idle = ns_engine_timeout_add(4, ns_js_image_ready_idle, r);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     r->ready_idle = 0;
-    if (!js || js->halted) return G_SOURCE_REMOVE;
+    if (!js || js->halted) return NS_SOURCE_REMOVE;
     if (g_hash_table_lookup(js->js_image_loads, r->el) != r)
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     const char *cur_src = ns_element_get_attr(r->el, "src");
     const char *cur_base = ns_js_node_doc_base(js, r->el);
     char *abs_url = NULL;
@@ -44990,7 +44974,7 @@ ns_js_image_ready_idle(gpointer data)
         g_free(abs_url);
         if (cur_src && *cur_src)
             ns_js_start_image_load(js, r->el, cur_src);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     g_free(abs_url);
     ns_image *img = r->img;
@@ -45013,7 +44997,7 @@ ns_js_image_ready_idle(gpointer data)
         if (img->loaded) ns_js_note_layout_unscoped(js, G_STRFUNC);
     }
     if (js->repaint_cb) js->repaint_cb(js->repaint_user_data);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* Image cache callback: stores the image and schedules ns_js_image_ready_idle once. */
@@ -45039,9 +45023,9 @@ ns_js_image_refused_idle(gpointer data)
     ns_js *js = r->js;
     if (!js || js->halted ||
         g_hash_table_lookup(js->js_image_loads, r->el) != r)
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     ns_js_fire_img_load_once(js, r->el, TRUE);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* Starts (or restarts) an img load: resolves src, checks fetch policy, queries the cache. */
@@ -45419,7 +45403,7 @@ ns_text_selection_fire(gpointer user_data)
     ns_js *js = task->js;
     if (js && js->in_pump) {
         task->source = ns_engine_timeout_add(4, ns_text_selection_fire, task);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     const ns_node *el = ns_unwrap_element(task->target);
     if (js && !js->halted && el) {
@@ -45433,7 +45417,7 @@ ns_text_selection_fire(gpointer user_data)
             g_ptr_array_remove_fast(js->select_event_tasks, task);
     }
     g_free(task);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* Queues a select event task if the selection changed from the before snapshot. */
@@ -51487,9 +51471,9 @@ ns_js_fire_page_transition(ns_js *js, const char *type, gboolean persisted)
 
 /* Completion callback for sendBeacon requests; discards the response. */
 static void
-ns_beacon_done(GObject *src, GAsyncResult *result, gpointer user_data)
+ns_beacon_done(NsTask *result, gpointer user_data)
 {
-    (void)src; (void)user_data;
+    (void)user_data;
     GError *err = NULL;
     ns_response *resp = ns_net_fetch_finish(result, &err);
     ns_response_free(resp);
@@ -53163,7 +53147,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     js->timers = g_hash_table_new_full(g_direct_hash, g_direct_equal,
                                        NULL, ns_timer_free);
     js->main_context = ns_engine_context() ? ns_engine_context()
-                                           : g_main_context_default();
+                                           : ns_loop_default();
     js->workers = g_ptr_array_new();
     js->frame_ctxs = g_ptr_array_new();
     js->frame_contexts = g_hash_table_new(g_direct_hash, g_direct_equal);
@@ -61050,17 +61034,17 @@ static gboolean
 ns_js_async_script_timer(gpointer data)
 {
     ns_js *js = data;
-    if (!js) return G_SOURCE_REMOVE;
+    if (!js) return NS_SOURCE_REMOVE;
     js->async_script_source = 0;
     if (js->eval_depth > 0 || js->in_pump) {
         ns_js_schedule_pending_script_drain(js);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     ns_js_load_pending_links(js);
     ns_js_drain_deferred_scripts(js);
     ns_js_drain_async_script_roots(js);
     ns_js_schedule_pending_script_drain(js);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* Arms the 4 ms drain timer when links or script roots are pending. */
@@ -63215,17 +63199,17 @@ static gboolean
 ns_js_lifecycle_tick(gpointer data)
 {
     ns_js *js = data;
-    if (!js) return G_SOURCE_REMOVE;
+    if (!js) return NS_SOURCE_REMOVE;
     js->lifecycle_source = 0;
     if (js->halted || !js->lifecycle_doc || !js->lifecycle_tasks) {
         ns_js_lifecycle_clear(js);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     if (js->eval_depth > 0 || js->callback_depth > 0 ||
         js->draining_microtasks || js->in_pump || js->iframe_load_depth > 0) {
         js->lifecycle_source =
             ns_js_attach_timeout(js, 4, ns_js_lifecycle_tick, js);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     ns_node *doc = js->lifecycle_doc;
     const char *origin = js->lifecycle_origin && *js->lifecycle_origin
@@ -63237,13 +63221,13 @@ ns_js_lifecycle_tick(gpointer data)
         ns_js_dispatch_event(js, doc, "readystatechange", NULL);
         js->lifecycle_phase = 1;
         ns_js_lifecycle_schedule(js);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     if (js->lifecycle_phase == 1) {
         if (ns_js_run_next_script_schedule(js, js->lifecycle_tasks,
                                            NS_SCRIPT_DEFERRED, origin)) {
             ns_js_lifecycle_schedule(js);
-            return G_SOURCE_REMOVE;
+            return NS_SOURCE_REMOVE;
         }
         ns_js_set_navigation_milestone(js,
             &js->navigation_timing.dom_content_loaded_event_start_ms,
@@ -63255,13 +63239,13 @@ ns_js_lifecycle_tick(gpointer data)
         ns_ce_upgrade_subtree_all(js, doc);
         js->lifecycle_phase = 2;
         ns_js_lifecycle_schedule(js);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     if (js->lifecycle_phase == 2) {
         if (ns_js_run_next_script_schedule(js, js->lifecycle_tasks,
                                            NS_SCRIPT_ASYNC, origin)) {
             ns_js_lifecycle_schedule(js);
-            return G_SOURCE_REMOVE;
+            return NS_SOURCE_REMOVE;
         }
         ns_js_load_document_stylesheets(js, doc);
         if (js->image_cache) ns_js_rescan_subtree_images(js, doc, 0);
@@ -63272,7 +63256,7 @@ ns_js_lifecycle_tick(gpointer data)
         ns_js_schedule_pending_script_drain(js);
         js->lifecycle_phase = 3;
         ns_js_lifecycle_schedule(js);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     ns_js_drain_deferred_scripts(js);
     ns_js_drain_async_script_roots(js);
@@ -63280,7 +63264,7 @@ ns_js_lifecycle_tick(gpointer data)
     ns_drain_microtasks(js);
     if (ns_js_lifecycle_has_blockers(js)) {
         ns_js_lifecycle_schedule(js);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     ns_js_set_navigation_milestone(js,
         &js->navigation_timing.dom_complete_ms, "domComplete");
@@ -63307,7 +63291,7 @@ ns_js_lifecycle_tick(gpointer data)
         g_printerr("[profile] js lifecycle total=%.1fms\n",
                    (ns_time_monotonic_us() - js->lifecycle_start_us) / 1000.0);
     ns_js_lifecycle_clear(js);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* Installs doc into the realm, runs early injects and blocking scripts, queues lifecycle. */

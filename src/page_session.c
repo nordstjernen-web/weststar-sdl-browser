@@ -48,17 +48,12 @@ struct ns_page_session {
     char          *post_body;
     size_t         post_len;
     char          *post_ct;
-    GSource       *wake;
+    guint          wake;
     ns_page_session_wake_cb wake_cb;
     gpointer       wake_data;
     gboolean       rendering;
     gboolean       wake_posted;
 };
-
-typedef struct {
-    GSource          source;
-    ns_page_session *session;
-} session_wake_source;
 
 /* Returns TRUE when the page needs a frame and no wake is posted or render in progress. */
 static gboolean
@@ -68,51 +63,40 @@ session_wake_due(ns_page_session *s)
            ns_browser_needs_frame(s->cur);
 }
 
-/* GSource prepare: fires when a frame is due, else times out at the page's next wake time. */
-static gboolean
-session_wake_prepare(GSource *source, gint *timeout)
+/* Wake source prepare: ready when a frame is due, else asks again at the page's next wake time. */
+static int
+session_wake_prepare(void *data, int *timeout)
 {
-    ns_page_session *s = ((session_wake_source *)source)->session;
-    *timeout = -1;
+    ns_page_session *s = data;
     if (session_wake_due(s))
         return TRUE;
     gint64 due = s->cur && !s->wake_posted ? ns_browser_next_wake_us(s->cur)
                                            : 0;
     if (due > 0) {
         gint64 wait_ms = (due - ns_time_monotonic_us() + 999) / 1000;
-        *timeout = (gint)CLAMP(wait_ms, 0, G_MAXINT);
+        *timeout = (int)CLAMP(wait_ms, 0, G_MAXINT);
     }
     return FALSE;
 }
 
-static gboolean
-session_wake_check(GSource *source)
-{
-    return session_wake_due(((session_wake_source *)source)->session);
-}
-
 /* Posts the wake callback once per frame request until the next render. */
-static gboolean
-session_wake_dispatch(GSource *source, GSourceFunc callback,
-                      gpointer user_data)
+static int
+session_wake_dispatch(void *data)
 {
-    (void)callback;
-    (void)user_data;
-    ns_page_session *s = ((session_wake_source *)source)->session;
+    ns_page_session *s = data;
     if (session_wake_due(s)) {
         s->wake_posted = TRUE;
         s->wake_cb(s->wake_data);
     }
-    return G_SOURCE_CONTINUE;
+    return NS_SOURCE_CONTINUE;
 }
 
-static GSourceFuncs session_wake_funcs = {
+static const NsSourceFuncs session_wake_funcs = {
     .prepare = session_wake_prepare,
-    .check = session_wake_check,
     .dispatch = session_wake_dispatch,
 };
 
-/* Sets the frame-wake callback, attaching the wake GSource to the engine context once. */
+/* Sets the frame-wake callback, attaching the wake source to the engine loop once. */
 void
 ns_page_session_set_wake(ns_page_session *s, ns_page_session_wake_cb cb,
                          gpointer user_data)
@@ -124,9 +108,8 @@ ns_page_session_set_wake(ns_page_session *s, ns_page_session_wake_cb cb,
     s->wake_posted = FALSE;
     if (s->wake || !cb)
         return;
-    s->wake = g_source_new(&session_wake_funcs, sizeof(session_wake_source));
-    ((session_wake_source *)s->wake)->session = s;
-    g_source_attach(s->wake, ns_engine_context());
+    s->wake = ns_loop_custom_add(ns_engine_context(), NS_PRIORITY_DEFAULT,
+                                 &session_wake_funcs, s, NULL);
 }
 
 void
@@ -275,9 +258,8 @@ ns_page_session_free(ns_page_session *s)
     if (!s)
         return;
     if (s->wake) {
-        g_source_destroy(s->wake);
-        g_source_unref(s->wake);
-        s->wake = NULL;
+        ns_loop_source_remove(s->wake);
+        s->wake = 0;
     }
     session_clear_post(s);
     free(s->page_nav);

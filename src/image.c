@@ -541,28 +541,26 @@ ns_decode_job_free(ns_decode_job *job)
     g_free(job);
 }
 
-/* GTask worker decoding an image body off the main thread. */
+/* NsTask worker decoding an image body off the main thread. */
 static void
-image_decode_worker(GTask *task, gpointer source, gpointer task_data,
+image_decode_worker(NsTask *task, gpointer task_data,
                     GCancellable *cancellable)
 {
-    (void)source;
     (void)cancellable;
     ns_decode_job *job = task_data;
     gsize len = 0;
     const guchar *data = g_bytes_get_data(job->body, &len);
     ns_img_decoded *d = g_new(ns_img_decoded, 1);
     *d = ns_image_decode_body(data, len);
-    g_task_return_pointer(task, d, g_free);
+    ns_task_return_pointer(task, d, g_free);
 }
 
 /* Applies a worker decode result to its image and fires callbacks unless cancelled. */
 static void
-on_image_decoded(GObject *src, GAsyncResult *res, gpointer user_data)
+on_image_decoded(NsTask *res, gpointer user_data)
 {
-    (void)src;
     ns_decode_job *job = user_data;
-    ns_img_decoded *d = g_task_propagate_pointer(G_TASK(res), NULL);
+    ns_img_decoded *d = ns_task_propagate_pointer(res, NULL);
     ns_pending *pending = job->pending;
     if (pending->dead) {
         if (d) {
@@ -587,9 +585,8 @@ on_image_decoded(GObject *src, GAsyncResult *res, gpointer user_data)
 
 /* Image fetch completion: records status/CORS, then decodes inline or in a worker. */
 static void
-on_image_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
+on_image_fetched(NsTask *result, gpointer user_data)
 {
-    (void)src;
     ns_pending *pending = user_data;
     GError *err = NULL;
     ns_response *resp = ns_net_fetch_finish(result, &err);
@@ -635,10 +632,10 @@ on_image_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
             g_strdup(resp->content_type ? resp->content_type : "");
         job->body_len = resp->body->len;
         ns_response_free(resp);
-        GTask *task = g_task_new(NULL, NULL, on_image_decoded, job);
-        g_task_set_task_data(task, job, NULL);
-        g_task_run_in_thread(task, image_decode_worker);
-        g_object_unref(task);
+        NsTask *task = ns_task_new(NULL, on_image_decoded, job);
+        ns_task_set_task_data(task, job, NULL);
+        ns_task_run_in_thread(task, image_decode_worker);
+        ns_task_unref(task);
         return;
     } else {
         ns_img_decoded d = ns_image_decode_body(resp->body->data,

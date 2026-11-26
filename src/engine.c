@@ -27,7 +27,7 @@
 #include "trace.h"
 
 typedef struct fetch_state {
-    GMainLoop  *loop;
+    NsMainLoop  *loop;
     ns_response *resp;
     GError      *error;
 } fetch_state;
@@ -114,33 +114,32 @@ ns_engine_layout_perf(guint64 *relayouts, double *total_ms)
 
 /* Async fetch callback storing the response or error and quitting the wait loop. */
 static void
-on_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
+on_fetch_done(NsTask *result, gpointer user_data)
 {
-    (void)src;
     fetch_state *st = user_data;
     st->resp = ns_net_fetch_finish(result, &st->error);
-    g_main_loop_quit(st->loop);
+    ns_main_loop_quit(st->loop);
 }
 
 /* Pushes an isolated main context for a blocking wait and returns a loop on it. */
-static GMainLoop *
+static NsMainLoop *
 engine_blocking_wait_begin(void)
 {
-    GMainContext *isolated = g_main_context_new();
-    g_main_context_push_thread_default(isolated);
+    NsLoop *isolated = ns_loop_new();
+    ns_loop_push_thread_default(isolated);
     g_engine_blocking_depth++;
-    GMainLoop *loop = g_main_loop_new(isolated, FALSE);
-    g_main_context_unref(isolated);
+    NsMainLoop *loop = ns_main_loop_new(isolated);
+    ns_loop_unref(isolated);
     return loop;
 }
 
 /* Pops the isolated context pushed by engine_blocking_wait_begin and frees the loop. */
 static void
-engine_blocking_wait_end(GMainLoop *loop)
+engine_blocking_wait_end(NsMainLoop *loop)
 {
     g_engine_blocking_depth--;
-    g_main_context_pop_thread_default(g_main_loop_get_context(loop));
-    g_main_loop_unref(loop);
+    ns_loop_pop_thread_default(ns_main_loop_get_loop(loop));
+    ns_main_loop_unref(loop);
 }
 
 /* Fetches url synchronously with destination-specific Accept headers; caller frees. */
@@ -153,7 +152,7 @@ ns_engine_fetch_blocking_for(const char *url, const char *top_url,
     ns_net_request_async(url, top_url, "GET", NULL, 0, NULL,
                          ns_net_accept_headers_for(dest), dest, NULL,
                          NULL, on_fetch_done, &st);
-    g_main_loop_run(st.loop);
+    ns_main_loop_run(st.loop);
     engine_blocking_wait_end(st.loop);
     if (error) *error = st.error;
     else g_clear_error(&st.error);
@@ -177,7 +176,7 @@ ns_engine_post_blocking(const char *url, const char *top_url,
     st.loop = engine_blocking_wait_begin();
     ns_net_post_async(url, top_url, body, body_len, content_type,
                       NULL, on_fetch_done, &st);
-    g_main_loop_run(st.loop);
+    ns_main_loop_run(st.loop);
     engine_blocking_wait_end(st.loop);
     if (error) *error = st.error;
     else g_clear_error(&st.error);
@@ -517,9 +516,8 @@ typedef struct {
 
 /* Preload completion: precompiles successful script bodies into the bytecode cache. */
 static void
-on_preload_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
+on_preload_fetched(NsTask *res, gpointer user_data)
 {
-    (void)src;
     ns_response *resp = ns_net_fetch_finish(res, NULL);
     preload_request *req = user_data;
     if (resp && req->dest == NS_FETCH_DEST_SCRIPT &&
@@ -1231,7 +1229,7 @@ ns_engine_anim_observe(ns_anim *anim, GHashTable *styles, gint64 now_us)
 }
 
 typedef struct {
-    GMainLoop      *loop;
+    NsMainLoop     *loop;
     int             pending;
     ns_image_cache *cache;
 } imgs_fetch_state;
@@ -1253,9 +1251,8 @@ img_record_response(ns_image *img, const char *final_url,
 
 /* Blocking image fetch callback: caches the body and quits the loop when all are done. */
 static void
-on_image_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
+on_image_fetch_done(NsTask *result, gpointer user_data)
 {
-    (void)src;
     img_fetch_item *it = user_data;
     GError *err = NULL;
     ns_response *resp = ns_net_fetch_finish(result, &err);
@@ -1268,7 +1265,7 @@ on_image_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
     if (resp) ns_response_free(resp);
     g_clear_error(&err);
     if (--it->st->pending == 0)
-        g_main_loop_quit(it->st->loop);
+        ns_main_loop_quit(it->st->loop);
     g_free(it->abs);
     g_free(it);
 }
@@ -1408,31 +1405,29 @@ img_async_item_finish(img_async_item *it)
     g_free(it);
 }
 
-/* GTask worker that decodes encoded image bytes off the main thread. */
+/* NsTask worker that decodes encoded image bytes off the main thread. */
 static void
-image_decode_in_worker(GTask *task, gpointer source, gpointer task_data,
+image_decode_in_worker(NsTask *task, gpointer task_data,
                        GCancellable *cancellable)
 {
-    (void)source;
     (void)cancellable;
     gsize len = 0;
     const guchar *data = g_bytes_get_data(task_data, &len);
     gint64 trace_start = ns_trace_now();
     ns_image_decoding *decoding = ns_image_decode_encoded(data, len);
     ns_trace_complete("decode", "decode image", trace_start, NULL);
-    g_task_return_pointer(task, decoding,
-                          (GDestroyNotify)ns_image_decoding_free);
+    ns_task_return_pointer(task, decoding,
+                           (GDestroyNotify)ns_image_decoding_free);
 }
 
 /* Inserts a worker-decoded image into the cache unless the session was closed. */
 static void
-on_image_decoded_async(GObject *src, GAsyncResult *result, gpointer user_data)
+on_image_decoded_async(NsTask *result, gpointer user_data)
 {
-    (void)src;
     img_async_item *it = user_data;
     ns_engine_img_session *s = it->session;
     ns_image_decoding *decoding =
-        g_task_propagate_pointer(G_TASK(result), NULL);
+        ns_task_propagate_pointer(result, NULL);
     if (s->dead)
         ns_image_decoding_free(decoding);
     else
@@ -1444,10 +1439,8 @@ on_image_decoded_async(GObject *src, GAsyncResult *result, gpointer user_data)
 
 /* Async image fetch callback: decodes in a worker if enabled, else caches inline. */
 static void
-on_image_fetch_async_done(GObject *src, GAsyncResult *result,
-                          gpointer user_data)
+on_image_fetch_async_done(NsTask *result, gpointer user_data)
 {
-    (void)src;
     img_async_item *it = user_data;
     ns_engine_img_session *s = it->session;
     GError *err = NULL;
@@ -1460,10 +1453,10 @@ on_image_fetch_async_done(GObject *src, GAsyncResult *result,
         it->final_url = g_strdup(resp->final_url);
         it->cors_allow_origin = g_strdup(resp->cors_allow_origin);
         ns_response_free(resp);
-        GTask *task = g_task_new(NULL, NULL, on_image_decoded_async, it);
-        g_task_set_task_data(task, body, (GDestroyNotify)g_bytes_unref);
-        g_task_run_in_thread(task, image_decode_in_worker);
-        g_object_unref(task);
+        NsTask *task = ns_task_new(NULL, on_image_decoded_async, it);
+        ns_task_set_task_data(task, body, (GDestroyNotify)g_bytes_unref);
+        ns_task_run_in_thread(task, image_decode_in_worker);
+        ns_task_unref(task);
         return;
     }
     if (usable)
@@ -1580,7 +1573,7 @@ ns_engine_fetch_images(ns_box *root, const char *base_url,
             ns_net_accept_headers_for(NS_FETCH_DEST_IMAGE), w->dest,
             w->policy, NULL, on_image_fetch_done, item);
     }
-    g_main_loop_run(st.loop);
+    ns_main_loop_run(st.loop);
     engine_blocking_wait_end(st.loop);
     g_hash_table_destroy(wanted);
 }

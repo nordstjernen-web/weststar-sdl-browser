@@ -61,6 +61,7 @@ So the shell goes first, and Cairo after it:
       main loop moves.)
    2. *The main loop and timers* move from GLib's `GMainContext` to an
       SDL-based loop with SDL timers; the engine thread gets the same.
+      (Done: see Event loop below.)
    3. *A portable build profile*: fontconfig optional (fonts found in the
       platform's font folders, with a small bundled fallback set), TLS and
       Web Crypto through mbedTLS instead of OpenSSL, and a bundled CA
@@ -210,14 +211,25 @@ press within one turn of the loop (`feed_nk` in `window.c`).
 ## Event loop
 
 GTK ran the GLib main loop on the main thread and the engine posted its
-results there with `g_idle_add`. The SDL shell keeps GLib (the engine
-needs it regardless) and runs both loops on the main thread
-(`src/sdl/mainloop.c`): it iterates the default `GMainContext` without
+results there with `g_idle_add`. Weststar's loop is its own, on SDL
+(`src/plat/ns_loop.c`): an `NsLoop` per thread that needs one (the main
+thread, the engine thread), with timeouts, idles and custom sources by
+id and priority, nested iterations, and posting from other threads,
+which wakes the loop (an SDL user event on the main thread, a condition
+variable elsewhere). `NsMainLoop` runs and quits one level of it.
+
+The main thread (`src/sdl/mainloop.c`) iterates its loop without
 blocking, builds and presents whatever changed, then waits in
-`SDL_WaitEventTimeout` until the next GLib timeout is due, at most 100 ms.
-Results posted from the engine thread use `ns_sdl_idle_add`, which also
-pushes an SDL wake event, so the wait ends at once. GLib's own timers
-(the watchdog heartbeat, session saving) run unchanged.
+`SDL_WaitEventTimeout` until the loop's next timeout is due, at most
+100 ms; results posted from the engine thread wake the wait at once.
+Background work (fetches, image decodes) runs on `ns_job` worker threads
+(`src/plat/ns_job.c`, SDL threads started as needed, up to 40, idle ones
+leaving after 10 s), and `NsTask` (`src/task.c`), shaped like GLib's
+GTask, delivers each result on the loop of the thread that started it.
+
+GLib's loop remains only in the watchdog's supervisor process, which
+spawns the browser and watches it as an OS child process and for Unix
+signals.
 
 ## What is gone, and where it went
 

@@ -462,7 +462,7 @@ browser_fire_media_events(gpointer user_data)
     ns_browser *b = user_data;
     b->media_events_source = 0;
     if (b->js && b->layout) ns_js_fire_media_load_events(b->js, b->layout);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* Schedules a one-shot dispatch of media load events if none is pending. */
@@ -554,7 +554,7 @@ browser_wait_images(ns_browser *browser)
     gint64 deadline = ns_time_monotonic_us() + (gint64)15 * G_USEC_PER_SEC;
     while (browser_images_outstanding(browser) > 0 &&
            ns_time_monotonic_us() < deadline)
-        g_main_context_iteration(ns_engine_context(), TRUE);
+        ns_loop_iterate(ns_engine_context(), TRUE);
     if (browser->dirty) {
         browser_relayout(browser);
         browser->dirty = FALSE;
@@ -1105,13 +1105,13 @@ browser_js_fragment_navigate(const char *url, gpointer user_data)
 static gboolean
 settle_quit_cb(gpointer user_data)
 {
-    g_main_loop_quit(user_data);
-    return G_SOURCE_CONTINUE;
+    ns_main_loop_quit(user_data);
+    return NS_SOURCE_CONTINUE;
 }
 
 typedef struct settle_ctx {
     ns_browser *b;
-    GMainLoop  *loop;
+    NsMainLoop *loop;
     int         quiet_ticks;
 } settle_ctx;
 
@@ -1125,7 +1125,7 @@ browser_settle_quiet(ns_browser *b)
     if (b->js && ns_js_has_pending_work(b->js)) return FALSE;
     if (b->js && ns_js_has_pending_animation_frame(b->js)) return FALSE;
     if (b->images && ns_image_cache_has_pending(b->images)) return FALSE;
-    if (g_main_context_pending(ns_engine_context())) return FALSE;
+    if (ns_loop_pending(ns_engine_context())) return FALSE;
     return TRUE;
 }
 
@@ -1155,13 +1155,13 @@ settle_tick_cb(gpointer user_data)
     }
     if (browser_settle_quiet(b)) {
         if (++ctx->quiet_ticks >= NS_SETTLE_QUIET_TICKS) {
-            g_main_loop_quit(ctx->loop);
-            return G_SOURCE_CONTINUE;
+            ns_main_loop_quit(ctx->loop);
+            return NS_SOURCE_CONTINUE;
         }
     } else {
         ctx->quiet_ticks = 0;
     }
-    return G_SOURCE_CONTINUE;
+    return NS_SOURCE_CONTINUE;
 }
 
 /* Runs the engine loop up to settle_ms until the page goes quiet. */
@@ -1170,14 +1170,14 @@ browser_settle(ns_browser *b, int settle_ms)
 {
     if (settle_ms <= 0) return;
     if (browser_settle_quiet(b)) return;
-    GMainLoop *loop = g_main_loop_new(ns_engine_context(), FALSE);
+    NsMainLoop *loop = ns_main_loop_new(ns_engine_context());
     settle_ctx ctx = { .b = b, .loop = loop };
     guint quit = ns_engine_timeout_add(settle_ms, settle_quit_cb, loop);
     guint tick = ns_engine_timeout_add(16, settle_tick_cb, &ctx);
-    g_main_loop_run(loop);
+    ns_main_loop_run(loop);
     ns_engine_source_remove(tick);
     ns_engine_source_remove(quit);
-    g_main_loop_unref(loop);
+    ns_main_loop_unref(loop);
 }
 
 /* Console hook: logs a line and appends it to a capped console buffer. */
@@ -2211,8 +2211,8 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
 
         gboolean did_iter = FALSE;
         int it = 0;
-        while (g_main_context_pending(ns_engine_context()) && it++ < 64) {
-            g_main_context_iteration(ns_engine_context(), FALSE);
+        while (ns_loop_pending(ns_engine_context()) && it++ < 64) {
+            ns_loop_iterate(ns_engine_context(), FALSE);
             did_iter = TRUE;
             changed = TRUE;
             if (ns_time_monotonic_us() >= deadline) break;

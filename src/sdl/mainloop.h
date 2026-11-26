@@ -1,4 +1,4 @@
-/* Weststar SDL Browser — the main thread's loop: GLib's default context and SDL events together.
+/* Weststar SDL Browser — the main thread's loop: the default NsLoop and SDL events together.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -8,6 +8,7 @@
 
 #include <SDL3/SDL.h>
 #include <glib.h>
+#include "plat/ns_loop.h"
 
 G_BEGIN_DECLS
 
@@ -19,13 +20,13 @@ typedef void (*NsSdlIdleFunc)(gpointer user_data);
 /* The SDL event type that only wakes the loop; registered on first use. */
 Uint32 ns_sdl_wake_event_type(void);
 
-/* Wakes the main loop from any thread, so work just queued on the
- * default GMainContext runs without waiting for the next timeout. */
+/* Wakes the main loop from any thread; the default NsLoop calls it for
+ * every source added from another thread. */
 void ns_sdl_wake(void);
 
-/* g_idle_add on the default context, waking the main loop: use it from
- * other threads instead of g_idle_add. */
-guint ns_sdl_idle_add(GSourceFunc fn, gpointer data);
+/* An idle on the default NsLoop, so on the main thread; callable from any
+ * thread. */
+unsigned ns_sdl_idle_add(NsSourceFunc fn, void *data);
 
 /* Runs until on_event returns FALSE or ns_sdl_loop_quit() is called. */
 void ns_sdl_loop_run(NsSdlEventFunc on_event, NsSdlIdleFunc on_idle,

@@ -297,10 +297,10 @@ media_tasks_flush(gpointer data)
 {
     ns_js *js = data;
     js->media_task_source = 0;
-    if (js->halted) return G_SOURCE_REMOVE;
+    if (js->halted) return NS_SOURCE_REMOVE;
     if (js->in_pump) {
         js->media_task_source = ns_engine_timeout_add(4, media_tasks_flush, js);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     GPtrArray *tasks = js->media_tasks;
     js->media_tasks = NULL;
@@ -313,7 +313,7 @@ media_tasks_flush(gpointer data)
     js->media_tasks_flushing = NULL;
     if (tasks) g_ptr_array_free(tasks, TRUE);
     ns_drain_microtasks(js);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* Moves pending play() promises into a task that will resolve or reject them. */
@@ -695,7 +695,7 @@ media_poll(gpointer data)
     ns_js *js = data;
     if (js->halted || !js->media_players) {
         js->media_poll_source = 0;
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     gint64 now = ns_time_monotonic_us();
     gboolean active = FALSE;
@@ -704,9 +704,9 @@ media_poll(gpointer data)
     g_hash_table_iter_init(&it, js->media_players);
     while (g_hash_table_iter_next(&it, NULL, &value))
         if (media_poll_player(value, now)) active = TRUE;
-    if (active) return G_SOURCE_CONTINUE;
+    if (active) return NS_SOURCE_CONTINUE;
     js->media_poll_source = 0;
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* Starts the media poll timer if it is not already running. */

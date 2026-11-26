@@ -11,6 +11,7 @@
 #include <glib.h>
 
 #include "fetch_policy.h"
+#include "task.h"
 #include "version.h"
 
 G_BEGIN_DECLS
@@ -121,7 +122,7 @@ void ns_net_post_async(const char         *url,
                        gsize               body_len,
                        const char         *content_type,
                        GCancellable       *cancellable,
-                       GAsyncReadyCallback callback,
+                       NsTaskReadyCallback callback,
                        gpointer            user_data);
 
 void ns_net_request_async(const char         *url,
@@ -134,10 +135,10 @@ void ns_net_request_async(const char         *url,
                           ns_fetch_destination dest,
                           ns_fetch_policy    *policy,
                           GCancellable       *cancellable,
-                          GAsyncReadyCallback callback,
+                          NsTaskReadyCallback callback,
                           gpointer            user_data);
 
-ns_response *ns_net_fetch_finish(GAsyncResult *result, GError **error);
+ns_response *ns_net_fetch_finish(NsTask *result, GError **error);
 
 const char *const *ns_net_accept_headers_for(ns_fetch_destination dest);
 

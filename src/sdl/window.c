@@ -246,7 +246,7 @@ note_expire(gpointer data)
     w->note_timer = 0;
     g_clear_pointer(&w->status_note, g_free);
     mark_dirty(w);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* A status message that stays for a few seconds. */
@@ -256,8 +256,8 @@ set_note(NsWindow *w, const char *text)
     g_free(w->status_note);
     w->status_note = text && *text ? g_strdup(text) : NULL;
     if (w->note_timer)
-        g_source_remove(w->note_timer);
-    w->note_timer = w->status_note ? g_timeout_add_seconds(5, note_expire, w) : 0;
+        ns_loop_source_remove(w->note_timer);
+    w->note_timer = w->status_note ? ns_loop_timeout_add_seconds(NULL, 5, note_expire, w) : 0;
     mark_dirty(w);
 }
 
@@ -377,7 +377,7 @@ download_done(gpointer data)
     g_free(d->path);
     g_free(d->name);
     g_free(d);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 static gpointer
@@ -474,7 +474,7 @@ save_chosen_idle(gpointer data)
     }
     g_free(c->path);
     g_free(c);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* SDL may call this on another thread; the choice is handed to the main loop. */
@@ -1561,7 +1561,7 @@ window_close(NsWindow *w)
     w->closing = TRUE;
     g_app.windows = g_list_remove(g_app.windows, w);
     if (w->note_timer)
-        g_source_remove(w->note_timer);
+        ns_loop_source_remove(w->note_timer);
     ns_page_view_close(w->view);
     ns_nk_free(w->nk);
     if (w->cursor)
@@ -1653,14 +1653,14 @@ write_session_cb(gpointer data)
 {
     (void)data;
     if (!g_app.session_path)
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     NsWindow *w = g_app.windows ? g_app.windows->data : NULL;
     const char *url = w ? ns_page_view_url(w->view) : NULL;
     char *contents = w && !w->private_mode && session_url_recoverable(url)
                    ? g_strconcat(url, "\n", NULL) : g_strdup("");
     g_file_set_contents(g_app.session_path, contents, -1, NULL);
     g_free(contents);
-    return G_SOURCE_CONTINUE;
+    return NS_SOURCE_CONTINUE;
 }
 
 static char *
@@ -1794,8 +1794,8 @@ ns_sdl_app_run(const char *startup_url, const char *session_path,
                 set_note(w, ns_i18n("Recovered the previous session after "
                                     "an unexpected exit"));
             if (g_app.session_path)
-                g_app.session_timer = g_timeout_add_seconds(4, write_session_cb,
-                                                            NULL);
+                g_app.session_timer = ns_loop_timeout_add_seconds(
+                    NULL, 4, write_session_cb, NULL);
             ns_sdl_loop_run(on_event, on_idle, NULL);
         }
     }
@@ -1803,7 +1803,7 @@ ns_sdl_app_run(const char *startup_url, const char *session_path,
     while (g_app.windows)
         window_close(g_app.windows->data);
     if (g_app.session_timer)
-        g_source_remove(g_app.session_timer);
+        ns_loop_source_remove(g_app.session_timer);
     ns_audio_shutdown();
     if (g_app.bookmarks)
         ns_bookmarks_free(g_app.bookmarks);

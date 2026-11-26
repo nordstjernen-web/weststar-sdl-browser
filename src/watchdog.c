@@ -5,6 +5,7 @@
  */
 
 #include "watchdog.h"
+#include "plat/ns_loop.h"
 #include "plat/ns_plat.h"
 #include "debuglog.h"
 
@@ -48,12 +49,12 @@ static gint g_beat;
 static int  g_hang_secs;
 
 /* Main-loop heartbeat that the hang thread watches for progress. */
-static gboolean
-ns_watchdog_beat(gpointer user_data)
+static int
+ns_watchdog_beat(void *user_data)
 {
     (void)user_data;
     g_atomic_int_inc(&g_beat);
-    return G_SOURCE_CONTINUE;
+    return NS_SOURCE_CONTINUE;
 }
 
 /* Exits the process with the hang code once the heartbeat stalls past the hang limit. */
@@ -103,7 +104,9 @@ ns_watchdog_child_arm_hang_monitor(int js_budget_ms)
         g_hang_secs = NS_WATCHDOG_HANG_MIN_SECS;
     g_message("ns_watchdog: hang monitor armed, exit after %ds unresponsive",
               g_hang_secs);
-    g_timeout_add_seconds(NS_WATCHDOG_BEAT_SECS, ns_watchdog_beat, NULL);
+    /* On the main thread's NsLoop: the beat stalls when that thread does. */
+    ns_loop_timeout_add_seconds(NULL, NS_WATCHDOG_BEAT_SECS, ns_watchdog_beat,
+                                NULL);
     ns_thread_unref(ns_thread_new("nd-watchdog", ns_watchdog_hang_thread, NULL));
 }
 
@@ -541,7 +544,11 @@ ns_watchdog_build_child_argv(const char *self_exe, int argc, char **argv,
     return (char **)g_ptr_array_free(args, FALSE);
 }
 
-/* Supervisor main: runs and restarts the browser child; returns its final exit status. */
+/* Supervisor main: runs and restarts the browser child; returns its final exit status.
+ * The supervisor is a process of its own that only spawns and watches the
+ * browser, so it keeps GLib's main loop: its child watch and (on Unix)
+ * signal sources are OS-process services GLib implements per platform,
+ * which the SDL-based NsLoop does not provide. */
 int
 ns_watchdog_run_supervisor(const char *self_exe, int argc, char **argv)
 {

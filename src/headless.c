@@ -5,6 +5,7 @@
  */
 
 #include "headless.h"
+#include "plat/ns_loop.h"
 #include "plat/ns_plat.h"
 #include "gfx.h"
 
@@ -40,9 +41,9 @@ static char *g_headless_doc_charset;
 static gboolean
 settle_quit_cb(gpointer user_data)
 {
-    GMainLoop *loop = user_data;
-    g_main_loop_quit(loop);
-    return G_SOURCE_REMOVE;
+    NsMainLoop *loop = user_data;
+    ns_main_loop_quit(loop);
+    return NS_SOURCE_REMOVE;
 }
 
 /* Parses a comma list of debug-log level names (or "all") into a level bitmask. */
@@ -717,7 +718,7 @@ settle_raf_tick(gpointer user_data)
         s->pending_mutation = FALSE;
         s->last_flush_us = ns_time_monotonic_us();
     }
-    return G_SOURCE_CONTINUE;
+    return NS_SOURCE_CONTINUE;
 }
 
 /* Runs the main loop for ms milliseconds with animation-frame ticks. */
@@ -725,13 +726,13 @@ static void
 settle_main_loop(int ms, headless_flush_ctx *fc)
 {
     if (ms <= 0 || !fc) return;
-    GMainLoop *loop = g_main_loop_new(NULL, FALSE);
-    g_timeout_add(ms, settle_quit_cb, loop);
+    NsMainLoop *loop = ns_main_loop_new(NULL);
+    ns_loop_timeout_add(NULL, ms, settle_quit_cb, loop);
     settle_state st = { .fc = fc, .last_flush_us = ns_time_monotonic_us() };
-    guint raf_id = g_timeout_add(16, settle_raf_tick, &st);
-    g_main_loop_run(loop);
-    g_source_remove(raf_id);
-    g_main_loop_unref(loop);
+    guint raf_id = ns_loop_timeout_add(NULL, 16, settle_raf_tick, &st);
+    ns_main_loop_run(loop);
+    ns_loop_source_remove(raf_id);
+    ns_main_loop_unref(loop);
 }
 
 static const char *const ns_wpt_poll_js =
@@ -759,7 +760,7 @@ wpt_results_ready(ns_js *js)
 }
 
 typedef struct wpt_wait_state {
-    GMainLoop          *loop;
+    NsMainLoop         *loop;
     headless_flush_ctx *fc;
     gboolean            done;
 } wpt_wait_state;
@@ -768,10 +769,10 @@ static gboolean
 wpt_poll_cb(gpointer user_data)
 {
     wpt_wait_state *w = user_data;
-    if (!wpt_results_ready(w->fc->js)) return G_SOURCE_CONTINUE;
+    if (!wpt_results_ready(w->fc->js)) return NS_SOURCE_CONTINUE;
     w->done = TRUE;
-    g_main_loop_quit(w->loop);
-    return G_SOURCE_REMOVE;
+    ns_main_loop_quit(w->loop);
+    return NS_SOURCE_REMOVE;
 }
 
 static char *
@@ -790,17 +791,18 @@ headless_wpt_finish(headless_flush_ctx *fc, const ns_headless_opts *opts)
     int timeout_ms = opts->wpt_timeout_ms > 0 ? opts->wpt_timeout_ms : 15000;
     gboolean done = wpt_results_ready(fc->js);
     if (!done) {
-        GMainLoop *loop = g_main_loop_new(NULL, FALSE);
+        NsMainLoop *loop = ns_main_loop_new(NULL);
         wpt_wait_state w = { .loop = loop, .fc = fc };
         settle_state st = { .fc = fc, .last_flush_us = ns_time_monotonic_us() };
-        guint raf_id = g_timeout_add(16, settle_raf_tick, &st);
-        guint poll_id = g_timeout_add(50, wpt_poll_cb, &w);
-        guint stop_id = g_timeout_add(timeout_ms, settle_quit_cb, loop);
-        g_main_loop_run(loop);
-        g_source_remove(raf_id);
-        if (w.done) g_source_remove(stop_id);
-        else        g_source_remove(poll_id);
-        g_main_loop_unref(loop);
+        guint raf_id = ns_loop_timeout_add(NULL, 16, settle_raf_tick, &st);
+        guint poll_id = ns_loop_timeout_add(NULL, 50, wpt_poll_cb, &w);
+        guint stop_id = ns_loop_timeout_add(NULL, timeout_ms, settle_quit_cb,
+                                            loop);
+        ns_main_loop_run(loop);
+        ns_loop_source_remove(raf_id);
+        if (w.done) ns_loop_source_remove(stop_id);
+        else        ns_loop_source_remove(poll_id);
+        ns_main_loop_unref(loop);
         done = w.done;
     }
     if (!done) {

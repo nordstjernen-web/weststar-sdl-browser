@@ -1,5 +1,5 @@
-/* Weststar SDL Browser — the main thread's loop: GLib's default context and SDL events together.
- * GLib is iterated without blocking; the thread then sleeps in SDL until the next GLib
+/* Weststar SDL Browser — the main thread's loop: the default NsLoop and SDL events together.
+ * The NsLoop is iterated without blocking; the thread then sleeps in SDL until its next
  * timeout, an input event, or a wake from another thread.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -8,8 +8,8 @@
 #include "mainloop.h"
 #include "plat/ns_plat.h"
 
-/* The longest the loop sleeps without a wake: GLib work queued from a thread
- * that does not call ns_sdl_wake() still runs within this many ms. */
+/* The longest the loop sleeps without a wake: state other threads change
+ * without posting to the loop is still noticed within this many ms. */
 #define NS_SDL_MAX_SLEEP_MS 100
 
 static Uint32 g_wake_type;
@@ -39,12 +39,12 @@ ns_sdl_wake(void)
         g_atomic_int_set(&g_wake_pending, 0);
 }
 
-guint
-ns_sdl_idle_add(GSourceFunc fn, gpointer data)
+unsigned
+ns_sdl_idle_add(NsSourceFunc fn, void *data)
 {
-    guint id = g_idle_add(fn, data);
-    ns_sdl_wake();
-    return id;
+    /* An addition from another thread wakes the default loop, which on the
+     * main thread means ns_sdl_wake(). */
+    return ns_loop_idle_add(ns_loop_default(), fn, data);
 }
 
 void
@@ -54,54 +54,26 @@ ns_sdl_loop_quit(void)
     ns_sdl_wake();
 }
 
-/* One non-blocking GLib iteration on the default context. Returns how long
- * the loop may sleep before GLib has work again: 0 when sources are ready,
- * -1 when GLib has no timeout pending. */
-static int
-glib_iterate(void)
-{
-    static GPollFD *fds;
-    static gint n_alloc;
-    GMainContext *ctx = g_main_context_default();
-    if (!g_main_context_acquire(ctx))
-        return 4;
-    gint priority = 0;
-    gint timeout = -1;
-    gboolean ready = g_main_context_prepare(ctx, &priority);
-    gint n;
-    while ((n = g_main_context_query(ctx, priority, &timeout, fds, n_alloc))
-           > n_alloc) {
-        n_alloc = n;
-        fds = g_renew(GPollFD, fds, n_alloc);
-    }
-    if (n > 0)
-        g_poll(fds, (guint)n, 0);
-    gboolean dispatch = g_main_context_check(ctx, priority, fds, n);
-    if (dispatch)
-        g_main_context_dispatch(ctx);
-    g_main_context_release(ctx);
-    return (ready || dispatch) ? 0 : timeout;
-}
-
 void
 ns_sdl_loop_run(NsSdlEventFunc on_event, NsSdlIdleFunc on_idle,
                 gpointer user_data)
 {
     Uint32 wake_type = ns_sdl_wake_event_type();
+    NsLoop *loop = ns_loop_default();
+    ns_loop_set_wake_func(loop, ns_sdl_wake);
     g_quit = FALSE;
     while (!g_quit) {
-        int timeout = -1;
         /* Bounded, so a source that rearms itself at once cannot keep
          * input waiting. */
-        for (int i = 0; i < 32; i++) {
-            timeout = glib_iterate();
-            if (timeout != 0 || g_quit)
+        for (int i = 0; i < 32 && !g_quit; i++) {
+            if (!ns_loop_iterate(loop, false))
                 break;
         }
         if (g_quit)
             break;
         if (on_idle)
             on_idle(user_data);
+        int timeout = ns_loop_next_timeout_ms(loop);
         if (timeout < 0 || timeout > NS_SDL_MAX_SLEEP_MS)
             timeout = NS_SDL_MAX_SLEEP_MS;
         SDL_Event ev;
@@ -118,4 +90,5 @@ ns_sdl_loop_run(NsSdlEventFunc on_event, NsSdlIdleFunc on_idle,
             }
         } while (SDL_PollEvent(&ev));
     }
+    ns_loop_set_wake_func(loop, NULL);
 }

@@ -243,7 +243,7 @@ static gboolean
 pv_unref_idle(gpointer data)
 {
     pv_unref(data);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 static Res *
@@ -398,7 +398,7 @@ pv_wake_idle(gpointer data)
     if (!v->closed && v->opened)
         arm_anim(v);
     pv_unref(v);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* The engine asks for a frame (a mutation, a timer, a loaded image). */
@@ -686,17 +686,17 @@ anim_tick(gpointer data)
     NsPageView *v = data;
     if (v->closed || !v->opened) {
         v->anim_id = 0;
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     request_render(v);
-    return G_SOURCE_CONTINUE;
+    return NS_SOURCE_CONTINUE;
 }
 
 static void
 disarm_anim(NsPageView *v)
 {
     if (v->anim_id)
-        g_source_remove(v->anim_id);
+        ns_loop_source_remove(v->anim_id);
     v->anim_id = 0;
     v->anim_interval = 0;
 }
@@ -719,7 +719,7 @@ arm_anim(NsPageView *v)
         return;
     disarm_anim(v);
     v->anim_interval = want;
-    v->anim_id = g_timeout_add(want, anim_tick, v);
+    v->anim_id = ns_loop_timeout_add(NULL, want, anim_tick, v);
     request_render(v);
 }
 
@@ -1662,7 +1662,7 @@ on_result(gpointer data)
     }
 done:
     res_free(res);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* ---- public: area, input ----------------------------------------------- */
@@ -2085,7 +2085,7 @@ save_page_done(gpointer data)
     g_free(c->url);
     g_free(c->dest);
     g_free(c);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 static gpointer

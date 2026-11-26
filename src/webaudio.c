@@ -1094,9 +1094,9 @@ ns_wa_poll(gpointer data)
     }
     if (!keep) {
         js->webaudio_poll_source = 0;
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
-    return G_SOURCE_CONTINUE;
+    return NS_SOURCE_CONTINUE;
 }
 
 static JSValue

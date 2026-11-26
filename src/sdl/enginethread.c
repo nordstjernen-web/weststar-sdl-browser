@@ -1,4 +1,4 @@
-/* Weststar SDL Browser — the thread the page engine runs on, with its own main context.
+/* Weststar SDL Browser — the thread the page engine runs on, with its own NsLoop.
  * Started on first post with an 8 MiB stack; runs queued jobs in order outside nested iterations.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -18,68 +18,51 @@ typedef struct {
     gpointer    data;
 } Job;
 
-static GMainContext *g_ctx;
-static GAsyncQueue  *g_jobs;
+static NsLoop      *g_loop;
+static GAsyncQueue *g_jobs;
 
-/* True when jobs are queued and the loop is not inside a nested main iteration. */
-static gboolean
-jobs_ready(void)
+/* Custom source prepare: ready when jobs are queued and the loop is not
+ * inside a nested iteration (a job never runs inside another callback). */
+static int
+jobs_prepare(void *data, int *timeout_ms)
 {
-    return g_main_depth() == 0 && g_async_queue_length(g_jobs) > 0;
+    (void)data;
+    (void)timeout_ms;
+    return ns_loop_depth() == 0 && g_async_queue_length(g_jobs) > 0;
 }
 
-static gboolean
-jobs_prepare(GSource *source, gint *timeout)
+/* Runs every queued engine job in order. */
+static int
+jobs_dispatch(void *data)
 {
-    (void)source;
-    *timeout = -1;
-    return jobs_ready();
-}
-
-static gboolean
-jobs_check(GSource *source)
-{
-    (void)source;
-    return jobs_ready();
-}
-
-/* GSource dispatch that runs every queued engine job in order. */
-static gboolean
-jobs_dispatch(GSource *source, GSourceFunc callback, gpointer user_data)
-{
-    (void)source;
-    (void)callback;
-    (void)user_data;
+    (void)data;
     Job *job;
     while ((job = g_async_queue_try_pop(g_jobs))) {
         job->fn(job->data);
         g_free(job);
     }
-    return G_SOURCE_CONTINUE;
+    return NS_SOURCE_CONTINUE;
 }
 
-static GSourceFuncs jobs_funcs = {
+static const NsSourceFuncs jobs_funcs = {
     .prepare = jobs_prepare,
-    .check = jobs_check,
     .dispatch = jobs_dispatch,
 };
 
-/* Engine thread body: W^X setup, trace name, job source and main loop on its context. */
+/* Engine thread body: W^X setup, trace name, job source and the run on its loop. */
 static gpointer
 engine_main(gpointer data)
 {
     (void)data;
     ns_security_deny_exec_memory(FALSE, FALSE);
-    g_main_context_push_thread_default(g_ctx);
-    ns_engine_context_set(g_ctx);
+    ns_loop_push_thread_default(g_loop);
+    ns_engine_context_set(g_loop);
     ns_trace_thread_name("ns-engine");
-    GSource *src = g_source_new(&jobs_funcs, sizeof(GSource));
-    g_source_attach(src, g_ctx);
-    g_source_unref(src);
-    GMainLoop *loop = g_main_loop_new(g_ctx, FALSE);
-    g_main_loop_run(loop);
-    g_main_loop_unref(loop);
-    g_main_context_pop_thread_default(g_ctx);
+    ns_loop_custom_add(g_loop, NS_PRIORITY_DEFAULT, &jobs_funcs, NULL, NULL);
+    NsMainLoop *run = ns_main_loop_new(g_loop);
+    ns_main_loop_run(run);
+    ns_main_loop_unref(run);
+    ns_loop_pop_thread_default(g_loop);
     return NULL;
 }
 
@@ -96,13 +79,13 @@ engine_spawn(void)
     ns_thread_unref(t);
 }
 
-/* Creates the engine context and job queue and spawns the thread exactly once. */
+/* Creates the engine loop and job queue and spawns the thread exactly once. */
 static void
 engine_start(void)
 {
     static NsOnce started;
     if (ns_once_enter(&started)) {
-        g_ctx = g_main_context_new();
+        g_loop = ns_loop_new();
         g_jobs = g_async_queue_new();
         engine_spawn();
         ns_once_leave(&started);
@@ -118,5 +101,5 @@ ns_engine_thread_post(NsEngineJob fn, gpointer data)
     job->fn = fn;
     job->data = data;
     g_async_queue_push(g_jobs, job);
-    g_main_context_wakeup(g_ctx);
+    ns_loop_wakeup(g_loop);
 }

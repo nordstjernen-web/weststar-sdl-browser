@@ -14,7 +14,7 @@
  *   ns_thread_join(); ns_thread_unref() detaches it instead.
  * - NsPrivate is a thread-local value with an optional destructor, run when
  *   a thread created by ns_thread_* (or SDL) exits. Threads made elsewhere
- *   (for instance GLib's GTask pool) do not run it.
+ *   (the main thread, or a library's own threads) do not run it.
  * - NsOnce guards a block that runs once:
  *       static NsOnce once;
  *       if (ns_once_enter(&once)) { ...; ns_once_leave(&once); }

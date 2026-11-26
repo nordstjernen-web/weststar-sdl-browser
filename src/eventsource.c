@@ -73,7 +73,7 @@ ns_es_dispatch_run(gpointer data)
     if (!g_atomic_int_get(&es->detached) && es->cbs.busy &&
         es->cbs.busy(es->user_data)) {
         ns_engine_timeout_add(4, ns_es_dispatch_run, d);
-        return G_SOURCE_REMOVE;
+        return NS_SOURCE_REMOVE;
     }
     if (!g_atomic_int_get(&es->detached) && d->invoke)
         d->invoke(es, d->payload);
@@ -81,7 +81,7 @@ ns_es_dispatch_run(gpointer data)
     g_atomic_int_add(&es->pending, -1);
     ns_es_unref(es);
     g_free(d);
-    return G_SOURCE_REMOVE;
+    return NS_SOURCE_REMOVE;
 }
 
 /* Queues a callback to the engine thread; dropped only once detached.

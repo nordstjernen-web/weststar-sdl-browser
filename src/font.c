@@ -378,9 +378,8 @@ ns_font_install_file(const char *path, const char *css_family)
 
 /* Font fetch completion: validates, converts WOFF, caches and installs for each family. */
 static void
-ns_font_on_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
+ns_font_on_fetched(NsTask *res, gpointer user_data)
 {
-    (void)src;
     ns_font_fetch_ctx *ctx = user_data;
     GError *err = NULL;
     ns_response *resp = ns_net_fetch_finish(res, &err);

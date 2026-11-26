@@ -51,7 +51,7 @@
 
 static void ns_net_fetch_async(const char *url, const char *top_url,
                                GCancellable *cancellable,
-                               GAsyncReadyCallback callback,
+                               NsTaskReadyCallback callback,
                                gpointer user_data);
 
 static char *g_cookie_dir;
@@ -2200,7 +2200,7 @@ ns_net_idle(void)
     return idle;
 }
 
-static void ns_fetch_task_abandon(GTask *task, const GError *err);
+static void ns_fetch_task_abandon(NsTask *task, const GError *err);
 
 /* Aborts queued fetches and waits up to timeout_ms for active ones; TRUE if drained. */
 static gboolean
@@ -2209,14 +2209,14 @@ ns_net_drain(int timeout_ms)
     g_atomic_int_set(&g_net_aborting, 1);
     GQueue dropped = G_QUEUE_INIT;
     ns_mutex_lock(&g_fetch_throttle_mutex);
-    for (GTask *t; (t = g_queue_pop_head(&g_fetch_queue)); )
+    for (NsTask *t; (t = g_queue_pop_head(&g_fetch_queue)); )
         g_queue_push_tail(&dropped, t);
     ns_mutex_unlock(&g_fetch_throttle_mutex);
-    for (GTask *t; (t = g_queue_pop_head(&dropped)); ) {
+    for (NsTask *t; (t = g_queue_pop_head(&dropped)); ) {
         GError *err = g_error_new_literal(NS_NET_DOMAIN, 1, "shutting down");
         ns_fetch_task_abandon(t, err);
-        g_task_return_error(t, err);
-        g_object_unref(t);
+        ns_task_return_error(t, err);
+        ns_task_unref(t);
     }
     ns_mutex_lock(&g_fetch_throttle_mutex);
     gint64 deadline = ns_time_monotonic_us() + (gint64)timeout_ms * 1000;
@@ -6940,7 +6940,7 @@ ns_fetch_claim_locked(const char *key, ns_response **preloaded,
 /* Joins an in-flight identical fetch or returns a preloaded response; sets *joined. */
 static ns_response *
 ns_fetch_join_async(const char *key, ns_fetch_ctx *gate,
-                    GAsyncReadyCallback callback,
+                    NsTaskReadyCallback callback,
                     gpointer user_data, gboolean *joined)
 {
     ns_response *preloaded = NULL;
@@ -6949,9 +6949,9 @@ ns_fetch_join_async(const char *key, ns_fetch_ctx *gate,
     ns_mutex_lock(&g_fetch_mutex);
     ns_fetch_claim claim = ns_fetch_claim_locked(key, &preloaded, &grp);
     if (claim == NS_FETCH_JOINED) {
-        GTask *joiner = g_task_new(NULL, NULL, callback, user_data);
-        g_task_set_source_tag(joiner, ns_net_fetch_async);
-        g_task_set_task_data(joiner, gate, ns_fetch_ctx_free);
+        NsTask *joiner = ns_task_new(NULL, callback, user_data);
+        ns_task_set_source_tag(joiner, ns_net_fetch_async);
+        ns_task_set_task_data(joiner, gate, ns_fetch_ctx_free);
         gate = NULL;
         if (!grp->tasks) grp->tasks = g_ptr_array_new();
         g_ptr_array_add(grp->tasks, joiner);
@@ -7029,15 +7029,15 @@ ns_fetch_coalesce_deliver(const char *key, ns_response *resp, const GError *err)
     if (!grp) return;
     if (grp->tasks) {
         for (guint i = 0; i < grp->tasks->len; i++) {
-            GTask *waiter = g_ptr_array_index(grp->tasks, i);
+            NsTask *waiter = g_ptr_array_index(grp->tasks, i);
             if (resp)
-                g_task_return_pointer(waiter, ns_response_copy(resp),
-                                      (GDestroyNotify)ns_response_free);
+                ns_task_return_pointer(waiter, ns_response_copy(resp),
+                                       (GDestroyNotify)ns_response_free);
             else if (err)
-                g_task_return_error(waiter, g_error_copy(err));
+                ns_task_return_error(waiter, g_error_copy(err));
             else
-                g_task_return_new_error(waiter, NS_NET_DOMAIN, 0, "fetch failed");
-            g_object_unref(waiter);
+                ns_task_return_new_error(waiter, NS_NET_DOMAIN, 0, "fetch failed");
+            ns_task_unref(waiter);
         }
         g_ptr_array_free(grp->tasks, TRUE);
     }
@@ -7047,9 +7047,9 @@ ns_fetch_coalesce_deliver(const char *key, ns_response *resp, const GError *err)
 
 /* Fails any coalesced waiters of a fetch task that will not run. */
 static void
-ns_fetch_task_abandon(GTask *task, const GError *err)
+ns_fetch_task_abandon(NsTask *task, const GError *err)
 {
-    ns_fetch_ctx *ctx = task ? g_task_get_task_data(task) : NULL;
+    ns_fetch_ctx *ctx = task ? ns_task_get_task_data(task) : NULL;
     if (ctx && ctx->coalesce_key)
         ns_fetch_coalesce_deliver(ctx->coalesce_key, NULL, err);
 }
@@ -7059,13 +7059,13 @@ ns_fetch_task_abandon(GTask *task, const GError *err)
 
 static GHashTable *g_fetch_host_active;
 
-static void ns_fetch_thread(GTask *task, gpointer source_object,
-                            gpointer task_data, GCancellable *cancellable);
+static void ns_fetch_thread(NsTask *task, gpointer task_data,
+                            GCancellable *cancellable);
 
 static char *
-ns_fetch_task_host(GTask *task)
+ns_fetch_task_host(NsTask *task)
 {
-    ns_fetch_ctx *ctx = task ? g_task_get_task_data(task) : NULL;
+    ns_fetch_ctx *ctx = task ? ns_task_get_task_data(task) : NULL;
     return (ctx && ctx->url) ? ns_url_host_from(ctx->url) : NULL;
 }
 
@@ -7103,10 +7103,10 @@ ns_fetch_throttle_dispatch(void)
             ns_mutex_unlock(&g_fetch_throttle_mutex);
             return;
         }
-        GTask *chosen = NULL;
+        NsTask *chosen = NULL;
         char *chosen_host = NULL;
         for (GList *l = g_fetch_queue.head; l; l = l->next) {
-            GTask *t = l->data;
+            NsTask *t = l->data;
             char *host = ns_fetch_task_host(t);
             if (!host ||
                 ns_fetch_host_count_locked(host) < NS_MAX_FETCHES_PER_HOST) {
@@ -7125,14 +7125,14 @@ ns_fetch_throttle_dispatch(void)
         ns_fetch_host_adjust_locked(chosen_host, 1);
         g_free(chosen_host);
         ns_mutex_unlock(&g_fetch_throttle_mutex);
-        g_task_run_in_thread(chosen, ns_fetch_thread);
-        g_object_unref(chosen);
+        ns_task_run_in_thread(chosen, ns_fetch_thread);
+        ns_task_unref(chosen);
     }
 }
 
 /* Queues a fetch task and dispatches what the throttle allows. */
 static void
-ns_fetch_throttle_submit(GTask *task)
+ns_fetch_throttle_submit(NsTask *task)
 {
     ns_mutex_lock(&g_fetch_throttle_mutex);
     g_queue_push_tail(&g_fetch_queue, task);
@@ -7142,12 +7142,10 @@ ns_fetch_throttle_submit(GTask *task)
 
 /* Worker thread: runs a fetch, delivers coalesced results, then frees its throttle slot. */
 static void
-ns_fetch_thread(GTask        *task,
-                gpointer      source_object,
+ns_fetch_thread(NsTask       *task,
                 gpointer      task_data,
                 GCancellable *cancellable)
 {
-    (void)source_object;
     ns_fetch_ctx *ctx = task_data;
     GError *err = NULL;
     gint64 trace_start = ns_trace_now();
@@ -7164,7 +7162,7 @@ ns_fetch_thread(GTask        *task,
         if (g_log_fetches)
             ns_debug_log_emit(NS_DLOG_NET, "fetch", "failed %s: %s",
                               ctx->url, err ? err->message : "unknown error");
-        g_task_return_error(task, err);
+        ns_task_return_error(task, err);
     } else if (g_log_fetches) {
         if (resp->error)
             ns_debug_log_emit(NS_DLOG_NET, "fetch", "error %s: %s",
@@ -7176,7 +7174,7 @@ ns_fetch_thread(GTask        *task,
                               resp->body ? resp->body->len : 0u);
     }
     if (resp)
-        g_task_return_pointer(task, resp, (GDestroyNotify)ns_response_free);
+        ns_task_return_pointer(task, resp, (GDestroyNotify)ns_response_free);
     {
         char *host = (ctx && ctx->url) ? ns_url_host_from(ctx->url) : NULL;
         ns_mutex_lock(&g_fetch_throttle_mutex);
@@ -7191,10 +7189,9 @@ ns_fetch_thread(GTask        *task,
 
 /* Opens a connect-only curl transfer to warm DNS, TCP and TLS for a URL. */
 static void
-ns_preconnect_thread(GTask *task, gpointer source_object, gpointer task_data,
+ns_preconnect_thread(NsTask *task, gpointer task_data,
                      GCancellable *cancellable)
 {
-    (void)source_object;
     (void)cancellable;
     const char *url = task_data;
     ns_mutex_lock(&g_fetch_throttle_mutex);
@@ -7219,7 +7216,7 @@ ns_preconnect_thread(GTask *task, gpointer source_object, gpointer task_data,
     if (g_preconnect_active > 0) g_preconnect_active--;
     ns_cond_broadcast(&g_fetch_idle_cond);
     ns_mutex_unlock(&g_fetch_throttle_mutex);
-    g_task_return_boolean(task, TRUE);
+    ns_task_return_boolean(task, TRUE);
 }
 
 /* Starts a background preconnect to an http(s) URL. */
@@ -7227,10 +7224,10 @@ void
 ns_net_preconnect_async(const char *url)
 {
     if (!url || !ns_url_is_http_or_https(url)) return;
-    GTask *task = g_task_new(NULL, NULL, NULL, NULL);
-    g_task_set_task_data(task, g_strdup(url), g_free);
-    g_task_run_in_thread(task, ns_preconnect_thread);
-    g_object_unref(task);
+    NsTask *task = ns_task_new(NULL, NULL, NULL);
+    ns_task_set_task_data(task, g_strdup(url), g_free);
+    ns_task_run_in_thread(task, ns_preconnect_thread);
+    ns_task_unref(task);
 }
 
 static ns_net_blob_resolver g_blob_resolver = NULL;
@@ -7279,14 +7276,14 @@ ns_net_resolve_blob_for(const char *url, const char *top_url, char **out_type)
 static gboolean
 ns_net_complete_blob(const char *url, const char *top_url,
                      GCancellable *cancellable,
-                     GAsyncReadyCallback callback, gpointer user_data)
+                     NsTaskReadyCallback callback, gpointer user_data)
 {
     if (!g_blob_resolver || !g_str_has_prefix(url, "blob:")) return FALSE;
     char *type = NULL;
     GBytes *bytes = ns_net_blob_origin_allowed(url, top_url)
         ? ns_net_resolve_blob(url, &type) : NULL;
-    GTask *task = g_task_new(NULL, cancellable, callback, user_data);
-    g_task_set_source_tag(task, ns_net_fetch_async);
+    NsTask *task = ns_task_new(cancellable, callback, user_data);
+    ns_task_set_source_tag(task, ns_net_fetch_async);
     ns_response *resp = g_new0(ns_response, 1);
     resp->body = g_byte_array_new();
     resp->final_url = g_strdup(url);
@@ -7302,8 +7299,8 @@ ns_net_complete_blob(const char *url, const char *top_url,
         resp->error = g_strdup("blob URL not found");
         g_free(type);
     }
-    g_task_return_pointer(task, resp, (GDestroyNotify)ns_response_free);
-    g_object_unref(task);
+    ns_task_return_pointer(task, resp, (GDestroyNotify)ns_response_free);
+    ns_task_unref(task);
     return TRUE;
 }
 
@@ -7311,7 +7308,7 @@ static void
 ns_net_fetch_async(const char        *url,
                    const char        *top_url,
                    GCancellable      *cancellable,
-                   GAsyncReadyCallback callback,
+                   NsTaskReadyCallback callback,
                    gpointer            user_data)
 {
     ns_net_request_async(url, top_url, "GET", NULL, 0, NULL, NULL,
@@ -7326,7 +7323,7 @@ ns_net_post_async(const char         *url,
                   gsize               body_len,
                   const char         *content_type,
                   GCancellable       *cancellable,
-                  GAsyncReadyCallback callback,
+                  NsTaskReadyCallback callback,
                   gpointer            user_data)
 {
     ns_net_request_async(url, top_url, "POST", body, body_len, content_type, NULL,
@@ -7338,13 +7335,13 @@ ns_net_post_async(const char         *url,
 static void
 ns_net_return_response(ns_response *resp, ns_fetch_ctx *gate,
                        GCancellable *cancellable,
-                       GAsyncReadyCallback callback, gpointer user_data)
+                       NsTaskReadyCallback callback, gpointer user_data)
 {
-    GTask *task = g_task_new(NULL, cancellable, callback, user_data);
-    g_task_set_source_tag(task, ns_net_fetch_async);
-    if (gate) g_task_set_task_data(task, gate, ns_fetch_ctx_free);
-    g_task_return_pointer(task, resp, (GDestroyNotify)ns_response_free);
-    g_object_unref(task);
+    NsTask *task = ns_task_new(cancellable, callback, user_data);
+    ns_task_set_source_tag(task, ns_net_fetch_async);
+    if (gate) ns_task_set_task_data(task, gate, ns_fetch_ctx_free);
+    ns_task_return_pointer(task, resp, (GDestroyNotify)ns_response_free);
+    ns_task_unref(task);
 }
 
 /* Starts an async request: policy gate, blob shortcut, coalescing, then throttled fetch. */
@@ -7359,7 +7356,7 @@ ns_net_request_async(const char         *url,
                      ns_fetch_destination dest,
                      ns_fetch_policy    *policy,
                      GCancellable       *cancellable,
-                     GAsyncReadyCallback callback,
+                     NsTaskReadyCallback callback,
                      gpointer            user_data)
 {
     g_return_if_fail(url != NULL);
@@ -7420,9 +7417,9 @@ ns_net_request_async(const char         *url,
             g_ptr_array_add(ctx->extra_headers, g_strdup(extra_headers[i]));
     }
 
-    GTask *task = g_task_new(NULL, cancellable, callback, user_data);
-    g_task_set_source_tag(task, ns_net_request_async);
-    g_task_set_task_data(task, ctx, ns_fetch_ctx_free);
+    NsTask *task = ns_task_new(cancellable, callback, user_data);
+    ns_task_set_source_tag(task, ns_net_request_async);
+    ns_task_set_task_data(task, ctx, ns_fetch_ctx_free);
     ns_fetch_throttle_submit(task);
 }
 
@@ -7494,14 +7491,14 @@ ns_net_fetch_blocking(const char *url, GCancellable *cancellable, GError **error
 
 /* Finishes an async fetch, re-checking policy on the redirected final URL. */
 ns_response *
-ns_net_fetch_finish(GAsyncResult *result, GError **error)
+ns_net_fetch_finish(NsTask *result, GError **error)
 {
-    g_return_val_if_fail(g_task_is_valid(result, NULL), NULL);
-    ns_response *resp = g_task_propagate_pointer(G_TASK(result), error);
-    gpointer tag = g_task_get_source_tag(G_TASK(result));
+    g_return_val_if_fail(result != NULL, NULL);
+    ns_response *resp = ns_task_propagate_pointer(result, error);
+    gpointer tag = ns_task_get_source_tag(result);
     const ns_fetch_ctx *gate =
         tag == ns_net_request_async || tag == ns_net_fetch_async
-            ? g_task_get_task_data(G_TASK(result)) : NULL;
+            ? ns_task_get_task_data(result) : NULL;
     if (gate && ns_request_is_gated(gate->top_url, NULL, gate->dest))
         ns_fetch_gate_final_url(resp, gate->url, gate->top_url, gate->dest,
                                 gate->policy);
