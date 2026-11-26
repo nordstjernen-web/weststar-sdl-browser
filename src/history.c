@@ -6,11 +6,11 @@
 
 #include "history.h"
 #include "plat/ns_plat.h"
+#include "plat/ns_fs.h"
 #include "config.h"
 #include "i18n.h"
 #include "sqlite_db.h"
 
-#include <glib/gstdio.h>
 #include <sqlite3.h>
 #include <string.h>
 
@@ -79,9 +79,9 @@ ns_history_init(void)
         ns_mutex_unlock(&g_history_mutex);
         return;
     }
-    char *dir = g_build_filename(g_get_user_data_dir(), NS_APP_DIR_NAME, NULL);
-    g_mkdir_with_parents(dir, 0700);
-    g_chmod(dir, 0700);
+    char *dir = g_build_filename(ns_fs_user_data_dir(), NS_APP_DIR_NAME, NULL);
+    ns_fs_mkdir_p(dir, 0700);
+    ns_fs_chmod(dir, 0700);
     char *path = g_build_filename(dir, "history.sqlite", NULL);
     g_free(dir);
 
@@ -101,7 +101,7 @@ ns_history_init(void)
         ns_mutex_unlock(&g_history_mutex);
         return;
     }
-    g_chmod(path, 0600);
+    ns_fs_chmod(path, 0600);
     g_free(path);
     history_prune();
     ns_mutex_unlock(&g_history_mutex);

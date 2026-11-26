@@ -7,6 +7,8 @@
 
 #include "pageview.h"
 #include "plat/ns_plat.h"
+#include "plat/ns_env.h"
+#include "plat/ns_fs.h"
 
 #include "enginethread.h"
 #include "keys.h"
@@ -20,7 +22,6 @@
 #include "security.h"
 #include "trace.h"
 
-#include <glib/gstdio.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -213,7 +214,7 @@ static void pv_unref(NsPageView *v) { if (g_atomic_ref_count_dec(&v->rc)) pv_fre
 static int
 pv_settle_ms(void)
 {
-    const char *e = g_getenv(NS_PROC_SETTLE_ENV);
+    const char *e = ns_getenv(NS_PROC_SETTLE_ENV);
     if (e && *e) {
         int n = atoi(e);
         if (n >= 0 && n <= 10000)
@@ -531,12 +532,12 @@ run_req(gpointer data)
             ns_page_session_export(s, req->url) == 0) {
             char *bytes = NULL;
             gsize len = 0;
-            ok = g_file_get_contents(req->url, &bytes, &len, NULL) &&
-                 g_file_set_contents(req->export_dest, bytes, (gssize)len, NULL);
+            ok = ns_fs_get_contents(req->url, &bytes, &len) &&
+                 ns_fs_set_contents(req->export_dest, bytes, (gssize)len);
             g_free(bytes);
         }
         if (req->url)
-            g_unlink(req->url);
+            ns_fs_unlink(req->url);
         res->ok = ok;
         res->url = g_strdup(req->export_dest ? req->export_dest : "");
         post(res);
@@ -2052,7 +2053,7 @@ ns_page_view_save_image(NsPageView *v, const char *dest)
                                  ns_time_monotonic_us(), ++counter);
     Req *req = g_new0(Req, 1);
     req->type = REQ_EXPORT;
-    req->url = g_build_filename(g_get_user_runtime_dir(), base, NULL);
+    req->url = g_build_filename(ns_fs_user_runtime_dir(), base, NULL);
     req->export_dest = g_strdup(dest);
     push_req(v, req);
     g_free(base);
@@ -2099,8 +2100,8 @@ save_page_worker(gpointer data)
         resp = NULL;
     }
     if (resp && !resp->error && resp->body &&
-        g_file_set_contents(c->dest, (const char *)resp->body->data,
-                            (gssize)resp->body->len, NULL)) {
+        ns_fs_set_contents(c->dest, (const char *)resp->body->data,
+                           (gssize)resp->body->len)) {
         c->ok = TRUE;
         ns_security_mark_download_origin(c->dest,
                                          resp->final_url ? resp->final_url : c->url);

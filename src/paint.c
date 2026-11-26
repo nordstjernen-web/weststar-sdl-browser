@@ -5,6 +5,7 @@
  */
 
 #include "paint.h"
+#include "plat/ns_env.h"
 
 static int g_dbg_paint_x = -2, g_dbg_paint_y = -2;
 
@@ -6959,7 +6960,7 @@ paint_3d_root(gfx_t *cr, const ns_box *b, const char *highlight)
         paint_block(cr, b);
     GArray *quads = collect_root_quads(b);
     paint_3d_register(b, quads);
-    if (g_getenv("NS_3D_DEBUG")) {
+    if (ns_getenv("NS_3D_DEBUG")) {
         fprintf(stderr, "3d root <%s class=%s> %u quads\n",
                 b->dom && b->dom->name ? b->dom->name : "?",
                 b->dom ? (ns_element_get_attr(b->dom, "class") ?: "") : "",
@@ -7016,7 +7017,7 @@ static void
 ns_dbg_paint_probe(gfx_t *cr, const ns_box *b)
 {
     if (g_dbg_paint_x == -2) {
-        const char *s = g_getenv("NS_DBG_PAINT_AT");
+        const char *s = ns_getenv("NS_DBG_PAINT_AT");
         g_dbg_paint_x = g_dbg_paint_y = -1;
         if (s) sscanf(s, "%d,%d", &g_dbg_paint_x, &g_dbg_paint_y);
     }

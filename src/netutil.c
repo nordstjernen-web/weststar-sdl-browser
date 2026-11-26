@@ -5,9 +5,9 @@
  */
 
 #include "net.h"
+#include "plat/ns_fs.h"
 #include "config.h"
 
-#include <glib/gstdio.h>
 #include <string.h>
 
 #ifdef G_OS_WIN32
@@ -311,14 +311,14 @@ ns_url_from_local_path(const char *path)
 #endif
 
     if (!candidate) {
-        if (!g_file_test(path, G_FILE_TEST_EXISTS))
+        if (!ns_fs_test(path, NS_FS_TEST_EXISTS))
             return NULL;
         candidate = g_canonicalize_filename(path, NULL);
     }
     if (!candidate)
         return NULL;
 
-    if (g_file_test(candidate, G_FILE_TEST_IS_DIR) &&
+    if (ns_fs_test(candidate, NS_FS_TEST_IS_DIR) &&
         !g_str_has_suffix(candidate, G_DIR_SEPARATOR_S)) {
         char *with_sep = g_strconcat(candidate, G_DIR_SEPARATOR_S, NULL);
         g_free(candidate);

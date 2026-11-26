@@ -6,6 +6,8 @@
 
 #include "libnorthstar.h"
 #include "plat/ns_plat.h"
+#include "plat/ns_env.h"
+#include "plat/ns_fs.h"
 #include "mainctx.h"
 
 #include "gfx.h"
@@ -603,7 +605,7 @@ browser_verify_layout(ns_browser *b, const char *what)
 {
     static int verify = -1;
     static guint checked, failed;
-    if (verify < 0) verify = g_getenv("NS_LAYOUT_VERIFY") != NULL;
+    if (verify < 0) verify = ns_getenv("NS_LAYOUT_VERIFY") != NULL;
     if (!verify || !b->layout) return;
     ns_css_set_viewport((double)b->vw, b->vh);
     ns_css_set_doc_language(b->doc_language);
@@ -824,7 +826,7 @@ browser_restyle_impl(ns_browser *b, GPtrArray *targets)
     g_hash_table_destroy(old_to_new);
     g_hash_table_destroy(moved);
     if (!ok) {
-        if (g_getenv("NS_PROFILE"))
+        if (ns_getenv("NS_PROFILE"))
             g_printerr("[profile] restyle needs relayout styles=%u %.2fms "
                        "cascade=%.2f\n", changed,
                        (ns_time_monotonic_us() - t0) / 1000.0,
@@ -871,7 +873,7 @@ browser_restyle_impl(ns_browser *b, GPtrArray *targets)
         b->repaint_pending = TRUE;
     }
     g_array_free(rects, TRUE);
-    if (g_getenv("NS_PROFILE"))
+    if (ns_getenv("NS_PROFILE"))
         g_printerr("[profile] restyle kept layout styles=%u %.2fms "
                    "cascade=%.2f%s\n", changed,
                    (ns_time_monotonic_us() - t0) / 1000.0, (t1 - t0) / 1000.0,
@@ -1416,7 +1418,7 @@ resolve_local_path(const char *url)
 {
     if (!url || strstr(url, "://") ||
         g_str_has_prefix(url, "about:") || g_str_has_prefix(url, "data:") ||
-        !g_file_test(url, G_FILE_TEST_EXISTS))
+        !ns_fs_test(url, NS_FS_TEST_EXISTS))
         return NULL;
     char *abs = g_canonicalize_filename(url, NULL);
     char *file_url = g_filename_to_uri(abs, NULL, NULL);
@@ -1977,20 +1979,18 @@ perf_dump_threads(GString *out)
 {
     g_string_append(out, "Threads\n");
 #if defined(__linux__)
-    GError *err = NULL;
-    GDir *dir = g_dir_open("/proc/self/task", 0, &err);
+    NsDir *dir = ns_dir_open("/proc/self/task");
     if (!dir) {
         g_string_append_printf(out, "  (unavailable: %s)\n",
-                               err ? err->message : "?");
-        g_clear_error(&err);
+                               ns_fs_last_error());
         return;
     }
     const char *tid;
     int n = 0;
-    while ((tid = g_dir_read_name(dir))) {
+    while ((tid = ns_dir_read_name(dir))) {
         char *path = g_strdup_printf("/proc/self/task/%s/comm", tid);
         char *comm = NULL;
-        if (g_file_get_contents(path, &comm, NULL, NULL) && comm) {
+        if (ns_fs_get_contents(path, &comm, NULL) && comm) {
             g_string_append_printf(out, "  [%s] %s", tid, g_strchomp(comm));
             g_string_append_c(out, '\n');
             n++;
@@ -1998,7 +1998,7 @@ perf_dump_threads(GString *out)
         g_free(comm);
         g_free(path);
     }
-    g_dir_close(dir);
+    ns_dir_close(dir);
     g_string_append_printf(out, "  %d thread%s total\n", n, n == 1 ? "" : "s");
 #else
     g_string_append(out, "  (thread enumeration is Linux-only)\n");
@@ -2542,7 +2542,7 @@ ns_browser_render_argb32_rects(ns_browser *browser, int scroll_x, int scroll_y,
         browser_paint_rect(browser, surf, scroll_x, scroll_y, scale,
                            0, 0, width, height);
     }
-    if (g_getenv("NS_PROFILE"))
+    if (ns_getenv("NS_PROFILE"))
         g_printerr("[profile] paint %6.1fms %dx%d\n",
                    (double)(ns_time_monotonic_us() - paint_t0) / 1000.0,
                    width, height);
@@ -2556,7 +2556,7 @@ ns_browser_render_argb32_rects(ns_browser *browser, int scroll_x, int scroll_y,
      * where any process that can set the environment could make it write
      * every page it shows to disk. */
     const char *dump_dir = ns_security_tool_mode()
-        ? g_getenv("NS_FRAME_DUMP") : NULL;
+        ? ns_getenv("NS_FRAME_DUMP") : NULL;
     if (dump_dir && *dump_dir) {
         static int frame_no;
         if (frame_no % 30 == 0) {

@@ -7,6 +7,8 @@
 
 #include "window.h"
 #include "plat/ns_plat.h"
+#include "plat/ns_env.h"
+#include "plat/ns_fs.h"
 
 #include "icons.h"
 #include "mainloop.h"
@@ -27,7 +29,6 @@
 #include "version.h"
 
 #include <SDL3/SDL.h>
-#include <glib/gstdio.h>
 #include <locale.h>
 #include <math.h>
 #include <string.h>
@@ -392,8 +393,8 @@ download_worker(gpointer data)
         resp = NULL;
     }
     if (resp && !resp->error && resp->body &&
-        g_file_set_contents(d->path, (const char *)resp->body->data,
-                            (gssize)resp->body->len, NULL)) {
+        ns_fs_set_contents(d->path, (const char *)resp->body->data,
+                           (gssize)resp->body->len)) {
         d->ok = TRUE;
         d->size = resp->body->len;
         ns_security_mark_download_origin(d->path,
@@ -435,7 +436,7 @@ start_download(NsWindow *w, const char *url, const char *suggested)
         name = g_strdup("download");
     const char *dir = ns_security_downloads_dir();
     char *path = g_build_filename(dir, name, NULL);
-    for (int n = 1; g_file_test(path, G_FILE_TEST_EXISTS) && n < 1000; n++) {
+    for (int n = 1; ns_fs_test(path, NS_FS_TEST_EXISTS) && n < 1000; n++) {
         g_free(path);
         char *alt = g_strdup_printf("%s.%d", name, n);
         path = g_build_filename(dir, alt, NULL);
@@ -1131,8 +1132,8 @@ update_geometry(NsWindow *w)
     double scale = SDL_GetWindowDisplayScale(w->win);
     if (!(density > 0)) density = 1.0;
     if (!(scale > 0)) scale = density;
-    if (g_getenv("NS_UI_SCALE")) {
-        double forced = g_ascii_strtod(g_getenv("NS_UI_SCALE"), NULL);
+    if (ns_getenv("NS_UI_SCALE")) {
+        double forced = g_ascii_strtod(ns_getenv("NS_UI_SCALE"), NULL);
         if (forced >= 1.0 && forced <= 4.0)
             scale = forced;
     }
@@ -1658,7 +1659,7 @@ write_session_cb(gpointer data)
     const char *url = w ? ns_page_view_url(w->view) : NULL;
     char *contents = w && !w->private_mode && session_url_recoverable(url)
                    ? g_strconcat(url, "\n", NULL) : g_strdup("");
-    g_file_set_contents(g_app.session_path, contents, -1, NULL);
+    ns_fs_set_contents(g_app.session_path, contents, -1);
     g_free(contents);
     return NS_SOURCE_CONTINUE;
 }
@@ -1667,7 +1668,7 @@ static char *
 recovered_url(const char *session_path)
 {
     char *contents = NULL, *found = NULL;
-    if (!g_file_get_contents(session_path, &contents, NULL, NULL))
+    if (!ns_fs_get_contents(session_path, &contents, NULL))
         return NULL;
     char **lines = g_strsplit(contents, "\n", -1);
     for (int i = 0; lines && lines[i]; i++)
@@ -1709,7 +1710,7 @@ confirm_ignored_cert_errors(void)
 static void
 clear_cache_dir(const char *name, gint64 min_age_s)
 {
-    char *dir = g_build_filename(g_get_user_cache_dir(), NS_APP_DIR_NAME, name,
+    char *dir = g_build_filename(ns_fs_user_cache_dir(), NS_APP_DIR_NAME, name,
                                  NULL);
     gint64 cutoff = ns_time_real_us() / G_USEC_PER_SEC - min_age_s;
     GQueue *stack = g_queue_new();
@@ -1718,28 +1719,28 @@ clear_cache_dir(const char *name, gint64 min_age_s)
     guint guard = 0;
     while (!g_queue_is_empty(stack) && guard++ < 100000) {
         char *d = g_queue_pop_head(stack);
-        GDir *gd = g_dir_open(d, 0, NULL);
+        NsDir *gd = ns_dir_open(d);
         if (gd) {
             const char *e;
-            while ((e = g_dir_read_name(gd))) {
+            while ((e = ns_dir_read_name(gd))) {
                 char *child = g_build_filename(d, e, NULL);
-                if (g_file_test(child, G_FILE_TEST_IS_SYMLINK) ||
-                    !g_file_test(child, G_FILE_TEST_IS_DIR)) {
-                    GStatBuf st;
+                if (ns_fs_test(child, NS_FS_TEST_IS_SYMLINK) ||
+                    !ns_fs_test(child, NS_FS_TEST_IS_DIR)) {
+                    NsFsStat st;
                     if (min_age_s <= 0 ||
-                        (g_lstat(child, &st) == 0 && st.st_mtime < cutoff))
-                        g_unlink(child);
+                        (ns_fs_stat(child, &st) == 0 && st.mtime < cutoff))
+                        ns_fs_unlink(child);
                     g_free(child);
                 } else {
                     g_queue_push_head(stack, child);
                 }
             }
-            g_dir_close(gd);
+            ns_dir_close(gd);
         }
         g_ptr_array_add(dirs, d);
     }
     for (guint i = dirs->len; i > 1; i--)
-        g_rmdir(g_ptr_array_index(dirs, i - 1));
+        ns_fs_rmdir(g_ptr_array_index(dirs, i - 1));
     g_queue_free_full(stack, g_free);
     g_ptr_array_free(dirs, TRUE);
     g_free(dir);

@@ -1,5 +1,6 @@
 # Headers that compile files into the binary (see ns_embeds in
-# src/meson.build), plus pdfjs_fonts.h, the table over the embedded fonts.
+# src/meson.build), plus pdfjs_fonts.h, the table over the embedded fonts,
+# and ns_icons.h, the one over the chrome's icons.
 if have_pdfjs
   pdfjs_fonts_conf = configuration_data()
   pdfjs_fonts_conf.set('PDFJS_FONT_INCLUDES', '\n'.join(pdfjs_font_includes))
@@ -49,3 +50,13 @@ foreach e : ns_embeds
     )
   endif
 endforeach
+
+# The icon table over the embedded icon headers.
+ns_icons_conf = configuration_data()
+ns_icons_conf.set('ICON_INCLUDES', '\n'.join(ns_icon_includes))
+ns_icons_conf.set('ICON_ROWS', '\n'.join(ns_icon_rows))
+ns_embedded_headers += configure_file(
+  input: 'ns_icons.h.in',
+  output: 'ns_icons.h',
+  configuration: ns_icons_conf,
+)

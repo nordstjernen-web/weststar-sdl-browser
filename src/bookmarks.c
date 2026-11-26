@@ -5,9 +5,9 @@
  */
 
 #include "bookmarks.h"
+#include "plat/ns_fs.h"
 #include "config.h"
 
-#include <glib/gstdio.h>
 #include <string.h>
 
 struct ns_bookmarks {
@@ -19,9 +19,9 @@ struct ns_bookmarks {
 static char *
 bookmarks_path(void)
 {
-    const char *config = g_get_user_config_dir();
+    const char *config = ns_fs_user_config_dir();
     g_autofree char *dir = g_build_filename(config, NS_APP_DIR_NAME, NULL);
-    g_mkdir_with_parents(dir, 0700);
+    ns_fs_mkdir_p(dir, 0700);
     return g_build_filename(dir, "bookmarks.txt", NULL);
 }
 
@@ -44,7 +44,7 @@ ns_bookmarks_load(void)
 
     char *contents = NULL;
     gsize len = 0;
-    if (g_file_get_contents(bm->path, &contents, &len, NULL) && contents) {
+    if (ns_fs_get_contents(bm->path, &contents, &len) && contents) {
         char **lines = g_strsplit(contents, "\n", -1);
         for (int i = 0; lines[i]; i++) {
             char *line = g_strstrip(lines[i]);

@@ -8,6 +8,8 @@
 #endif
 #include "safebrowsing_google.h"
 #include "plat/ns_plat.h"
+#include "plat/ns_env.h"
+#include "plat/ns_fs.h"
 #include "config.h"
 #include "net.h"
 #include "ns_sb_key.h"
@@ -105,7 +107,7 @@ G_STATIC_ASSERT(G_N_ELEMENTS(sbg_lists) == NS_SB_GOOGLE_LISTS);
 static const char *
 sbg_api_key(void)
 {
-    const char *env = g_getenv("NS_SAFE_BROWSING_API_KEY");
+    const char *env = ns_getenv("NS_SAFE_BROWSING_API_KEY");
     if (env && *env)
         return env;
     return NS_SAFE_BROWSING_API_KEY;
@@ -135,7 +137,7 @@ sbg_now(void)
 static char *
 sbg_dir(void)
 {
-    return g_build_filename(g_get_user_cache_dir(), NS_APP_DIR_NAME,
+    return g_build_filename(ns_fs_user_cache_dir(), NS_APP_DIR_NAME,
                             "safebrowsing", NULL);
 }
 
@@ -550,7 +552,7 @@ sbg_list_save(const char *name, const sbg_list *l)
     g_autofree char *path = sbg_list_path(name);
     gboolean ok = FALSE;
     for (int attempt = 0; attempt < 5 && !ok; attempt++) {
-        ok = g_file_set_contents(path, (const char *)buf, (gssize)size, NULL);
+        ok = ns_fs_set_contents(path, (const char *)buf, (gssize)size);
         if (!ok)
             ns_sleep_us(200 * 1000);
     }
@@ -659,7 +661,7 @@ sbg_update_list(gsize index)
             sbg_list_clear(&fresh);
         } else if (values) {
             g_autofree char *path = sbg_list_path(name);
-            g_unlink(path);
+            ns_fs_unlink(path);
         }
         g_free(values);
     }
@@ -731,7 +733,7 @@ ns_sbg_start(void)
     if (!ns_once_enter(&started))
         return;
     g_autofree char *dir = sbg_dir();
-    g_mkdir_with_parents(dir, 0700);
+    ns_fs_mkdir_p(dir, 0700);
     ns_mutex_lock(&g_sbg_lock);
     g_sbg_full_hits = g_hash_table_new_full(g_bytes_hash, g_bytes_equal,
                                             (GDestroyNotify)g_bytes_unref,
@@ -1293,9 +1295,9 @@ ns_sbg_get_stats(ns_sb_stats *out)
             ls->prefixes = l.count;
             ls->next_update = l.next_update;
             g_autofree char *path = sbg_list_path(sbg_lists[i]);
-            GStatBuf st;
-            if (g_stat(path, &st) == 0)
-                ls->updated = (gint64)st.st_mtime;
+            NsFsStat st;
+            if (ns_fs_stat(path, &st) == 0)
+                ls->updated = (gint64)st.mtime;
         }
         sbg_list_clear(&l);
     }

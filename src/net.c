@@ -6,6 +6,8 @@
 
 #include "net.h"
 #include "plat/ns_plat.h"
+#include "plat/ns_env.h"
+#include "plat/ns_fs.h"
 #include "content_decode.h"
 #include "trace.h"
 #include "cache.h"
@@ -371,8 +373,8 @@ static char *
 ns_net_data_path(char **slot, const char *basename)
 {
     if (*slot) return *slot;
-    char *dir = g_build_filename(g_get_user_data_dir(), NS_APP_DIR_NAME, NULL);
-    g_mkdir_with_parents(dir, 0700);
+    char *dir = g_build_filename(ns_fs_user_data_dir(), NS_APP_DIR_NAME, NULL);
+    ns_fs_mkdir_p(dir, 0700);
     *slot = g_build_filename(dir, basename, NULL);
     g_free(dir);
     return *slot;
@@ -383,21 +385,21 @@ void
 ns_rmrf(const char *path)
 {
     if (!path) return;
-    GDir *dir = g_dir_open(path, 0, NULL);
+    NsDir *dir = ns_dir_open(path);
     if (dir) {
         const char *name;
-        while ((name = g_dir_read_name(dir))) {
+        while ((name = ns_dir_read_name(dir))) {
             char *child = g_build_filename(path, name, NULL);
-            if (g_file_test(child, G_FILE_TEST_IS_DIR) &&
-                !g_file_test(child, G_FILE_TEST_IS_SYMLINK))
+            if (ns_fs_test(child, NS_FS_TEST_IS_DIR) &&
+                !ns_fs_test(child, NS_FS_TEST_IS_SYMLINK))
                 ns_rmrf(child);
             else
-                g_unlink(child);
+                ns_fs_unlink(child);
             g_free(child);
         }
-        g_dir_close(dir);
+        ns_dir_close(dir);
     }
-    g_rmdir(path);
+    ns_fs_rmdir(path);
 }
 
 static gboolean
@@ -418,19 +420,19 @@ ns_net_hsts_curl_path(void)
     if (g_hsts_curl_path) return g_hsts_curl_path;
     if (ns_net_is_private() || !g_atomic_int_get(&g_ignore_cert_errors))
         return ns_net_data_path(&g_hsts_curl_path, "hsts-curl.txt");
-    char *real_dir = g_build_filename(g_get_user_data_dir(), NS_APP_DIR_NAME,
+    char *real_dir = g_build_filename(ns_fs_user_data_dir(), NS_APP_DIR_NAME,
                                       NULL);
-    g_mkdir_with_parents(real_dir, 0700);
+    ns_fs_mkdir_p(real_dir, 0700);
     g_hsts_curl_path = g_build_filename(real_dir,
                                         "hsts-curl-unverified-run.txt",
                                         NULL);
     char *real = g_build_filename(real_dir, "hsts-curl.txt", NULL);
     char *contents = NULL;
     gsize len = 0;
-    if (g_file_get_contents(real, &contents, &len, NULL))
-        g_file_set_contents(g_hsts_curl_path, contents, (gssize)len, NULL);
+    if (ns_fs_get_contents(real, &contents, &len))
+        ns_fs_set_contents(g_hsts_curl_path, contents, (gssize)len);
     else
-        g_file_set_contents(g_hsts_curl_path, "", 0, NULL);
+        ns_fs_set_contents(g_hsts_curl_path, "", 0);
     g_free(contents);
     g_free(real);
     g_free(real_dir);
@@ -463,11 +465,9 @@ ns_hsts_cache_reload_locked(const char *path)
 
     char *content = NULL;
     gsize len = 0;
-    GError *err = NULL;
-    if (!g_file_get_contents(path, &content, &len, &err)) {
-        if (!g_error_matches(err, G_FILE_ERROR, G_FILE_ERROR_NOENT))
-            g_warning("hsts: failed to read %s: %s", path, err->message);
-        g_clear_error(&err);
+    if (!ns_fs_get_contents(path, &content, &len)) {
+        if (ns_fs_test(path, NS_FS_TEST_EXISTS))
+            g_warning("hsts: failed to read %s: %s", path, ns_fs_last_error());
         return;
     }
 
@@ -496,9 +496,9 @@ ns_hsts_cache_reload_locked(const char *path)
 static gint64
 file_mtime_us(const char *path)
 {
-    GStatBuf st;
-    if (g_stat(path, &st) != 0) return 0;
-    return (gint64)st.st_mtime * G_USEC_PER_SEC;
+    NsFsStat st;
+    if (ns_fs_stat(path, &st) != 0) return 0;
+    return (gint64)st.mtime * G_USEC_PER_SEC;
 }
 
 /* TRUE if the host or a parent with includeSubDomains has an unexpired HSTS entry. */
@@ -1446,9 +1446,9 @@ ns_net_cookie_dir(void)
 {
     if (g_cookie_dir) return g_cookie_dir;
     if (ns_net_is_private()) return NULL;
-    g_cookie_dir = g_build_filename(g_get_user_config_dir(), NS_APP_DIR_NAME,
+    g_cookie_dir = g_build_filename(ns_fs_user_config_dir(), NS_APP_DIR_NAME,
                                     "cookies", NULL);
-    g_mkdir_with_parents(g_cookie_dir, 0700);
+    ns_fs_mkdir_p(g_cookie_dir, 0700);
     return g_cookie_dir;
 }
 
@@ -1457,19 +1457,19 @@ static void
 ns_net_empty_dir(const char *dir)
 {
     if (!dir) return;
-    GDir *d = g_dir_open(dir, 0, NULL);
+    NsDir *d = ns_dir_open(dir);
     if (!d) return;
     const char *name;
-    while ((name = g_dir_read_name(d))) {
+    while ((name = ns_dir_read_name(d))) {
         char *child = g_build_filename(dir, name, NULL);
-        if (g_file_test(child, G_FILE_TEST_IS_DIR) &&
-            !g_file_test(child, G_FILE_TEST_IS_SYMLINK))
+        if (ns_fs_test(child, NS_FS_TEST_IS_DIR) &&
+            !ns_fs_test(child, NS_FS_TEST_IS_SYMLINK))
             ns_rmrf(child);
         else
-            g_unlink(child);
+            ns_fs_unlink(child);
         g_free(child);
     }
-    g_dir_close(d);
+    ns_dir_close(d);
 }
 
 /* Clears all in-memory cookie partitions and deletes the jar files. */
@@ -1497,7 +1497,7 @@ ns_net_cookies_clear(void)
 static void
 ns_net_site_storage_clear(void)
 {
-    char *base = g_build_filename(g_get_user_data_dir(), NS_APP_DIR_NAME, NULL);
+    char *base = g_build_filename(ns_fs_user_data_dir(), NS_APP_DIR_NAME, NULL);
     char *localstorage = g_build_filename(base, "localstorage", NULL);
     char *indexeddb    = g_build_filename(base, "indexeddb", NULL);
     ns_rmrf(localstorage);
@@ -1547,7 +1547,7 @@ cookie_partition_open_jar(ns_cookie_partition *p, const char *site)
     char *jar = ns_net_cookie_path_for_partition(site);
     char *legacy_js_jar = g_strdup_printf("%.*s.js.txt",
                                           (int)(strlen(jar) - 4), jar);
-    gboolean migrate = g_file_test(legacy_js_jar, G_FILE_TEST_EXISTS);
+    gboolean migrate = ns_fs_test(legacy_js_jar, NS_FS_TEST_EXISTS);
     curl_easy_setopt(p->holder, CURLOPT_SHARE, p->share);
     curl_easy_setopt(p->holder, CURLOPT_COOKIEFILE, jar);
     if (migrate)
@@ -1556,7 +1556,7 @@ cookie_partition_open_jar(ns_cookie_partition *p, const char *site)
     curl_easy_setopt(p->holder, CURLOPT_COOKIELIST, "RELOAD");
     if (migrate) {
         curl_easy_setopt(p->holder, CURLOPT_COOKIELIST, "FLUSH");
-        g_unlink(legacy_js_jar);
+        ns_fs_unlink(legacy_js_jar);
     }
     g_free(legacy_js_jar);
     g_free(jar);
@@ -1978,7 +1978,7 @@ ns_net_http_version(void)
     if (ns_once_enter(&once)) {
         const curl_version_info_data *info = curl_version_info(CURLVERSION_NOW);
         if (info && (info->features & CURL_VERSION_HTTP3) &&
-            g_getenv("NS_FORCE_HTTP3"))
+            ns_getenv("NS_FORCE_HTTP3"))
             version = CURL_HTTP_VERSION_3;
         ns_once_leave(&once);
     }
@@ -2012,7 +2012,7 @@ static gboolean
 ns_net_try_ca_bundle(const char *path)
 {
     if (!path || !*path) return FALSE;
-    if (!g_file_test(path, G_FILE_TEST_EXISTS)) return FALSE;
+    if (!ns_fs_test(path, NS_FS_TEST_EXISTS)) return FALSE;
     g_ca_bundle = g_strdup(path);
     return TRUE;
 }
@@ -2022,8 +2022,8 @@ static void
 ns_net_resolve_ca_bundle(void)
 {
     if (g_ca_bundle) return;
-    const char *env = g_getenv("CURL_CA_BUNDLE");
-    if (!env) env = g_getenv("SSL_CERT_FILE");
+    const char *env = ns_getenv("CURL_CA_BUNDLE");
+    if (!env) env = ns_getenv("SSL_CERT_FILE");
     if (ns_net_try_ca_bundle(env)) return;
 
     char *dir = ns_executable_dir();
@@ -3022,24 +3022,24 @@ about_read_first(const char *const *rel_paths, gsize *out_len)
 {
     const char *exe = ns_app_self_exe();
     char *exe_dir = exe ? g_path_get_dirname(exe) : g_strdup(".");
-    const char *user_data_dir = g_get_user_data_dir();
+    const char *user_data_dir = ns_fs_user_data_dir();
     const char *const *system_data_dirs = g_get_system_data_dirs();
     char *contents = NULL;
     gsize len = 0;
     for (int i = 0; rel_paths[i]; i++) {
         char *path = g_build_filename(exe_dir, rel_paths[i], NULL);
-        gboolean ok = g_file_get_contents(path, &contents, &len, NULL);
+        gboolean ok = ns_fs_get_contents(path, &contents, &len);
         g_free(path);
         if (ok) break;
         if (user_data_dir && *user_data_dir) {
             path = g_build_filename(user_data_dir, rel_paths[i], NULL);
-            ok = g_file_get_contents(path, &contents, &len, NULL);
+            ok = ns_fs_get_contents(path, &contents, &len);
             g_free(path);
             if (ok) break;
         }
         for (int j = 0; system_data_dirs && system_data_dirs[j]; j++) {
             path = g_build_filename(system_data_dirs[j], rel_paths[i], NULL);
-            ok = g_file_get_contents(path, &contents, &len, NULL);
+            ok = ns_fs_get_contents(path, &contents, &len);
             g_free(path);
             if (ok) break;
         }
@@ -4001,13 +4001,13 @@ read_file_budgeted(const char *path,
                    guint64 budget,
                    char **error_out)
 {
-    GStatBuf st;
-    if (g_stat(path, &st) == 0 && st.st_size > 0 &&
-        ((guint64)st.st_size > budget || (guint64)st.st_size > G_MAXUINT)) {
-        if (error_out) *error_out = response_budget_error((guint64)st.st_size);
+    NsFsStat st;
+    if (ns_fs_stat(path, &st) == 0 && st.size > 0 &&
+        ((guint64)st.size > budget || (guint64)st.size > G_MAXUINT)) {
+        if (error_out) *error_out = response_budget_error((guint64)st.size);
         return FALSE;
     }
-    FILE *f = g_fopen(path, "rb");
+    FILE *f = ns_fs_fopen(path, "rb");
     if (!f) {
         if (error_out) *error_out = g_strdup(g_strerror(errno));
         return FALSE;
@@ -4240,13 +4240,11 @@ static char *
 file_directory_listing_page(const char *path, const char *url, long *status_out)
 {
     if (status_out) *status_out = 200;
-    GError *err = NULL;
-    GDir *dir = g_dir_open(path, 0, &err);
+    NsDir *dir = ns_dir_open(path);
     if (!dir) {
-        long status = g_error_matches(err, G_FILE_ERROR, G_FILE_ERROR_ACCES)
-            ? 403 : 404;
-        char *msg = g_strdup(err ? err->message : "cannot read folder");
-        g_clear_error(&err);
+        /* A folder that is there but cannot be listed is refused. */
+        long status = ns_fs_test(path, NS_FS_TEST_IS_DIR) ? 403 : 404;
+        char *msg = g_strdup(ns_fs_last_error());
         if (status_out) *status_out = status;
         char *html = file_directory_error_page(url, status, msg);
         g_free(msg);
@@ -4255,18 +4253,18 @@ file_directory_listing_page(const char *path, const char *url, long *status_out)
 
     GPtrArray *entries = g_ptr_array_new_with_free_func(listing_entry_free);
     const char *name;
-    while ((name = g_dir_read_name(dir)) != NULL) {
+    while ((name = ns_dir_read_name(dir)) != NULL) {
         char *full = g_build_filename(path, name, NULL);
         ns_listing_entry *e = g_new0(ns_listing_entry, 1);
         e->name = g_strdup(name);
         e->display = g_filename_display_name(name);
-        e->is_dir = g_file_test(full, G_FILE_TEST_IS_DIR);
+        e->is_dir = ns_fs_test(full, NS_FS_TEST_IS_DIR);
         e->have_size = TRUE;
-        GStatBuf st;
-        if (g_stat(full, &st) == 0) {
-            if (st.st_size > 0)
-                e->size = (guint64)st.st_size;
-            e->date = file_mtime_label((gint64)st.st_mtime);
+        NsFsStat st;
+        if (ns_fs_stat(full, &st) == 0) {
+            if (st.size > 0)
+                e->size = (guint64)st.size;
+            e->date = file_mtime_label((gint64)st.mtime);
         }
         e->uri = file_uri_for_path(full, e->is_dir);
         if (e->uri)
@@ -4275,7 +4273,7 @@ file_directory_listing_page(const char *path, const char *url, long *status_out)
             listing_entry_free(e);
         g_free(full);
     }
-    g_dir_close(dir);
+    ns_dir_close(dir);
     g_ptr_array_sort(entries, listing_entry_compare);
 
     char *display_path = g_filename_display_name(path);
@@ -4571,7 +4569,7 @@ synthesize_file_response(const char *url, const char *top_url,
         return TRUE;
     }
 
-    if (g_file_test(path, G_FILE_TEST_IS_DIR)) {
+    if (ns_fs_test(path, NS_FS_TEST_IS_DIR)) {
         if (!navigation) {
             resp->status = 0;
             resp->error = g_strdup("directory listings are only shown to "

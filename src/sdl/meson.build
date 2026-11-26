@@ -35,19 +35,10 @@ if weststar_pie and host_system != 'darwin'
   weststar_sdl_platform_link_args += cc.get_supported_link_arguments(['-pie'])
 endif
 
-gnome = import('gnome')
-weststar_icon_resources = gnome.compile_resources(
-  'weststar-icon-resources',
-  meson.project_source_root() / 'data' / 'icons' / 'weststar-icons.gresource.xml',
-  source_dir: meson.project_source_root() / 'data' / 'icons',
-  c_name: 'weststar_icons',
-)
-
 executable(
   'weststar',
   northstar_engine_sources + northstar_app_sources +
     weststar_sdl_sources + northstar_audio_sources +
-    weststar_icon_resources +
     northstar_win_resources + ns_embedded_headers + [sb_key_h] +
     pdf_viewer_headers,
   dependencies: northstar_deps + [sdl3_dep, libnuklear, weststar_gfx_dep] +

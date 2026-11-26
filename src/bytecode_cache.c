@@ -6,6 +6,7 @@
 
 #include "bytecode_cache.h"
 #include "plat/ns_plat.h"
+#include "plat/ns_fs.h"
 
 #include "config.h"
 #include "net.h"
@@ -75,9 +76,9 @@ ns_bytecode_cache_init(void)
     if (!g_dir) {
         const ns_config *c = ns_config_get();
         if (!c || c->cache_enabled) {
-            const char *base = g_get_user_cache_dir();
+            const char *base = ns_fs_user_cache_dir();
             g_dir = g_build_filename(base, NS_APP_DIR_NAME, NS_BYTECODE_CACHE_DIR, NULL);
-            g_mkdir_with_parents(g_dir, 0700);
+            ns_fs_mkdir_p(g_dir, 0700);
         }
     }
     ns_mutex_unlock(&g_lock);
@@ -136,7 +137,7 @@ disk_path_for(const char *key)
     if (!base || !key || !*key) { g_free(base); return NULL; }
     char sub[3] = { key[0], key[1], '\0' };
     char *dir = g_build_filename(base, sub, NULL);
-    g_mkdir_with_parents(dir, 0700);
+    ns_fs_mkdir_p(dir, 0700);
     char *file = g_build_filename(dir, key + 2, NULL);
     g_free(dir);
     g_free(base);
@@ -149,15 +150,15 @@ read_disk(const char *key, gsize *out_len)
 {
     char *path = disk_path_for(key);
     if (!path) return NULL;
-    GStatBuf stbuf;
-    if (g_stat(path, &stbuf) != 0 || stbuf.st_size < 8 ||
-        (guint64)stbuf.st_size > (guint64)NS_BYTECODE_CACHE_VALUE_CAP_BYTES + 8) {
+    NsFsStat stbuf;
+    if (ns_fs_stat(path, &stbuf) != 0 || stbuf.size < 8 ||
+        (guint64)stbuf.size > (guint64)NS_BYTECODE_CACHE_VALUE_CAP_BYTES + 8) {
         g_free(path);
         return NULL;
     }
     gchar *contents = NULL;
     gsize length = 0;
-    gboolean ok = g_file_get_contents(path, &contents, &length, NULL);
+    gboolean ok = ns_fs_get_contents(path, &contents, &length);
     if (ok) g_utime(path, NULL);
     g_free(path);
     if (!ok) return NULL;
@@ -206,36 +207,36 @@ prune_disk(void)
     if (!base) return;
     GArray *files = g_array_new(FALSE, FALSE, sizeof(disk_file));
     guint64 total = 0;
-    GDir *top = g_dir_open(base, 0, NULL);
+    NsDir *top = ns_dir_open(base);
     const char *sub;
-    while (top && (sub = g_dir_read_name(top))) {
+    while (top && (sub = ns_dir_read_name(top))) {
         char *subdir = g_build_filename(base, sub, NULL);
-        GDir *d = g_dir_open(subdir, 0, NULL);
+        NsDir *d = ns_dir_open(subdir);
         const char *name;
-        while (d && (name = g_dir_read_name(d))) {
+        while (d && (name = ns_dir_read_name(d))) {
             disk_file f = { g_build_filename(subdir, name, NULL), 0, 0 };
-            GStatBuf st;
-            if (g_file_test(f.path, G_FILE_TEST_IS_REGULAR) &&
-                g_stat(f.path, &st) == 0) {
-                f.size = (guint64)st.st_size;
-                f.mtime = (gint64)st.st_mtime;
+            NsFsStat st;
+            if (ns_fs_test(f.path, NS_FS_TEST_IS_REGULAR) &&
+                ns_fs_stat(f.path, &st) == 0) {
+                f.size = (guint64)st.size;
+                f.mtime = (gint64)st.mtime;
                 total += f.size;
                 g_array_append_val(files, f);
             } else {
                 g_free(f.path);
             }
         }
-        if (d) g_dir_close(d);
+        if (d) ns_dir_close(d);
         g_free(subdir);
     }
-    if (top) g_dir_close(top);
+    if (top) ns_dir_close(top);
     g_free(base);
     if (total > NS_BYTECODE_CACHE_DISK_CAP_BYTES) {
         g_array_sort(files, disk_file_older_first);
         for (guint i = 0; i < files->len &&
                           total > NS_BYTECODE_CACHE_DISK_CAP_BYTES; i++) {
             disk_file *f = &g_array_index(files, disk_file, i);
-            if (g_unlink(f->path) == 0) total -= f->size;
+            if (ns_fs_unlink(f->path) == 0) total -= f->size;
         }
     }
     for (guint i = 0; i < files->len; i++)
@@ -264,12 +265,12 @@ write_disk(const char *key, const guint8 *bc, gsize bc_len)
                      fwrite(bc,     1, bc_len, f) == bc_len &&
                      ferror(f) == 0;
     if (fclose(f) != 0 || !wrote) {
-        g_unlink(tmp);
+        ns_fs_unlink(tmp);
         g_free(tmp); g_free(path);
         return;
     }
-    if (g_rename(tmp, path) != 0)
-        g_unlink(tmp);
+    if (ns_fs_rename(tmp, path) != 0)
+        ns_fs_unlink(tmp);
     g_free(tmp);
     g_free(path);
     if (bc_len >= NS_BYTECODE_CACHE_PRUNE_MIN_BYTES) prune_disk();
@@ -525,7 +526,7 @@ ns_bytecode_cache_precompile(const char *top_url, const char *url,
                     (g_pending && g_hash_table_contains(g_pending, job->key));
     ns_mutex_unlock(&g_lock);
     char *path = skip ? NULL : disk_path_for(job->key);
-    if (path && g_file_test(path, G_FILE_TEST_EXISTS)) skip = TRUE;
+    if (path && ns_fs_test(path, NS_FS_TEST_EXISTS)) skip = TRUE;
     g_free(path);
     if (skip) {
         g_free(job);

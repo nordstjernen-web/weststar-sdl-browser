@@ -5,11 +5,11 @@
 
 #include "trace.h"
 #include "plat/ns_plat.h"
+#include "plat/ns_fs.h"
 #include "html.h"
 
 #include <stdarg.h>
 #include <stdio.h>
-#include <glib/gstdio.h>
 
 static FILE   *g_trace_file;
 static NsMutex g_trace_lock;
@@ -69,7 +69,7 @@ gboolean
 ns_trace_open(const char *path)
 {
     if (!path || !*path) return FALSE;
-    FILE *f = g_fopen(path, "w");
+    FILE *f = ns_fs_fopen(path, "w");
     if (!f) return FALSE;
     g_trace_origin_us = ns_time_monotonic_us();
     fputs("[\n", f);

@@ -7,6 +7,8 @@
 #include "headless.h"
 #include "plat/ns_loop.h"
 #include "plat/ns_plat.h"
+#include "plat/ns_env.h"
+#include "plat/ns_fs.h"
 #include "gfx.h"
 
 #include <stdio.h>
@@ -407,7 +409,7 @@ rdrv_run_actions(ns_page_session *s, const char *spec, int vw, int vh,
             if (nav) rdrv_follow_nav(s, nav, vw, vh, settle_ms, FALSE);
         } else if (g_str_has_prefix(a, "evalfile ")) {
             char *src = NULL;
-            if (g_file_get_contents(g_strstrip(a + 9), &src, NULL, NULL)) {
+            if (ns_fs_get_contents(g_strstrip(a + 9), &src, NULL)) {
                 char *res = ns_page_session_eval(s, src);
                 fprintf(stdout, "act-eval: %s\n", res ? res : "(null)");
                 free(res);
@@ -536,7 +538,7 @@ ns_headless_run_session(const ns_headless_opts *o)
 static gboolean
 ns_headless_renderer_capable(const ns_headless_opts *opts)
 {
-    if (g_getenv("NS_HEADLESS_LEGACY")) return FALSE;
+    if (ns_getenv("NS_HEADLESS_LEGACY")) return FALSE;
     if (opts->wpt) return FALSE;
     if (opts->inspect && *opts->inspect) return FALSE;
     if (opts->inspect_at && *opts->inspect_at) return FALSE;
@@ -601,7 +603,7 @@ static void
 headless_relayout(headless_flush_ctx *c)
 {
     if (!c) return;
-    if (g_getenv("NS_ANIM_DEBUG")) g_printerr("[anim] headless_relayout\n");
+    if (ns_getenv("NS_ANIM_DEBUG")) g_printerr("[anim] headless_relayout\n");
     if (c->js && *c->layout) ns_js_set_layout_root(c->js, NULL);
     if (*c->layout) { ns_paint_3d_invalidate(); ns_box_free(*c->layout); *c->layout = NULL; }
     if (c->js && *c->styles) ns_js_set_style_table(c->js, NULL);
@@ -1519,7 +1521,7 @@ headless_run_actions(headless_flush_ctx *fc, headless_nav_capture *nav,
             ns_js_consume_mutated(fc->js);
         } else if (g_str_has_prefix(a, "evalfile ")) {
             char *src = NULL;
-            if (g_file_get_contents(g_strstrip(a + 9), &src, NULL, NULL)) {
+            if (ns_fs_get_contents(g_strstrip(a + 9), &src, NULL)) {
                 char *result = ns_js_eval_source(fc->js, src,
                                                  "headless-act-evalfile");
                 if (result) {

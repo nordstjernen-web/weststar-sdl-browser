@@ -6,6 +6,8 @@
 
 #include "js.h"
 #include "plat/ns_plat.h"
+#include "plat/ns_env.h"
+#include "plat/ns_fs.h"
 #include "polyfills.h"
 #include "typed_om.h"
 
@@ -17,7 +19,6 @@
 
 #include <curl/curl.h>
 #include <gio/gio.h>
-#include <glib/gstdio.h>
 #include "ns_pango.h"
 
 #include "quickjs_compat.h"
@@ -2838,6 +2839,30 @@ ns_tlist_toggle(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *a
     return result ? JS_TRUE : JS_FALSE;
 }
 
+/* g_key_file_load_from_file and g_key_file_save_to_file through ns_fs: the
+ * per-origin INI files are read whole and replaced atomically. */
+static gboolean
+ns_key_file_load(GKeyFile *kf, const char *path)
+{
+    char *data = NULL;
+    size_t len = 0;
+    if (!ns_fs_get_contents(path, &data, &len)) return FALSE;
+    gboolean ok = g_key_file_load_from_data(kf, data, len, G_KEY_FILE_NONE,
+                                            NULL);
+    g_free(data);
+    return ok;
+}
+
+static gboolean
+ns_key_file_save(GKeyFile *kf, const char *path)
+{
+    gsize len = 0;
+    char *data = g_key_file_to_data(kf, &len, NULL);
+    gboolean ok = data && ns_fs_set_contents(path, data, (gssize)len);
+    g_free(data);
+    return ok;
+}
+
 /* Per-origin INI file under <data dir>/<subdir>, keyed by SHA-256 of the origin;
  * NULL in private mode. */
 static char *
@@ -2848,10 +2873,10 @@ ns_origin_store_path(const char *subdir, const char *origin)
     if (cfg && cfg->private_mode) return NULL;
     g_autofree char *hash = g_compute_checksum_for_string(G_CHECKSUM_SHA256,
                                                           origin, -1);
-    g_autofree char *dir = g_build_filename(g_get_user_data_dir(),
+    g_autofree char *dir = g_build_filename(ns_fs_user_data_dir(),
                                             NS_APP_DIR_NAME, subdir, NULL);
-    g_mkdir_with_parents(dir, 0700);
-    g_chmod(dir, 0700);
+    ns_fs_mkdir_p(dir, 0700);
+    ns_fs_chmod(dir, 0700);
     g_autofree char *file = g_strdup_printf("%s.ini", hash);
     return g_build_filename(dir, file, NULL);
 }
@@ -2908,13 +2933,10 @@ ns_storage_flush(ns_js *js)
     gsize len = 0;
     char *data = g_key_file_to_data(kf, &len, NULL);
     if (data) {
-        GError *err = NULL;
-        if (!g_file_set_contents(js->local_storage_path, data, (gssize)len, &err)) {
+        if (!ns_fs_set_contents(js->local_storage_path, data, (gssize)len))
             g_warning("local storage: failed to write %s: %s",
-                      js->local_storage_path, err->message);
-            g_clear_error(&err);
-        }
-        g_chmod(js->local_storage_path, 0600);
+                      js->local_storage_path, ns_fs_last_error());
+        ns_fs_chmod(js->local_storage_path, 0600);
         g_free(data);
     }
     g_key_file_free(kf);
@@ -3063,7 +3085,7 @@ ns_storage_load_for(ns_js *js, const char *new_url)
     js->local_storage_path = ns_origin_store_path("localstorage", new_origin);
     if (!js->local_storage_path) return;
     GKeyFile *kf = g_key_file_new();
-    if (g_key_file_load_from_file(kf, js->local_storage_path, G_KEY_FILE_NONE, NULL)) {
+    if (ns_key_file_load(kf, js->local_storage_path)) {
         gsize n = 0;
         char **keys = g_key_file_get_keys(kf, "storage", &n, NULL);
         if (keys) {
@@ -13276,7 +13298,7 @@ ns_post_message_to_target(JSContext *ctx, JSValue target,
         gboolean match = actual && wanted &&
                          g_ascii_strcasecmp(wanted, actual) == 0;
         if (!match) {
-            if (g_getenv("NS_DEBUG_POSTMESSAGE"))
+            if (ns_getenv("NS_DEBUG_POSTMESSAGE"))
                 g_printerr("[postmessage] dropped: targetOrigin %s, target is %s\n",
                               wanted ? wanted : "(none)",
                               actual ? actual : "(none)");
@@ -13307,7 +13329,7 @@ ns_post_message_to_target(JSContext *ctx, JSValue target,
     /* NS_DEBUG_POSTMESSAGE=1 logs each message; off by default because
      * JSON.stringify can run page toJSON code. */
     static int pm_debug = -1;
-    if (pm_debug < 0) pm_debug = g_getenv("NS_DEBUG_POSTMESSAGE") != NULL;
+    if (pm_debug < 0) pm_debug = ns_getenv("NS_DEBUG_POSTMESSAGE") != NULL;
     if (pm_debug) {
         g_autofree char *dst_origin = ns_window_origin_of(ctx, target);
         JSValue json = JS_JSONStringify(ctx, data, JS_UNDEFINED, JS_UNDEFINED);
@@ -24182,12 +24204,12 @@ ns_sw_persist_registration(ns_worker_host *host)
     g_autofree char *path = ns_origin_store_path("serviceworkers", host->origin);
     if (!path) return;
     GKeyFile *kf = g_key_file_new();
-    g_key_file_load_from_file(kf, path, G_KEY_FILE_NONE, NULL);
+    ns_key_file_load(kf, path);
     g_autofree char *group = ns_sw_registration_group(host->scope);
     g_key_file_set_string(kf, "meta", "origin", host->origin);
     g_key_file_set_string(kf, group, "script", host->url);
     g_key_file_set_string(kf, group, "scope", host->scope);
-    g_key_file_save_to_file(kf, path, NULL);
+    ns_key_file_save(kf, path);
     g_key_file_free(kf);
 }
 
@@ -24198,7 +24220,7 @@ ns_sw_remove_persisted(const char *origin, const char *scope)
     g_autofree char *path = ns_origin_store_path("serviceworkers", origin);
     if (!path) return FALSE;
     GKeyFile *kf = g_key_file_new();
-    if (!g_key_file_load_from_file(kf, path, G_KEY_FILE_NONE, NULL)) {
+    if (!ns_key_file_load(kf, path)) {
         g_key_file_free(kf);
         return FALSE;
     }
@@ -24214,9 +24236,9 @@ ns_sw_remove_persisted(const char *origin, const char *scope)
                 break;
             }
         if (has_registration)
-            g_key_file_save_to_file(kf, path, NULL);
+            ns_key_file_save(kf, path);
         else
-            g_remove(path);
+            ns_fs_remove(path);
     }
     g_key_file_free(kf);
     return removed;
@@ -24230,7 +24252,7 @@ ns_sw_load_persisted(const char *origin)
     g_autofree char *path = ns_origin_store_path("serviceworkers", origin);
     if (!path) return saved;
     GKeyFile *kf = g_key_file_new();
-    if (!g_key_file_load_from_file(kf, path, G_KEY_FILE_NONE, NULL)) {
+    if (!ns_key_file_load(kf, path)) {
         g_key_file_free(kf);
         return saved;
     }
@@ -31471,7 +31493,7 @@ ns_js_file_from_path(JSContext *ctx, const char *path)
     if (!path || !*path) return JS_NULL;
     char *contents = NULL;
     gsize len = 0;
-    if (!g_file_get_contents(path, &contents, &len, NULL))
+    if (!ns_fs_get_contents(path, &contents, &len))
         return JS_NULL;
     const char *base = strrchr(path, '/');
 #ifdef G_OS_WIN32
@@ -59263,7 +59285,7 @@ ns_js_profile_enabled(void)
 {
     static gint cached = -1;
     if (G_UNLIKELY(cached < 0))
-        cached = g_getenv("NS_PROFILE") ? 1 : 0;
+        cached = ns_getenv("NS_PROFILE") ? 1 : 0;
     return cached == 1;
 }
 
@@ -63319,10 +63341,10 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc,
         /* Test harness hook: never honoured by the interactive browser,
          * where it would inject script into every page. */
         const char *early = ns_security_tool_mode()
-            ? g_getenv("NS_EARLY_JS_FILE") : NULL;
+            ? ns_getenv("NS_EARLY_JS_FILE") : NULL;
         char *early_src = NULL;
         if (early && *early &&
-            g_file_get_contents(early, &early_src, NULL, NULL)) {
+            ns_fs_get_contents(early, &early_src, NULL)) {
             char *r = ns_js_eval_source(js, early_src, "early-inject");
             g_free(r);
             g_free(early_src);

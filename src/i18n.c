@@ -6,6 +6,8 @@
  */
 
 #include "i18n.h"
+#include "plat/ns_env.h"
+#include "plat/ns_fs.h"
 #include "html.h"
 
 #include <string.h>
@@ -21,7 +23,7 @@ catalogue_path_in(const char *dir, const char *lang)
     char *file = g_strdup_printf("%s.lang", lang);
     char *path = g_build_filename(dir, file, NULL);
     g_free(file);
-    if (g_file_test(path, G_FILE_TEST_IS_REGULAR)) return path;
+    if (ns_fs_test(path, NS_FS_TEST_IS_REGULAR)) return path;
     g_free(path);
     return NULL;
 }
@@ -30,7 +32,7 @@ catalogue_path_in(const char *dir, const char *lang)
 static char *
 find_catalogue(const char *self_exe, const char *lang)
 {
-    const char *override = g_getenv("NS_I18N_DIR");
+    const char *override = ns_getenv("NS_I18N_DIR");
     if (override && *override) return catalogue_path_in(override, lang);
 
     static const char *const rel[] = {
@@ -64,7 +66,7 @@ static GHashTable *
 catalogue_load(const char *path)
 {
     char *contents = NULL;
-    if (!g_file_get_contents(path, &contents, NULL, NULL)) return NULL;
+    if (!ns_fs_get_contents(path, &contents, NULL)) return NULL;
     GHashTable *table = g_hash_table_new_full(g_str_hash, g_str_equal,
                                               g_free, g_free);
     char **lines = g_strsplit(contents, "\n", -1);

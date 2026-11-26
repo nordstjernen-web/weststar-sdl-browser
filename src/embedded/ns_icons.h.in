@@ -1,0 +1,9 @@
+/* generated from src/embedded/ns_icons.h.in by meson — do not edit */
+@ICON_INCLUDES@
+
+typedef struct { const char *name; const char *svg; unsigned len; } ns_icon_file;
+
+/* The chrome's SVG icons by name (without ".svg"), for src/sdl/icons.c. */
+static const ns_icon_file ns_icon_files[] = {
+@ICON_ROWS@
+};

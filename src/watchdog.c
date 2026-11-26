@@ -7,6 +7,8 @@
 #include "watchdog.h"
 #include "plat/ns_loop.h"
 #include "plat/ns_plat.h"
+#include "plat/ns_env.h"
+#include "plat/ns_fs.h"
 #include "debuglog.h"
 
 #include <stdio.h>
@@ -14,7 +16,6 @@
 #include <string.h>
 
 #include <gio/gio.h>
-#include <glib/gstdio.h>
 
 #ifdef G_OS_WIN32
 #include <windows.h>
@@ -139,7 +140,7 @@ ns_watchdog_is_child(int argc, char **argv)
 gboolean
 ns_watchdog_child_is_recovery(void)
 {
-    const char *v = g_getenv(NS_WATCHDOG_RECOVER_ENV);
+    const char *v = ns_getenv(NS_WATCHDOG_RECOVER_ENV);
     return v && g_strcmp0(v, "1") == 0;
 }
 
@@ -331,7 +332,7 @@ ns_watchdog_spawn_win32(ns_watchdog *wd, gboolean recover, GPid *pid,
 {
     wchar_t *app = g_utf8_to_utf16(wd->child_argv[0], -1, NULL, NULL, NULL);
     wchar_t *cmd = ns_watchdog_build_command_line(wd->child_argv);
-    const char *old_utf8 = g_getenv(NS_WATCHDOG_RECOVER_ENV);
+    const char *old_utf8 = ns_getenv(NS_WATCHDOG_RECOVER_ENV);
     wchar_t *old = old_utf8 ? g_utf8_to_utf16(old_utf8, -1, NULL, NULL, NULL)
                             : NULL;
     if (!app || !cmd) {
@@ -556,7 +557,7 @@ ns_watchdog_run_supervisor(const char *self_exe, int argc, char **argv)
 
     char *uuid = g_uuid_string_random();
     char *name = g_strconcat("weststar-watchdog-", uuid, ".session", NULL);
-    wd.session_path = g_build_filename(g_get_user_runtime_dir(), name, NULL);
+    wd.session_path = g_build_filename(ns_fs_user_runtime_dir(), name, NULL);
     g_free(name);
     g_free(uuid);
 
@@ -581,7 +582,7 @@ ns_watchdog_run_supervisor(const char *self_exe, int argc, char **argv)
         g_spawn_close_pid(wd.pid);
     }
     g_main_loop_unref(wd.loop);
-    g_unlink(wd.session_path);
+    ns_fs_unlink(wd.session_path);
     g_strfreev(wd.child_argv);
     g_free(wd.session_path);
     return wd.exit_status;

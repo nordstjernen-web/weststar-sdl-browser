@@ -5,6 +5,8 @@
  */
 
 #include "font.h"
+#include "plat/ns_env.h"
+#include "plat/ns_fs.h"
 #include "brand.h"
 #include "bytes.h"
 
@@ -122,13 +124,13 @@ ns_font_init(void)
     g_entries = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
     g_pending_by_url = g_hash_table_new_full(g_str_hash, g_str_equal,
                                              g_free, ns_font_pending_free);
-    const char *xdg = g_getenv("XDG_CACHE_HOME");
+    const char *xdg = ns_getenv("XDG_CACHE_HOME");
     char *base = xdg && *xdg
         ? g_strdup(xdg)
-        : g_build_filename(g_get_home_dir(), ".cache", NULL);
+        : g_build_filename(ns_fs_home_dir(), ".cache", NULL);
     g_cache_dir = g_build_filename(base, NS_APP_DIR_NAME, "webfonts", NULL);
     g_free(base);
-    g_mkdir_with_parents(g_cache_dir, 0700);
+    ns_fs_mkdir_p(g_cache_dir, 0700);
     ns_paint_register_font_oracle();
 }
 
@@ -431,16 +433,14 @@ ns_font_on_fetched(NsTask *res, gpointer user_data)
                                                                          : ctx->url),
                                                     forced_ext);
                 if (!path) continue;
-                GError *werr = NULL;
-                if (g_file_set_contents(path, (const char *)write_data,
-                                        (gssize)write_len, &werr)) {
+                if (ns_fs_set_contents(path, (const char *)write_data,
+                                       (gssize)write_len)) {
 #ifdef NS_HAVE_FONTCONFIG
                     ns_font_install_file(path, family);
 #endif
                     if (e) e->loaded = TRUE;
                     g_font_generation++;
                 }
-                g_clear_error(&werr);
                 g_free(path);
             }
         }

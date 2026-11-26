@@ -9,6 +9,8 @@
 #endif
 #include "safebrowsing.h"
 #include "plat/ns_plat.h"
+#include "plat/ns_env.h"
+#include "plat/ns_fs.h"
 #include "safebrowsing_google.h"
 #include "config.h"
 #include "net.h"
@@ -49,7 +51,7 @@ static void
 load_file(const char *path)
 {
     char *contents = NULL;
-    if (!path || !g_file_get_contents(path, &contents, NULL, NULL))
+    if (!path || !ns_fs_get_contents(path, &contents, NULL))
         return;
     char **lines = g_strsplit(contents, "\n", -1);
     for (int i = 0; lines && lines[i]; i++) {
@@ -84,7 +86,7 @@ load_bundled(void)
     if (dir) {
         for (gsize i = 0; i < G_N_ELEMENTS(rel); i++) {
             char *path = g_build_filename(dir, rel[i], NULL);
-            gboolean exists = g_file_test(path, G_FILE_TEST_EXISTS);
+            gboolean exists = ns_fs_test(path, NS_FS_TEST_EXISTS);
             if (exists) {
                 load_file(path);
                 g_free(path);
@@ -95,7 +97,7 @@ load_bundled(void)
         }
         g_free(dir);
     }
-    if (g_file_test("data/safebrowsing.list", G_FILE_TEST_EXISTS)) {
+    if (ns_fs_test("data/safebrowsing.list", NS_FS_TEST_EXISTS)) {
         load_file("data/safebrowsing.list");
         return TRUE;
     }
@@ -114,13 +116,13 @@ ensure_loaded(void)
 
     /* An extra list (NS_SAFEBROWSING_LIST) adds to the bundled one; it
      * must not be a way to switch protection off. */
-    const char *override = g_getenv("NS_SAFEBROWSING_LIST");
+    const char *override = ns_getenv("NS_SAFEBROWSING_LIST");
     if (override && *override) {
         load_file(override);
         load_bundled();
         return;
     }
-    char *user = g_build_filename(g_get_user_config_dir(), NS_APP_DIR_NAME,
+    char *user = g_build_filename(ns_fs_user_config_dir(), NS_APP_DIR_NAME,
                                   "safebrowsing.list", NULL);
     load_file(user);
     g_free(user);

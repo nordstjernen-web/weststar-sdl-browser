@@ -6,7 +6,6 @@
 
 #include <SDL3/SDL.h>
 #include <glib.h>
-#include <glib/gstdio.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,6 +33,8 @@
 #include <web-text-lib/ns-pango-cache.h>
 
 #include "audio/audio.h"
+#include "plat/ns_env.h"
+#include "plat/ns_fs.h"
 #include "bytecode_cache.h"
 #include "cache.h"
 #include "config.h"
@@ -166,16 +167,16 @@ static void
 ns_win32_use_fontconfig_backend(const char *dir)
 {
 #ifdef NS_HAVE_FONTCONFIG
-    if (dir && !g_getenv("FONTCONFIG_FILE")) {
+    if (dir && !ns_getenv("FONTCONFIG_FILE")) {
         char *conf = g_build_filename(dir, "etc", "fonts", "fonts.conf", NULL);
-        if (g_file_test(conf, G_FILE_TEST_EXISTS))
-            g_setenv("FONTCONFIG_FILE", conf, TRUE);
+        if (ns_fs_test(conf, NS_FS_TEST_EXISTS))
+            ns_setenv("FONTCONFIG_FILE", conf, TRUE);
         g_free(conf);
     }
-    if (dir && !g_getenv("FONTCONFIG_PATH")) {
+    if (dir && !ns_getenv("FONTCONFIG_PATH")) {
         char *fonts = g_build_filename(dir, "etc", "fonts", NULL);
-        if (g_file_test(fonts, G_FILE_TEST_IS_DIR))
-            g_setenv("FONTCONFIG_PATH", fonts, TRUE);
+        if (ns_fs_test(fonts, NS_FS_TEST_IS_DIR))
+            ns_setenv("FONTCONFIG_PATH", fonts, TRUE);
         g_free(fonts);
     }
     FcInit();
@@ -197,15 +198,15 @@ ns_win32_anchor_data(void)
     }
     ns_win32_use_fontconfig_backend(dir);
     char *share_dir = g_build_filename(dir, "share", NULL);
-    if (g_file_test(share_dir, G_FILE_TEST_IS_DIR) && !g_getenv("XDG_DATA_DIRS"))
-        g_setenv("XDG_DATA_DIRS", share_dir, TRUE);
+    if (ns_fs_test(share_dir, NS_FS_TEST_IS_DIR) && !ns_getenv("XDG_DATA_DIRS"))
+        ns_setenv("XDG_DATA_DIRS", share_dir, TRUE);
     g_free(share_dir);
     {
         char *ca = g_build_filename(dir,
             "etc", "ssl", "certs", "ca-bundle.crt", NULL);
-        if (g_file_test(ca, G_FILE_TEST_EXISTS)) {
-            if (!g_getenv("CURL_CA_BUNDLE")) g_setenv("CURL_CA_BUNDLE", ca, TRUE);
-            if (!g_getenv("SSL_CERT_FILE"))  g_setenv("SSL_CERT_FILE",  ca, TRUE);
+        if (ns_fs_test(ca, NS_FS_TEST_EXISTS)) {
+            if (!ns_getenv("CURL_CA_BUNDLE")) ns_setenv("CURL_CA_BUNDLE", ca, TRUE);
+            if (!ns_getenv("SSL_CERT_FILE"))  ns_setenv("SSL_CERT_FILE",  ca, TRUE);
         }
         g_free(ca);
     }
@@ -275,9 +276,9 @@ ns_macos_anchor_data(void)
 
     char *ca = g_build_filename(res, "etc", "ssl", "certs",
                                 "ca-bundle.crt", NULL);
-    if (g_file_test(ca, G_FILE_TEST_EXISTS)) {
-        if (!g_getenv("CURL_CA_BUNDLE")) g_setenv("CURL_CA_BUNDLE", ca, TRUE);
-        if (!g_getenv("SSL_CERT_FILE"))  g_setenv("SSL_CERT_FILE",  ca, TRUE);
+    if (ns_fs_test(ca, NS_FS_TEST_EXISTS)) {
+        if (!ns_getenv("CURL_CA_BUNDLE")) ns_setenv("CURL_CA_BUNDLE", ca, TRUE);
+        if (!ns_getenv("SSL_CERT_FILE"))  ns_setenv("SSL_CERT_FILE",  ca, TRUE);
     }
     g_free(ca);
 
@@ -290,17 +291,17 @@ ns_macos_anchor_data(void)
 static gboolean
 ns_linux_has_gpu_render_node(void)
 {
-    GDir *dir = g_dir_open("/dev/dri", 0, NULL);
+    NsDir *dir = ns_dir_open("/dev/dri");
     if (!dir) return FALSE;
     const char *name;
     gboolean found = FALSE;
-    while ((name = g_dir_read_name(dir))) {
+    while ((name = ns_dir_read_name(dir))) {
         if (g_str_has_prefix(name, "renderD") || g_str_has_prefix(name, "card")) {
             found = TRUE;
             break;
         }
     }
-    g_dir_close(dir);
+    ns_dir_close(dir);
     return found;
 }
 #endif
@@ -310,7 +311,7 @@ ns_linux_has_gpu_render_node(void)
 static void
 ns_apply_render_driver(const char *pref)
 {
-    if (g_getenv("SDL_RENDER_DRIVER")) return;
+    if (ns_getenv("SDL_RENDER_DRIVER")) return;
     if (!pref || !*pref ||
         g_ascii_strcasecmp(pref, "auto")    == 0 ||
         g_ascii_strcasecmp(pref, "default") == 0 ||
@@ -373,7 +374,7 @@ ns_preopen_screenshot_outputs(int argc, char **argv)
         }
         if (!p || !*p || *p == '-') continue;
         char *dir = g_path_get_dirname(p);
-        if (dir && *dir) g_mkdir_with_parents(dir, 0700);
+        if (dir && *dir) ns_fs_mkdir_p(dir, 0700);
         g_free(dir);
         if (!ns_engine_preopen_output(p))
             g_printerr("weststar: cannot write to %s\n", p);
@@ -406,7 +407,7 @@ ns_run_headless(ns_headless_opts *hopts)
     if (hopts->url && !strstr(hopts->url, "://") &&
         !g_str_has_prefix(hopts->url, "about:") &&
         !g_str_has_prefix(hopts->url, "data:") &&
-        g_file_test(hopts->url, G_FILE_TEST_EXISTS)) {
+        ns_fs_test(hopts->url, NS_FS_TEST_EXISTS)) {
         char *abs_path = g_canonicalize_filename(hopts->url, NULL);
         file_url = g_filename_to_uri(abs_path, NULL, NULL);
         g_free(abs_path);
@@ -469,7 +470,7 @@ ns_run_proc_gui(const char *url, const char *render_driver_override,
     char *file_url = NULL;
     if (!strstr(start, "://") && !g_str_has_prefix(start, "about:") &&
         !g_str_has_prefix(start, "data:") &&
-        g_file_test(start, G_FILE_TEST_EXISTS)) {
+        ns_fs_test(start, NS_FS_TEST_EXISTS)) {
         char *abs_path = g_canonicalize_filename(start, NULL);
         file_url = g_filename_to_uri(abs_path, NULL, NULL);
         g_free(abs_path);
@@ -590,8 +591,8 @@ main(int argc, char **argv)
             const char *pxy = argv[i] + 8;
             ns_net_set_proxy_override(pxy);
             if (pxy && *pxy) {
-                g_setenv("NS_HTTP_PROXY", pxy, TRUE);
-                g_setenv("NS_HTTPS_PROXY", pxy, TRUE);
+                ns_setenv("NS_HTTP_PROXY", pxy, TRUE);
+                ns_setenv("NS_HTTPS_PROXY", pxy, TRUE);
             }
         } else if (g_str_has_prefix(argv[i], "--render-driver=")) {
             render_driver_override = argv[i] + 16;

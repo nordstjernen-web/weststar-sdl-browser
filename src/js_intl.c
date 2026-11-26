@@ -6,6 +6,7 @@
 
 #include "js_intl.h"
 #include "plat/ns_plat.h"
+#include "plat/ns_env.h"
 
 #include <math.h>
 #include <string.h>
@@ -1406,7 +1407,7 @@ intl_local_tz_id(void)
             g_time_zone_unref(z);
         }
         if (!cached) {
-            const char *env = g_getenv("TZ");
+            const char *env = ns_getenv("TZ");
             if (env && *env && strchr(env, '/')) cached = g_strdup(env);
         }
         if (!cached) cached = g_strdup("UTC");

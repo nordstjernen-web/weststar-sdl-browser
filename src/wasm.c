@@ -6,6 +6,7 @@
 
 #include "wasm.h"
 #include "plat/ns_plat.h"
+#include "plat/ns_env.h"
 
 #include "quickjs_compat.h"
 
@@ -257,7 +258,7 @@ ns_wasm_runtime_init_once(void)
     args.mem_alloc_type = Alloc_With_System_Allocator;
     if (!wasm_runtime_full_init(&args))
         return FALSE;
-    wasm_runtime_set_log_level(g_getenv("ND_WASM_LOG")
+    wasm_runtime_set_log_level(ns_getenv("ND_WASM_LOG")
                                    ? WASM_LOG_LEVEL_VERBOSE
                                    : WASM_LOG_LEVEL_ERROR);
     wasm_runtime_set_enlarge_mem_success_callback(ns_wasm_on_memory_grown,

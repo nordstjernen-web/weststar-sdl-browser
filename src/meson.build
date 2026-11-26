@@ -80,6 +80,27 @@ if have_pdfjs
   endforeach
 endif
 
+# The chrome's SVG icons (src/sdl/icons.c), embedded like any other file,
+# and ns_icons.h, a table over them by name, written at configure time.
+ns_icon_names = [
+  'weststar', 'weststar-back', 'weststar-forward', 'weststar-home',
+  'weststar-reload', 'weststar-stop', 'weststar-print', 'weststar-downloads',
+  'weststar-bookmarks', 'weststar-bookmarks-saved', 'weststar-console',
+  'weststar-settings', 'weststar-about', 'weststar-stage-connect',
+  'weststar-stage-fetch', 'weststar-stage-parse', 'weststar-stage-script',
+  'weststar-stage-render', 'weststar-stage-done',
+]
+ns_icon_includes = []
+ns_icon_rows = []
+foreach name : ns_icon_names
+  icon_symbol = 'ns_icon_' + name.underscorify()
+  ns_embeds += [['icon_@0@.h'.format(name.underscorify()),
+                 files('../data/icons/hicolor/scalable/apps' / name + '.svg'),
+                 icon_symbol]]
+  ns_icon_includes += '#include "icon_@0@.h"'.format(name.underscorify())
+  ns_icon_rows += '    { "@0@", @1@, sizeof @1@ - 1 },'.format(name, icon_symbol)
+endforeach
+
 # The generated headers are written to their own build directory,
 # src/embedded/: an earlier build made headers of the same names in src/ at
 # build time, and after a reconfigure meson deletes what were outputs of the
@@ -142,6 +163,8 @@ northstar_engine_sources = files(
   'content_decode.c',
   'paint.c',
   'pdf.c',
+  'plat/ns_env.c',
+  'plat/ns_fs.c',
   'plat/ns_job.c',
   'plat/ns_loop.c',
   'plat/ns_plat.c',

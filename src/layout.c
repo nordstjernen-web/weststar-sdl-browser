@@ -6,6 +6,7 @@
 
 #include "layout.h"
 #include "plat/ns_plat.h"
+#include "plat/ns_env.h"
 #include "media_types.h"
 
 #include <math.h>
@@ -6111,7 +6112,7 @@ measure_cache_mode(void)
 {
     static gint mode = -1;
     if (G_UNLIKELY(mode < 0)) {
-        const char *v = g_getenv("NS_LAYOUT_CACHE");
+        const char *v = ns_getenv("NS_LAYOUT_CACHE");
         mode = v && strcmp(v, "0") == 0 ? 0
              : v && strcmp(v, "verify") == 0 ? 2 : 1;
     }
@@ -15169,7 +15170,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
     if (!g_abs_pending || g_abs_pending->len == 0) return;
     static int profile_env = -1;
     if (profile_env < 0)
-        profile_env = g_getenv("NS_PROFILE") != NULL ? 1 : 0;
+        profile_env = ns_getenv("NS_PROFILE") != NULL ? 1 : 0;
     gint64 profile_start = profile_env ? ns_time_monotonic_us() : 0;
     gint64 build_us = 0;
     gint64 static_us = 0;
@@ -15819,7 +15820,7 @@ ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width)
 {
     static int profile_env = -1;
     if (profile_env < 0)
-        profile_env = g_getenv("NS_PROFILE") != NULL ? 1 : 0;
+        profile_env = ns_getenv("NS_PROFILE") != NULL ? 1 : 0;
     gint64 t0 = profile_env ? ns_time_monotonic_us() : 0;
     g_abs_pending = g_array_new(FALSE, FALSE, sizeof(ns_abs_entry));
     g_abs_seen = g_hash_table_new(g_direct_hash, g_direct_equal);

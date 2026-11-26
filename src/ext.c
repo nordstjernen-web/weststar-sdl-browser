@@ -6,12 +6,13 @@
 
 #include "ext.h"
 #include "plat/ns_plat.h"
+#include "plat/ns_env.h"
+#include "plat/ns_fs.h"
 
 #include <stdlib.h>
 #include <string.h>
 
 #include <gio/gio.h>
-#include <glib/gstdio.h>
 #include <libpsl.h>
 
 #include "config.h"
@@ -225,11 +226,11 @@ ns_ext_storage_path(const char *id, const char *area)
     if (!id || !ns_ext_area_ok(area)) return NULL;
     g_autofree char *hash =
         g_compute_checksum_for_string(G_CHECKSUM_SHA256, id, -1);
-    g_autofree char *dir = g_build_filename(g_get_user_data_dir(),
+    g_autofree char *dir = g_build_filename(ns_fs_user_data_dir(),
                                             NS_APP_DIR_NAME,
                                             "ext-storage", hash, NULL);
-    g_mkdir_with_parents(dir, 0700);
-    g_chmod(dir, 0700);
+    ns_fs_mkdir_p(dir, 0700);
+    ns_fs_chmod(dir, 0700);
     g_autofree char *file = g_strdup_printf("%s.json", area);
     return g_build_filename(dir, file, NULL);
 }
@@ -301,7 +302,7 @@ ns_ext_js_sread(JSContext *ctx, JSValueConst this_val,
     g_autofree char *path = ns_ext_storage_path(id, area);
     if (path) {
         char *data = NULL;
-        if (g_file_get_contents(path, &data, NULL, NULL)) out = data;
+        if (ns_fs_get_contents(path, &data, NULL)) out = data;
     } else if (ns_config_get()->private_mode && g_private_storage) {
         g_autofree char *key = ns_ext_storage_key(id, area);
         out = g_strdup(g_hash_table_lookup(g_private_storage, key));
@@ -325,8 +326,8 @@ ns_ext_js_swrite(JSContext *ctx, JSValueConst this_val,
     const char *json = JS_ToCString(ctx, argv[2]);
     gboolean ok = FALSE;
     g_autofree char *path = ns_ext_storage_path(id, area);
-    if (path && json && g_file_set_contents(path, json, -1, NULL)) {
-        g_chmod(path, 0600);
+    if (path && json && ns_fs_set_contents(path, json, -1)) {
+        ns_fs_chmod(path, 0600);
         ok = TRUE;
     } else if (json && ns_config_get()->private_mode && g_private_storage) {
         char *key = ns_ext_storage_key(id, area);
@@ -493,7 +494,7 @@ ns_ext_read_files(const char *base_dir, JSContext *ctx, JSValueConst entry,
         const char *rel = g_ptr_array_index(files, i);
         g_autofree char *path = ns_ext_safe_path(base_dir, rel);
         char *data = NULL;
-        if (path && g_file_get_contents(path, &data, NULL, NULL)) {
+        if (path && ns_fs_get_contents(path, &data, NULL)) {
             g_string_append(src, data);
             g_string_append_c(src, '\n');
             g_free(data);
@@ -657,7 +658,7 @@ ns_ext_load_rule_file(ns_ext *e, JSContext *ctx, const char *path)
     g_autofree char *full = ns_ext_safe_path(e->base_dir, path);
     char *raw = NULL;
     gsize len = 0;
-    if (!full || !g_file_get_contents(full, &raw, &len, NULL)) return;
+    if (!full || !ns_fs_get_contents(full, &raw, &len)) return;
     JSValue arr = JS_ParseJSON(ctx, raw, len, full);
     if (JS_IsException(arr)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
@@ -893,7 +894,7 @@ ns_ext_load_filter_list(ns_ext *e, const char *path)
 {
     g_autofree char *full = ns_ext_safe_path(e->base_dir, path);
     char *raw = NULL;
-    if (!full || !g_file_get_contents(full, &raw, NULL, NULL)) return;
+    if (!full || !ns_fs_get_contents(full, &raw, NULL)) return;
     gchar **lines = g_strsplit(raw, "\n", -1);
     for (gchar **lp = lines; *lp; lp++) {
         char *line = g_strstrip(*lp);
@@ -1031,7 +1032,7 @@ ns_ext_load_one(const char *dir, JSContext *ctx)
     g_autofree char *mpath = g_build_filename(dir, "manifest.json", NULL);
     char *raw = NULL;
     gsize len = 0;
-    if (!g_file_get_contents(mpath, &raw, &len, NULL)) return;
+    if (!ns_fs_get_contents(mpath, &raw, &len)) return;
     JSValue obj = JS_ParseJSON(ctx, raw, len, mpath);
     if (JS_IsException(obj)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
@@ -1078,19 +1079,19 @@ ns_ext_scan_root(const char *root, JSContext *ctx)
 {
     if (!root || !*root) return;
     g_autofree char *self = g_build_filename(root, "manifest.json", NULL);
-    if (g_file_test(self, G_FILE_TEST_EXISTS)) {
+    if (ns_fs_test(self, NS_FS_TEST_EXISTS)) {
         ns_ext_load_one(root, ctx);
         return;
     }
-    GDir *d = g_dir_open(root, 0, NULL);
+    NsDir *d = ns_dir_open(root);
     if (!d) return;
     const char *name;
-    while ((name = g_dir_read_name(d))) {
+    while ((name = ns_dir_read_name(d))) {
         g_autofree char *child = g_build_filename(root, name, NULL);
-        if (g_file_test(child, G_FILE_TEST_IS_DIR))
+        if (ns_fs_test(child, NS_FS_TEST_IS_DIR))
             ns_ext_load_one(child, ctx);
     }
-    g_dir_close(d);
+    ns_dir_close(d);
 }
 
 /* Creates extension registries and loads from NS_EXTENSIONS_DIR and the default dir. */
@@ -1108,7 +1109,7 @@ ns_ext_do_init(void)
     JSContext *ctx = JS_NewContext(rt);
     if (!ctx) { JS_FreeRuntime(rt); return; }
 
-    const char *envd = g_getenv("NS_EXTENSIONS_DIR");
+    const char *envd = ns_getenv("NS_EXTENSIONS_DIR");
     if (envd && *envd) {
         gchar **parts = g_strsplit(envd, G_SEARCHPATH_SEPARATOR_S, -1);
         for (gchar **p = parts; *p; p++)
@@ -1129,7 +1130,7 @@ ns_ext_do_init(void)
 static char *
 ns_ext_default_dir(void)
 {
-    return g_build_filename(g_get_user_data_dir(),
+    return g_build_filename(ns_fs_user_data_dir(),
                             NS_APP_DIR_NAME "-extensions", NULL);
 }
 
@@ -1138,15 +1139,15 @@ void
 ns_ext_migrate_default_dir(void)
 {
     g_autofree char *dir = ns_ext_default_dir();
-    g_autofree char *legacy = g_build_filename(g_get_user_data_dir(),
+    g_autofree char *legacy = g_build_filename(ns_fs_user_data_dir(),
                                                NS_APP_DIR_NAME, "extensions",
                                                NULL);
-    if (g_file_test(legacy, G_FILE_TEST_IS_DIR) &&
-        !g_file_test(dir, G_FILE_TEST_EXISTS))
-        (void)g_rename(legacy, dir);
+    if (ns_fs_test(legacy, NS_FS_TEST_IS_DIR) &&
+        !ns_fs_test(dir, NS_FS_TEST_EXISTS))
+        (void)ns_fs_rename(legacy, dir);
     /* Always leave the new directory in place, so this one-time move can
      * never pick up a directory that a sandboxed session wrote later. */
-    g_mkdir_with_parents(dir, 0700);
+    ns_fs_mkdir_p(dir, 0700);
 }
 
 static const struct {
@@ -1396,7 +1397,7 @@ ns_ext_resource_load(const char *url, GBytes **bytes,
     g_autofree char *path = ns_ext_safe_path(e->base_dir, relative);
     char *data = NULL;
     gsize len = 0;
-    if (!path || !g_file_get_contents(path, &data, &len, NULL) ||
+    if (!path || !ns_fs_get_contents(path, &data, &len) ||
         len > 32u * 1024u * 1024u) {
         g_free(data);
         if (error) *error = g_strdup("extension resource is unavailable");

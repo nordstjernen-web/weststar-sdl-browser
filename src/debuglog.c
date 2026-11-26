@@ -6,13 +6,14 @@
 
 #include "debuglog.h"
 #include "plat/ns_plat.h"
+#include "plat/ns_env.h"
+#include "plat/ns_fs.h"
 #include "brand.h"
 #include "security.h"
 
 #include <stdio.h>
 #include <string.h>
 
-#include <glib/gstdio.h>
 
 #define NS_DLOG_CAPACITY 1024
 
@@ -48,11 +49,11 @@ const char *
 ns_debug_log_file_path(void)
 {
     if (!g_dlog_file_path && ns_dlog_file_enabled()) {
-        const char *override = g_getenv("NS_LOG_FILE");
+        const char *override = ns_getenv("NS_LOG_FILE");
         if (override && *override)
             g_dlog_file_path = g_strdup(override);
         else
-            g_dlog_file_path = g_build_filename(g_get_user_data_dir(),
+            g_dlog_file_path = g_build_filename(ns_fs_user_data_dir(),
                                                 NS_BRAND_SHORT,
                                                 "weststar-debug.log", NULL);
     }
@@ -69,8 +70,8 @@ ns_dlog_file_write(const ns_dlog_entry *e)
         const char *path = ns_debug_log_file_path();
         if (path) {
             char *dir = g_path_get_dirname(path);
-            if (dir) { g_mkdir_with_parents(dir, 0700); g_free(dir); }
-            g_dlog_file = g_fopen(path, "a");
+            if (dir) { ns_fs_mkdir_p(dir, 0700); g_free(dir); }
+            g_dlog_file = ns_fs_fopen(path, "a");
         }
     }
     if (!g_dlog_file) return;

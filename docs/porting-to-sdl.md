@@ -62,17 +62,25 @@ So the shell goes first, and Cairo after it:
    2. *The main loop and timers* move from GLib's `GMainContext` to an
       SDL-based loop with SDL timers; the engine thread gets the same.
       (Done: see Event loop below.)
-   3. *A portable build profile*: fontconfig optional (fonts found in the
+   3. *Files, folders, the environment and resources* move from GLib and
+      GIO to SDL (`src/plat/ns_fs.c`, `ns_env.c`): reading and atomically
+      writing files, folders and their listings, path tests, per-user
+      folders (the same ones as before on Linux and Windows; SDL's
+      preference path elsewhere), and environment variables. The toolbar
+      icons are compiled into the binary like the other embedded files,
+      so `glib-compile-resources` is no longer needed. (Done; the
+      watchdog keeps GLib's process spawning for its child watch.)
+   4. *A portable build profile*: fontconfig optional (fonts found in the
       platform's font folders, with a small bundled fallback set), TLS and
       Web Crypto through mbedTLS instead of OpenSSL, and a bundled CA
       certificate set for systems whose root store is too old.
-   4. *GLib's data structures and GObject* (about 500 functions at 21,000
+   5. *GLib's data structures and GObject* (about 500 functions at 21,000
       call sites, and the Pango fork's type system) come from a trimmed
       GLib vendored in the tree and built statically, its few OS calls
       redirected to the SDL layer — rather than rewriting the call sites.
-   5. *SDL2 as well as SDL3* in the shell, since the Amiga-family ports
+   6. *SDL2 as well as SDL3* in the shell, since the Amiga-family ports
       and XP-capable builds are SDL2.
-   6. *Toolchains and targets*: the code kept to C11 (C23 `#embed`
+   7. *Toolchains and targets*: the code kept to C11 (C23 `#embed`
       already has a fallback), a 32-bit Windows build against the old
       MSVCRT for XP, and an AROS build in an emulator, each in CI.
    Windows XP is the realistic floor on Windows (2000 and 95 lack too much

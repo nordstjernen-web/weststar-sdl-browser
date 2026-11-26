@@ -6,9 +6,10 @@
 
 #include "idb.h"
 #include "plat/ns_plat.h"
+#include "plat/ns_env.h"
+#include "plat/ns_fs.h"
 
 #include <glib.h>
-#include <glib/gstdio.h>
 #include <sqlite3.h>
 #include <stdarg.h>
 #include <string.h>
@@ -168,10 +169,10 @@ ns_idb_partition_dir(JSContext *ctx)
     const char *partition = ns_js_storage_partition(js);
     if (!partition || !*partition) return NULL;
     g_autofree char *hash = ns_idb_hash_string(partition);
-    char *dir = g_build_filename(g_get_user_data_dir(), NS_APP_DIR_NAME,
+    char *dir = g_build_filename(ns_fs_user_data_dir(), NS_APP_DIR_NAME,
                                  "indexeddb", hash, NULL);
-    g_mkdir_with_parents(dir, 0700);
-    g_chmod(dir, 0700);
+    ns_fs_mkdir_p(dir, 0700);
+    ns_fs_chmod(dir, 0700);
     return dir;
 }
 
@@ -753,7 +754,7 @@ ns_idb_max_origin_pages(void)
     static gint64 cached = -1;
     if (cached < 0) {
         cached = NS_IDB_MAX_ORIGIN_PAGES;
-        const char *env = g_getenv("NS_IDB_MAX_ORIGIN_PAGES");
+        const char *env = ns_getenv("NS_IDB_MAX_ORIGIN_PAGES");
         if (env && *env) {
             gint64 v = g_ascii_strtoll(env, NULL, 10);
             if (v > 0) cached = v;
@@ -773,11 +774,11 @@ static GHashTable *g_idb_sibling_pages;
 static gint64
 ns_idb_scan_sibling_pages(const char *dir, const char *current_path)
 {
-    GDir *gd = g_dir_open(dir, 0, NULL);
+    NsDir *gd = ns_dir_open(dir);
     if (!gd) return 0;
     gint64 total = 0;
     const char *entry = NULL;
-    while ((entry = g_dir_read_name(gd)) != NULL) {
+    while ((entry = ns_dir_read_name(gd)) != NULL) {
         if (!g_str_has_suffix(entry, ".sqlite")) continue;
         g_autofree char *path = g_build_filename(dir, entry, NULL);
         if (current_path && !g_strcmp0(path, current_path)) continue;
@@ -789,7 +790,7 @@ ns_idb_scan_sibling_pages(const char *dir, const char *current_path)
         total += ns_idb_db_pages(db);
         sqlite3_close(db);
     }
-    g_dir_close(gd);
+    ns_dir_close(gd);
     return total;
 }
 
@@ -1106,11 +1107,11 @@ ns_idb_backend_delete_database(JSContext *ctx, JSValueConst this_val,
     if (!path) return ns_idb_throw(ctx, "SecurityError", "Storage is unavailable");
     ns_idb_cache_evict(key);
     if (strcmp(path, ":memory:") == 0) return JS_TRUE;
-    g_unlink(path);
+    ns_fs_unlink(path);
     g_autofree char *wal = g_strconcat(path, "-wal", NULL);
     g_autofree char *shm = g_strconcat(path, "-shm", NULL);
-    g_unlink(wal);
-    g_unlink(shm);
+    ns_fs_unlink(wal);
+    ns_fs_unlink(shm);
     return JS_TRUE;
 }
 
@@ -1125,11 +1126,11 @@ ns_idb_backend_databases(JSContext *ctx, JSValueConst this_val,
     JSValue arr = JS_NewArray(ctx);
     g_autofree char *dir = ns_idb_partition_dir(ctx);
     if (!dir) return arr;
-    GDir *gd = g_dir_open(dir, 0, NULL);
+    NsDir *gd = ns_dir_open(dir);
     if (!gd) return arr;
     uint32_t i = 0;
     const char *entry = NULL;
-    while ((entry = g_dir_read_name(gd)) != NULL) {
+    while ((entry = ns_dir_read_name(gd)) != NULL) {
         if (!g_str_has_suffix(entry, ".sqlite")) continue;
         g_autofree char *path = g_build_filename(dir, entry, NULL);
         sqlite3 *db = NULL;
@@ -1147,7 +1148,7 @@ ns_idb_backend_databases(JSContext *ctx, JSValueConst this_val,
         JS_SetPropertyStr(ctx, info, "version", JS_NewInt64(ctx, version));
         JS_SetPropertyUint32(ctx, arr, i++, info);
     }
-    g_dir_close(gd);
+    ns_dir_close(gd);
     return arr;
 }
 

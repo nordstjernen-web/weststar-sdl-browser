@@ -6,11 +6,11 @@
 
 #include "cache.h"
 #include "plat/ns_plat.h"
+#include "plat/ns_fs.h"
 #include "config.h"
 #include "sqlite_db.h"
 #include "net.h"
 
-#include <glib/gstdio.h>
 #include <sqlite3.h>
 #include <string.h>
 
@@ -80,7 +80,7 @@ restrict_to_owner(const char *path, gboolean is_dir)
 #ifdef G_OS_WIN32
     set_owner_only_w32(path, is_dir);
 #else
-    g_chmod(path, is_dir ? 0700 : 0600);
+    ns_fs_chmod(path, is_dir ? 0700 : 0600);
 #endif
 }
 
@@ -122,7 +122,7 @@ body_path_for_key(const char *key, gboolean ensure_dir)
     char prefix[3] = { key[0], key[1], '\0' };
     char *sub = g_build_filename(g_cache_dir, "bodies", prefix, NULL);
     if (ensure_dir) {
-        if (g_mkdir_with_parents(sub, 0700) == 0)
+        if (ns_fs_mkdir_p(sub, 0700) == 0)
             restrict_to_owner(sub, TRUE);
     }
     char *out = g_build_filename(sub, key + 2, NULL);
@@ -312,9 +312,9 @@ ns_cache_init(void)
         g_cache_disabled = TRUE;
         return;
     }
-    const char *base = g_get_user_cache_dir();
+    const char *base = ns_fs_user_cache_dir();
     g_cache_dir = g_build_filename(base, NS_APP_DIR_NAME, "cache", NULL);
-    g_mkdir_with_parents(g_cache_dir, 0700);
+    ns_fs_mkdir_p(g_cache_dir, 0700);
     restrict_to_owner(g_cache_dir, TRUE);
 
     char *db_path = g_build_filename(g_cache_dir, "http-cache.sqlite", NULL);
@@ -494,7 +494,7 @@ static void
 delete_key(const char *key)
 {
     char *bp = body_path_for_key(key, FALSE);
-    g_unlink(bp);
+    ns_fs_unlink(bp);
     g_free(bp);
     if (!g_cache_db) return;
     sqlite3_stmt *st = NULL;
@@ -580,14 +580,14 @@ ns_cache_get(const char *url, const char *partition,
     g_autofree char *bp = body_path_for_key(key, FALSE);
     char *data = NULL;
     gsize dlen = 0;
-    GStatBuf stbuf;
-    if (g_stat(bp, &stbuf) != 0 || stbuf.st_size < 0 ||
-        (guint64)stbuf.st_size > cache_cap_bytes()) {
+    NsFsStat stbuf;
+    if (ns_fs_stat(bp, &stbuf) != 0 ||
+        (guint64)stbuf.size > cache_cap_bytes()) {
         ns_cache_entry_free(e);
         delete_key(key);
         return NULL;
     }
-    if (!g_file_get_contents(bp, &data, &dlen, NULL)) {
+    if (!ns_fs_get_contents(bp, &data, &dlen)) {
         ns_cache_entry_free(e);
         delete_key(key);
         return NULL;

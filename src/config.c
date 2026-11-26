@@ -6,10 +6,10 @@
 
 #include "config.h"
 #include "plat/ns_plat.h"
+#include "plat/ns_env.h"
+#include "plat/ns_fs.h"
 #include "security.h"
 
-#include <glib/gstdio.h>
-#include <errno.h>
 #include <string.h>
 
 #include "net.h"
@@ -237,11 +237,10 @@ load_file(ns_config *c, const char *path)
 {
     char *contents = NULL;
     gsize len = 0;
-    GError *err = NULL;
-    if (!g_file_get_contents(path, &contents, &len, &err)) {
-        if (!g_error_matches(err, G_FILE_ERROR, G_FILE_ERROR_NOENT))
-            g_warning("config: failed to read %s: %s", path, err->message);
-        g_clear_error(&err);
+    if (!ns_fs_get_contents(path, &contents, &len)) {
+        if (ns_fs_test(path, NS_FS_TEST_EXISTS))
+            g_warning("config: failed to read %s: %s", path,
+                      ns_fs_last_error());
         return;
     }
     char **lines = g_strsplit(contents, "\n", -1);
@@ -311,7 +310,7 @@ apply_env(ns_config *c)
             apply_pair(c, env_disable[i].key, "false");
         }
     for (gsize i = 0; i < G_N_ELEMENTS(env_value); i++) {
-        const char *v = g_getenv(env_value[i].env);
+        const char *v = ns_getenv(env_value[i].env);
         if (v && *v) {
             note_env_override(c, env_value[i].key);
             apply_pair(c, env_value[i].key, v);
@@ -330,7 +329,7 @@ ns_config_init(void)
     if (g_cfg_path)
         return;
     apply_default(&g_cfg);
-    g_cfg_path = g_build_filename(g_get_user_config_dir(),
+    g_cfg_path = g_build_filename(ns_fs_user_config_dir(),
                                   NS_APP_DIR_NAME, NS_EXE_NAME ".conf",
                                   NULL);
     load_file(&g_cfg, g_cfg_path);
@@ -484,10 +483,10 @@ ns_config_save(GError **error)
         return FALSE;
     }
     char *dir = g_path_get_dirname(g_cfg_path);
-    if (g_mkdir_with_parents(dir, 0700) != 0) {
-        g_set_error(error, G_FILE_ERROR, g_file_error_from_errno(errno),
+    if (ns_fs_mkdir_p(dir, 0700) != 0) {
+        g_set_error(error, G_FILE_ERROR, G_FILE_ERROR_FAILED,
                     "could not create config directory %s: %s",
-                    dir, g_strerror(errno));
+                    dir, ns_fs_last_error());
         g_free(dir);
         return FALSE;
     }
@@ -504,8 +503,11 @@ ns_config_save(GError **error)
         g_string_append_printf(s, "%s = %s\n", key,
                                file_value ? file_value : (v ? v : ""));
     }
-    gboolean ok = g_file_set_contents(g_cfg_path, s->str, (gssize)s->len, error);
-    if (ok) g_chmod(g_cfg_path, 0600);
+    gboolean ok = ns_fs_set_contents(g_cfg_path, s->str, (gssize)s->len);
+    if (!ok)
+        g_set_error(error, G_FILE_ERROR, G_FILE_ERROR_FAILED,
+                    "could not write %s: %s", g_cfg_path, ns_fs_last_error());
+    if (ok) ns_fs_chmod(g_cfg_path, 0600);
     g_string_free(s, TRUE);
     return ok;
 }

@@ -9,6 +9,8 @@
 #endif
 #include "security.h"
 #include "plat/ns_plat.h"
+#include "plat/ns_env.h"
+#include "plat/ns_fs.h"
 #include "brand.h"
 
 #include <stddef.h>
@@ -20,7 +22,7 @@
 gboolean
 ns_env_flag(const char *name)
 {
-    const char *v = name ? g_getenv(name) : NULL;
+    const char *v = name ? ns_getenv(name) : NULL;
     if (!v) return FALSE;
     while (*v == ' ' || *v == '\t') v++;
     return *v &&
@@ -54,13 +56,13 @@ ns_security_downloads_dir(void)
     static char *dir;
     if (dir) return dir;
 #ifdef G_OS_UNIX
-    char *home_real = g_get_home_dir() ? realpath(g_get_home_dir(), NULL) : NULL;
+    char *home_real = ns_fs_home_dir() ? realpath(ns_fs_home_dir(), NULL) : NULL;
     const char *dl_raw = g_get_user_special_dir(G_USER_DIRECTORY_DOWNLOAD);
     char *dl_real = dl_raw && *dl_raw ? realpath(dl_raw, NULL) : NULL;
-    const char *home = home_real ? home_real : g_get_home_dir();
+    const char *home = home_real ? home_real : ns_fs_home_dir();
     const char *dl = dl_real ? dl_real : dl_raw;
 #else
-    const char *home = g_get_home_dir();
+    const char *home = ns_fs_home_dir();
     const char *dl = g_get_user_special_dir(G_USER_DIRECTORY_DOWNLOAD);
 #endif
     gsize home_len = home ? strlen(home) : 0;
@@ -499,17 +501,17 @@ static void
 add_gpu_devices(int rfd, guint64 fs_read, guint64 fs_dev)
 {
     add_path_rw(rfd, fs_read | LANDLOCK_ACCESS_FS_WRITE_FILE, "/dev/dri");
-    GDir *dev = g_dir_open("/dev", 0, NULL);
+    NsDir *dev = ns_dir_open("/dev");
     if (!dev) return;
     const char *name;
-    while ((name = g_dir_read_name(dev))) {
+    while ((name = ns_dir_read_name(dev))) {
         if (!g_str_has_prefix(name, "nvidia")) continue;
         g_autofree char *path = g_build_filename("/dev", name, NULL);
-        gboolean is_dir = g_file_test(path, G_FILE_TEST_IS_DIR);
+        gboolean is_dir = ns_fs_test(path, NS_FS_TEST_IS_DIR);
         add_path_rw(rfd, is_dir ? fs_read | LANDLOCK_ACCESS_FS_WRITE_FILE : fs_dev,
                     path);
     }
-    g_dir_close(dev);
+    ns_dir_close(dev);
 }
 
 /* Confines filesystem access (Landlock on Linux, Seatbelt on macOS); no-op elsewhere. */
@@ -577,61 +579,61 @@ ns_security_sandbox_init(const char *self_exe)
     for (int vi = 0; vi < 64; vi++) {
         char vdev[32];
         g_snprintf(vdev, sizeof vdev, "/dev/video%d", vi);
-        if (g_file_test(vdev, G_FILE_TEST_EXISTS))
+        if (ns_fs_test(vdev, NS_FS_TEST_EXISTS))
             add_path_rw(rfd, fs_dev, vdev);
     }
     if (ns_gpu_devices_allowed)
         add_gpu_devices(rfd, fs_read, fs_dev);
-    if (g_file_test("/dev/snd", G_FILE_TEST_IS_DIR))
+    if (ns_fs_test("/dev/snd", NS_FS_TEST_IS_DIR))
         add_path_rw(rfd, fs_read | fs_write_file, "/dev/snd");
 
-    const char *xauth = g_getenv("XAUTHORITY");
+    const char *xauth = ns_getenv("XAUTHORITY");
     if (xauth && *xauth)
         add_path_rw(rfd, LANDLOCK_ACCESS_FS_READ_FILE, xauth);
 
-    const char *home = g_get_home_dir();
+    const char *home = ns_fs_home_dir();
 
-    add_path_rw(rfd, fs_read, g_get_user_config_dir());
-    add_path_rw(rfd, fs_read, g_get_user_data_dir());
-    add_path_rw(rfd, fs_read, g_get_user_cache_dir());
+    add_path_rw(rfd, fs_read, ns_fs_user_config_dir());
+    add_path_rw(rfd, fs_read, ns_fs_user_data_dir());
+    add_path_rw(rfd, fs_read, ns_fs_user_cache_dir());
     /* The runtime dir holds other services' state (systemd --user,
      * gvfs, ...); only dconf's shared-memory flag file is written. */
-    add_path_rw(rfd, fs_read, g_get_user_runtime_dir());
+    add_path_rw(rfd, fs_read, ns_fs_user_runtime_dir());
     {
         g_autofree char *dconf =
-            g_build_filename(g_get_user_runtime_dir(), "dconf", NULL);
-        if (g_file_test(dconf, G_FILE_TEST_IS_DIR))
+            g_build_filename(ns_fs_user_runtime_dir(), "dconf", NULL);
+        if (ns_fs_test(dconf, NS_FS_TEST_IS_DIR))
             add_path_rw(rfd, fs_rw, dconf);
     }
 
     char *ns_cfg_root =
-        g_build_filename(g_get_user_config_dir(), NS_APP_DIR_NAME, NULL);
-    g_mkdir_with_parents(ns_cfg_root, 0700);
+        g_build_filename(ns_fs_user_config_dir(), NS_APP_DIR_NAME, NULL);
+    ns_fs_mkdir_p(ns_cfg_root, 0700);
     add_path_rw(rfd, fs_rw, ns_cfg_root);
     g_free(ns_cfg_root);
 
     char *ns_data_root =
-        g_build_filename(g_get_user_data_dir(), NS_APP_DIR_NAME, NULL);
-    g_mkdir_with_parents(ns_data_root, 0700);
+        g_build_filename(ns_fs_user_data_dir(), NS_APP_DIR_NAME, NULL);
+    ns_fs_mkdir_p(ns_data_root, 0700);
     add_path_rw(rfd, fs_rw, ns_data_root);
     g_free(ns_data_root);
 
     char *ns_cache_top =
-        g_build_filename(g_get_user_cache_dir(), NS_APP_DIR_NAME, NULL);
-    g_mkdir_with_parents(ns_cache_top, 0700);
+        g_build_filename(ns_fs_user_cache_dir(), NS_APP_DIR_NAME, NULL);
+    ns_fs_mkdir_p(ns_cache_top, 0700);
     add_path_rw(rfd, fs_rw, ns_cache_top);
     g_free(ns_cache_top);
 
     char *ns_cache_root =
-        g_build_filename(g_get_user_cache_dir(), NS_APP_DIR_NAME, "cache", NULL);
-    g_mkdir_with_parents(ns_cache_root, 0700);
+        g_build_filename(ns_fs_user_cache_dir(), NS_APP_DIR_NAME, "cache", NULL);
+    ns_fs_mkdir_p(ns_cache_root, 0700);
     add_path_rw(rfd, fs_rw, ns_cache_root);
     g_free(ns_cache_root);
 
     {
         const char *dl_dir = ns_security_downloads_dir();
         if (dl_dir) {
-            g_mkdir_with_parents(dl_dir, 0700);
+            ns_fs_mkdir_p(dl_dir, 0700);
             /* Landlock grants what the path resolves to, so the fallback
              * ~/Downloads must resolve, like the XDG directory, strictly
              * below $HOME and outside hidden directories (a symlink to
@@ -643,7 +645,7 @@ ns_security_sandbox_init(const char *self_exe)
                 strncmp(dl_real, home_real, hl) == 0 &&
                 dl_real[hl] == '/' && dl_real[hl + 1] != '\0' &&
                 dl_real[hl + 1] != '.' && !strstr(dl_real + hl, "/.");
-            if (ok && g_file_test(dl_real, G_FILE_TEST_IS_DIR)) {
+            if (ok && ns_fs_test(dl_real, NS_FS_TEST_IS_DIR)) {
                 add_path_rw(rfd, fs_rw, dl_real);
                 g_free(ns_sandbox_readable_downloads);
                 ns_sandbox_readable_downloads = g_strdup(dl_real);
@@ -675,7 +677,7 @@ ns_security_sandbox_init(const char *self_exe)
         };
         for (gsize i = 0; dev_data_rel[i]; i++) {
             g_autofree char *p = g_build_filename(exe_dir, dev_data_rel[i], NULL);
-            if (g_file_test(p, G_FILE_TEST_IS_DIR))
+            if (ns_fs_test(p, NS_FS_TEST_IS_DIR))
                 add_path_rw(rfd, fs_read, p);
         }
         const char *const prefix_lib_rel[] = {
@@ -685,7 +687,7 @@ ns_security_sandbox_init(const char *self_exe)
         };
         for (gsize i = 0; prefix_lib_rel[i]; i++) {
             g_autofree char *p = g_build_filename(exe_dir, prefix_lib_rel[i], NULL);
-            if (g_file_test(p, G_FILE_TEST_IS_DIR))
+            if (ns_fs_test(p, NS_FS_TEST_IS_DIR))
                 add_path_rw(rfd, fs_read | fs_exec, p);
         }
         const char *const dev_root_markers[] = {
@@ -697,7 +699,7 @@ ns_security_sandbox_init(const char *self_exe)
         for (gsize i = 0; dev_root_markers[i]; i++) {
             g_autofree char *marker =
                 g_build_filename(exe_dir, dev_root_markers[i], NULL);
-            if (g_file_test(marker, G_FILE_TEST_IS_REGULAR)) {
+            if (ns_fs_test(marker, NS_FS_TEST_IS_REGULAR)) {
                 g_autofree char *root = g_path_get_dirname(marker);
                 add_path_rw(rfd, fs_read, root);
                 break;
@@ -1239,15 +1241,15 @@ ns_security_sandbox_init(const char *self_exe)
         "  (subpath \"/tmp\")\n"
         "  (subpath \"/dev\")\n");
 
-    sb_append_subpath(prof, g_get_user_runtime_dir());
+    sb_append_subpath(prof, ns_fs_user_runtime_dir());
 
-    char *cfg = g_build_filename(g_get_user_config_dir(), NS_APP_DIR_NAME, NULL);
+    char *cfg = g_build_filename(ns_fs_user_config_dir(), NS_APP_DIR_NAME, NULL);
     sb_append_subpath(prof, cfg);
     g_free(cfg);
-    char *data = g_build_filename(g_get_user_data_dir(), NS_APP_DIR_NAME, NULL);
+    char *data = g_build_filename(ns_fs_user_data_dir(), NS_APP_DIR_NAME, NULL);
     sb_append_subpath(prof, data);
     g_free(data);
-    char *cache = g_build_filename(g_get_user_cache_dir(), NS_APP_DIR_NAME, NULL);
+    char *cache = g_build_filename(ns_fs_user_cache_dir(), NS_APP_DIR_NAME, NULL);
     sb_append_subpath(prof, cache);
     g_free(cache);
 

@@ -1,5 +1,6 @@
 /* Weststar SDL Browser — the bundled SVG icons, drawn by the engine's own SVG renderer.
- * The icons are compiled into the binary as a GResource (data/icons/weststar-icons.gresource.xml).
+ * The icons (data/icons/hicolor/scalable/apps/) are compiled into the binary
+ * as C arrays, found by name in ns_icons.h (see ns_icon_names in src/meson.build).
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -10,9 +11,10 @@
 #include "html.h"
 #include "svg.h"
 
-#include <gio/gio.h>
+#include "ns_icons.h"
 
-#define NS_ICON_RESOURCE_DIR "/org/weststar/SdlBrowser/icons/scalable/apps/"
+#include <glib.h>
+#include <string.h>
 
 typedef struct {
     ns_node       *doc;
@@ -43,16 +45,13 @@ icon_lookup(const char *name)
         return icon->root ? icon : NULL;
     icon = g_new0(Icon, 1);
     g_hash_table_insert(g_icons, g_strdup(name), icon);
-    char *path = g_strconcat(NS_ICON_RESOURCE_DIR, name, ".svg", NULL);
-    GBytes *bytes = g_resources_lookup_data(path, G_RESOURCE_LOOKUP_FLAGS_NONE,
-                                            NULL);
-    g_free(path);
-    if (!bytes)
+    const ns_icon_file *file = NULL;
+    for (gsize i = 0; i < G_N_ELEMENTS(ns_icon_files); i++)
+        if (!strcmp(ns_icon_files[i].name, name))
+            file = &ns_icon_files[i];
+    if (!file)
         return NULL;
-    gsize len = 0;
-    const char *data = g_bytes_get_data(bytes, &len);
-    icon->doc = ns_html_parse(data, (gssize)len);
-    g_bytes_unref(bytes);
+    icon->doc = ns_html_parse(file->svg, (gssize)file->len);
     icon->root = icon->doc ? ns_svg_document_root(icon->doc) : NULL;
     return icon->root ? icon : NULL;
 }

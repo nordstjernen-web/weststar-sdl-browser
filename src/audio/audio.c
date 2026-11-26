@@ -9,6 +9,7 @@
 #define SDL_MAIN_HANDLED
 #include "audio.h"
 #include "plat/ns_plat.h"
+#include "plat/ns_env.h"
 #include "trace.h"
 
 #include <glib.h>
@@ -134,7 +135,7 @@ emit(const char *fmt, ...)
     va_start(ap, fmt);
     char *line = g_strdup_vprintf(fmt, ap);
     va_end(ap);
-    if (g_str_has_prefix(line, "error ") || g_getenv("NS_DBG_AUDIO"))
+    if (g_str_has_prefix(line, "error ") || ns_getenv("NS_DBG_AUDIO"))
         g_printerr("[audio] %s\n", line);
     g_free(line);
 }

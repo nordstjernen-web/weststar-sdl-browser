@@ -6,6 +6,7 @@
 
 #include "page_session.h"
 #include "plat/ns_plat.h"
+#include "plat/ns_env.h"
 #include "damage.h"
 #include "libnorthstar.h"
 #include "mainctx.h"
@@ -415,7 +416,7 @@ session_damage_mode(void)
 {
     static gint mode = -1;
     if (G_UNLIKELY(mode < 0)) {
-        const char *v = g_getenv("NS_DAMAGE");
+        const char *v = ns_getenv("NS_DAMAGE");
         mode = v && strcmp(v, "0") == 0 ? 0
              : v && strcmp(v, "verify") == 0 ? 2 : 1;
     }

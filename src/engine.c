@@ -6,9 +6,10 @@
 
 #include "mainctx.h"
 #include "plat/ns_plat.h"
+#include "plat/ns_env.h"
+#include "plat/ns_fs.h"
 #include "engine.h"
 
-#include <glib/gstdio.h>
 #include "gfx.h"
 #include <math.h>
 #include <stdio.h>
@@ -1062,7 +1063,7 @@ ns_engine_compute_cascade(ns_node *doc, const char *page_url,
     ns_css_relayout_enter();
     ns_css_set_doc_base(document_base);
     ns_css_style_element_cache_begin();
-    gboolean profile = g_getenv("NS_PROFILE") != NULL;
+    gboolean profile = ns_getenv("NS_PROFILE") != NULL;
     gint64 t0 = profile ? ns_time_monotonic_us() : 0;
     GPtrArray *page_sheets = g_ptr_array_new();
     GPtrArray *sheet_docs = g_ptr_array_new();
@@ -1145,7 +1146,7 @@ ns_engine_relayout(ns_node *doc, const char *page_url,
     };
     static int profile_env = -1;
     if (profile_env < 0)
-        profile_env = g_getenv("NS_PROFILE") != NULL ? 1 : 0;
+        profile_env = ns_getenv("NS_PROFILE") != NULL ? 1 : 0;
     GHashTable *styles;
     gint64 relayout_t0 = ns_time_monotonic_us();
     if (profile_env) {
@@ -1589,7 +1590,7 @@ ns_engine_preopen_output(const char *path)
         g_preopened_outputs = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                     g_free, NULL);
     if (g_hash_table_contains(g_preopened_outputs, path)) return TRUE;
-    FILE *f = g_fopen(path, "wb");
+    FILE *f = ns_fs_fopen(path, "wb");
     if (!f) return FALSE;
     g_hash_table_insert(g_preopened_outputs, g_strdup(path), f);
     return TRUE;

@@ -6,6 +6,7 @@
 
 #include "css.h"
 #include "plat/ns_plat.h"
+#include "plat/ns_env.h"
 #include "css_syntax.h"
 
 #include "image.h"
@@ -32755,7 +32756,7 @@ incr_ensure_struct_keys(const ns_css_stylesheet *ua,
     incr_desc_features_build(ua, author, n);
     g_struct_sig = sig;
     g_struct_ready = TRUE;
-    if (g_getenv("NS_PROFILE"))
+    if (ns_getenv("NS_PROFILE"))
         g_printerr("[profile] restyle-index structural=%u ancestors=%u "
                    "sibling=%u loose=%d nth-last=%d\n",
                    g_hash_table_size(g_struct_keys),
@@ -36531,7 +36532,7 @@ ns_css_compute(ns_node *doc,
 
     const ns_css_stylesheet *cached_ua = ua_sheet_for(doc);
 
-    gboolean profile = g_getenv("NS_PROFILE") != NULL;
+    gboolean profile = ns_getenv("NS_PROFILE") != NULL;
     gint64 t0 = profile ? ns_time_monotonic_us() : 0;
     (void)ns_css_rule_index_ensure(cached_ua);
     for (gsize i = 0; i < n_sheets; i++)
@@ -36628,7 +36629,7 @@ ns_css_compute(ns_node *doc,
         incr_own_attr_deps(g_has_cq_attrs);
         incr_own_attr_deps(g_has_self_attrs);
         incr_own_attr_deps(g_has_argloose_attrs);
-        if (g_getenv("NS_PROFILE"))
+        if (ns_getenv("NS_PROFILE"))
             g_printerr("[incr] :has() argument keys=%u attrs=%u; anchors "
                        "always live: keys=%u attrs=%u; keyless anchors: "
                        "argument keys=%u attrs=%u unkeyed=%d\n",
@@ -36642,7 +36643,7 @@ ns_css_compute(ns_node *doc,
         g_incr_eligible = !g_has_cq_loose;
         g_incr_has_sig = keys_sig;
     }
-    gboolean incr_usable = g_getenv("NS_NO_INCR_RESTYLE") == NULL
+    gboolean incr_usable = ns_getenv("NS_NO_INCR_RESTYLE") == NULL
         && g_incr_eligible
         && fabs(g_incr_zoom - 1.0) <= 0.001;
     guint64 cq_sig = cq_map_signature(g_cq_map);
@@ -36733,7 +36734,7 @@ ns_css_compute(ns_node *doc,
         g_incr_prev_focus = g_css_focus_node;
         g_incr_prev_hover = g_css_hover_node;
         g_incr_prev_active = g_css_active_node;
-        if (g_getenv("NS_PROFILE"))
+        if (ns_getenv("NS_PROFILE"))
             g_printerr("[incr] active=%d marked=%u reused=%u recomputed=%u\n",
                        g_incr_pass_active, incr_marked, g_incr_reused,
                        g_incr_recomputed);
