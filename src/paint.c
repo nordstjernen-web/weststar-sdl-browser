@@ -29,7 +29,6 @@ typedef struct rgba {
 
 static gboolean       g_caret_visible = TRUE;
 static int            g_paint_no_cull;
-static int            g_paint_filter_depth;
 static GPtrArray     *g_paint_deferred_list;
 
 static int            g_paint_defer_depth;
@@ -7439,7 +7438,6 @@ filter_layer_begin(cairo_t *cr, const ns_box *b, const char *filter,
     cairo_t *tcr = cairo_create(surf);
     cairo_scale(tcr, k, k);
     cairo_translate(tcr, -x0, -y0);
-    g_paint_filter_depth++;
     *fl = (filter_layer){
         .outer = cr, .cr = tcr, .surf = surf,
         .x = x0, .y = y0, .k = k, .sigma = sigma, .filter = filter,
@@ -7451,7 +7449,6 @@ filter_layer_begin(cairo_t *cr, const ns_box *b, const char *filter,
 static void
 filter_layer_discard(filter_layer *fl)
 {
-    g_paint_filter_depth--;
     cairo_destroy(fl->cr);
     cairo_surface_destroy(fl->surf);
     fl->cr = NULL;
@@ -7462,7 +7459,6 @@ filter_layer_discard(filter_layer *fl)
 static void
 filter_layer_end(filter_layer *fl)
 {
-    g_paint_filter_depth--;
     cairo_destroy(fl->cr);
     fl->cr = NULL;
     cairo_surface_flush(fl->surf);
