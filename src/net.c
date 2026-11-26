@@ -4646,7 +4646,7 @@ static const char k_about_start_template[] =
     "</style></head>"
     "<body><main class=\"wrap\">"
     "__ND_LOGO_MARK__"
-    "<h1 class=\"title\">Weststar</h1>"
+    "<h1 class=\"title\">Weststar Browser</h1>"
     "<form class=\"search\" id=\"dsearch\" role=\"search\">"
     "<input id=\"sq\" name=\"q\" type=\"search\" autocomplete=\"off\""
     " autofocus dir=\"auto\" aria-label=\"{{Search the web}}\""

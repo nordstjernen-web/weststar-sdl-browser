@@ -9,6 +9,8 @@ layout, QuickJS-ng for JavaScript, libcurl for the network.
 
 It is licensed under the GNU General Public License, version 3 or later.
 
+![Weststar on Windows, showing the start page](docs/images/weststar-windows.png)
+
 ## Status
 
 This is the start of the port. The work is done in stages, each merged to
