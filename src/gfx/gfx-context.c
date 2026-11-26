@@ -1072,6 +1072,8 @@ drawer_init(drawer *d, gfx_t *g, int width)
 static void
 drawer_free(drawer *d)
 {
+    gfx_source_fini(&d->src);
+    gfx_source_fini(&d->mask);
     free(d->srcbuf);
     free(d->maskbuf);
     free(d->covbuf);

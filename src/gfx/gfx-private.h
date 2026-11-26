@@ -190,12 +190,15 @@ typedef struct {
     int                  texel_int;   /* to_texel is an integer translation */
     int                  tx, ty;
     double               alpha;       /* multiplies every colour */
+    uint32_t            *lut;         /* gradients: colours over [0, 1] */
 } gfx_source;
 
 /* The pixels a source can be non-transparent in, for an image that does
  * not extend; FALSE when unbounded. */
 int  gfx_source_extent(const gfx_source *src, int *x0, int *y0, int *x1,
                        int *y1);
+/* Frees what gfx_source_init allocated. */
+void gfx_source_fini(gfx_source *src);
 void gfx_source_init(gfx_source *src, const gfx_pattern_t *pat,
                      const gfx_matrix_t *to_pattern, double alpha);
 /* Fills out[0 .. len) with premultiplied ARGB for row y, pixels x .. */

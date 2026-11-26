@@ -325,6 +325,17 @@ gfx_mesh_pattern_end_patch(gfx_pattern_t *p)
 
 /* ---- sources ----------------------------------------------------------- */
 
+#define GFX_LUT_SIZE 1024
+
+static uint32_t stop_color(const gfx_pattern_t *pat, double t);
+
+void
+gfx_source_fini(gfx_source *src)
+{
+    free(src->lut);
+    src->lut = NULL;
+}
+
 void
 gfx_source_init(gfx_source *src, const gfx_pattern_t *pat,
                 const gfx_matrix_t *to_pattern, double alpha)
@@ -336,6 +347,15 @@ gfx_source_init(gfx_source *src, const gfx_pattern_t *pat,
     if (pat->status != GFX_STATUS_SUCCESS) {
         src->solid = 0;
         return;
+    }
+    if ((pat->type == GFX_PATTERN_LINEAR || pat->type == GFX_PATTERN_RADIAL) &&
+        pat->stops.len > 0) {
+        /* Colours along the gradient, looked up instead of interpolated
+         * per pixel. */
+        src->lut = malloc(GFX_LUT_SIZE * sizeof *src->lut);
+        if (src->lut)
+            for (int i = 0; i < GFX_LUT_SIZE; i++)
+                src->lut[i] = stop_color(pat, (double)i / (GFX_LUT_SIZE - 1));
     }
     if (pat->type == GFX_PATTERN_SOLID) {
         double a = pat->a * src->alpha;
@@ -635,11 +655,54 @@ fetch_surface(const gfx_source *src, int y, int x, int len, uint32_t *out)
 
 /* ---- gradients --------------------------------------------------------- */
 
+/* t mapped into [0, 1] by the extend mode; FALSE where nothing is drawn. */
+static inline int
+extend_t(gfx_extend_t extend, double *t)
+{
+    if (!isfinite(*t))
+        return 0;
+    switch (extend) {
+    case GFX_EXTEND_NONE:
+        return *t >= 0 && *t <= 1;
+    case GFX_EXTEND_PAD:
+        *t = gfx_clampd(*t, 0, 1);
+        return 1;
+    case GFX_EXTEND_REPEAT:
+        *t -= floor(*t);
+        return 1;
+    case GFX_EXTEND_REFLECT:
+        *t = fmod(fabs(*t), 2.0);
+        if (*t > 1)
+            *t = 2 - *t;
+        return 1;
+    }
+    return 1;
+}
+
 static uint32_t
 gradient_color(const gfx_pattern_t *pat, double t)
 {
+    if (pat->stops.len == 0 || !extend_t(pat->extend, &t))
+        return 0;
+    return stop_color(pat, t);
+}
+
+static inline uint32_t
+gradient_lookup(const gfx_source *src, double t)
+{
+    if (!src->lut)
+        return gradient_color(src->pat, t);
+    if (!extend_t(src->pat->extend, &t))
+        return 0;
+    return src->lut[(int)(t * (GFX_LUT_SIZE - 1) + 0.5)];
+}
+
+/* The interpolated colour at t in [0, 1]. */
+static uint32_t
+stop_color(const gfx_pattern_t *pat, double t)
+{
     size_t n = pat->stops.len;
-    if (n == 0 || !isfinite(t))
+    if (n == 0)
         return 0;
     switch (pat->extend) {
     case GFX_EXTEND_NONE:
@@ -693,7 +756,7 @@ fetch_linear(const gfx_source *src, int y, int x, int len, uint32_t *out)
     double den = dx * dx + dy * dy;
     if (den == 0) {
         /* A degenerate line: the last stop, if the gradient extends. */
-        uint32_t c = pat->extend == GFX_EXTEND_NONE ? 0 : gradient_color(pat, 1);
+        uint32_t c = pat->extend == GFX_EXTEND_NONE ? 0 : gradient_lookup(src, 1);
         for (int i = 0; i < len; i++)
             out[i] = c;
         return;
@@ -705,7 +768,7 @@ fetch_linear(const gfx_source *src, int y, int x, int len, uint32_t *out)
     double t = ((u - x0) * dx + (v - y0) * dy) / den;
     double dt = (m->xx * dx + m->yx * dy) / den;
     for (int i = 0; i < len; i++)
-        out[i] = gradient_color(pat, t + dt * i);
+        out[i] = gradient_lookup(src, t + dt * i);
 }
 
 static void
@@ -728,7 +791,7 @@ fetch_radial(const gfx_source *src, int y, int x, int len, uint32_t *out)
             if (b != 0) {
                 double t = 0.5 * c / b;
                 if (none ? (t >= 0 && t <= 1) : (t * dr >= mindr))
-                    col = gradient_color(pat, t);
+                    col = gradient_lookup(src, t);
             }
         } else {
             double disc = b * b - a * c;
@@ -737,14 +800,14 @@ fetch_radial(const gfx_source *src, int y, int x, int len, uint32_t *out)
                 double t0 = (b + sq) / a, t1 = (b - sq) / a;
                 if (none) {
                     if (t0 >= 0 && t0 <= 1)
-                        col = gradient_color(pat, t0);
+                        col = gradient_lookup(src, t0);
                     else if (t1 >= 0 && t1 <= 1)
-                        col = gradient_color(pat, t1);
+                        col = gradient_lookup(src, t1);
                 } else {
                     if (t0 * dr >= mindr)
-                        col = gradient_color(pat, t0);
+                        col = gradient_lookup(src, t0);
                     else if (t1 * dr >= mindr)
-                        col = gradient_color(pat, t1);
+                        col = gradient_lookup(src, t1);
                 }
             }
         }

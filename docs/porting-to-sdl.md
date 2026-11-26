@@ -106,21 +106,23 @@ tangent.
 **Speed.** `meson test -C builddir --benchmark --verbose` (or
 `builddir/src/gfx/gfx-bench`) times twelve page-like workloads with gfx
 and with Cairo. On Windows (Ryzen 5 9600X, `-O3`, Cairo 1.18.6 with
-pixman's SIMD), after the first optimisation pass and SSE2 for blending
-and bilinear sampling, gfx is 1.6x Cairo's time over all:
+pixman's SIMD), after the first optimisation pass, SSE2 for blending and
+bilinear sampling, and a colour table for gradients, gfx takes 1.34x
+Cairo's time over all:
 
 | Workload | gfx / Cairo |
 |----------|-------------|
-| Solid page fills, aligned rectangles, thin lines, circles | 0.8–1.2x |
-| Translucent overlays, shrunk images | 1.4x |
-| Gradients, rounded boxes, opacity groups | 1.8–2.1x |
-| Rounded clips | 2.8x |
+| Gradients | 0.7x |
+| Solid page fills, translucent overlays, aligned rectangles, thin lines, circles | 0.8–1.2x |
+| Shrunk images | 1.4x |
+| Rounded boxes, opacity groups | 2.0–2.2x |
+| Rounded clips | 2.9x |
 | Scaled images | 3.9x |
-| Images drawn 1:1 | 6.1x |
+| Images drawn 1:1 | 5.9x |
 
 What is left is per-pixel work that pixman does with wider SIMD:
-blending images whose alpha varies, mask clips, and gradient colour
-lookup.
+blending images whose alpha varies, mask clips, and anti-aliased edges
+of filled shapes.
 
 Not in gfx: vector output (PDF) and curved mesh patch sides.
 
