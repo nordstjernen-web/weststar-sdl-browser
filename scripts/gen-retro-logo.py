@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Draws Weststar's about-page logo: a 256-colour "N" in mid-1990s style.
+"""Draws Weststar's about-page logo: a 256-colour "W" in mid-1990s style.
 
 48 x 48 pixel art with one 256-entry palette, as a VGA game would have
-it: an embossed, rust-and-bronze metal N (light bevels top-left, dark
+it: an embossed, rust-and-bronze metal W (light bevels top-left, dark
 bevels bottom-right, a noisy cast-metal texture and a rivet) standing
 over a dark planet horizon with a glowing rim, under a deep blue night
 sky where stars twinkle and a meteor streaks past. Saved as a looping
@@ -50,16 +50,28 @@ pal[SHADOW] = (1, 2, 10)
 
 # ---- shapes -------------------------------------------------------------
 
-LX, TY, NW, NH, STROKE = 9, 6, 30, 31, 8
+LX, TY, NW, NH, STROKE = 3, 8, 42, 28, 6
+
+# The W: four thick strokes from the top down to two bottom points and
+# up to a lower middle peak.
+W_POINTS = [(LX + 3.0, TY + 0.5), (LX + 11.5, TY + NH - 1.5),
+            (LX + NW / 2, TY + 5.0), (LX + NW - 11.5, TY + NH - 1.5),
+            (LX + NW - 3.0, TY + 0.5)]
+
+def seg_dist(px, py, ax, ay, bx, by):
+    dx, dy = bx - ax, by - ay
+    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)))
+    cx, cy = ax + t * dx, ay + t * dy
+    return ((px - cx) ** 2 + (py - cy) ** 2) ** 0.5
 
 def n_shape(x, y):
-    if not (TY <= y < TY + NH and LX <= x < LX + NW):
+    """The letter (a W): within half a stroke of one of its four strokes,
+    cut flat at the top and bottom."""
+    if not (TY <= y < TY + NH):
         return False
-    if x < LX + STROKE or x >= LX + NW - STROKE:
-        return True
-    t = (y - TY) / (NH - 1)
-    cx = LX + STROKE / 2 + t * (NW - STROKE)
-    return abs(x + 0.5 - cx) <= STROKE / 2 + 0.3
+    px, py = x + 0.5, y + 0.5
+    return any(seg_dist(px, py, *W_POINTS[i], *W_POINTS[i + 1]) <= STROKE / 2
+               for i in range(4))
 
 N = [[n_shape(x, y) for x in range(ART)] for y in range(ART)]
 
@@ -147,7 +159,7 @@ def frame(f):
         for x in range(ART):
             if in_n(x, y):
                 px[y][x] = metal_index(x, y)
-    for rx, ry in ((LX + 3, TY + 3), (LX + NW - 5, TY + NH - 5)):
+    for rx, ry in ((LX + 3, TY + 2), (LX + NW - 5, TY + 2)):
         px[ry][rx] = METAL[31]
         px[ry + 1][rx + 1] = METAL[2]
         px[ry][rx + 1] = px[ry + 1][rx] = METAL[14]

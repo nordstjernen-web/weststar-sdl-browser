@@ -15,7 +15,7 @@ Linux and Windows.
 The current version is 1.0.0. It is licensed under the GNU General Public
 License, version 3 or later.
 
-![Weststar 1.0.0 on Windows 11, showing the start page](docs/images/weststar-windows.png)
+![Weststar 1.0.0 on Windows 11, showing its Windows 95 style start page](docs/images/weststar-windows.png)
 
 ## Status
 
