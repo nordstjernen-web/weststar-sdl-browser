@@ -1,4 +1,4 @@
-/* Northstar Web Browser — page pipeline: blocking fetch, stylesheet collection, cascade, layout.
+/* Weststar SDL Browser — page pipeline: blocking fetch, stylesheet collection, cascade, layout.
  * Also speculative preloads, image fetching and decode, and PNG/text output of the box tree.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -1713,7 +1713,7 @@ static void
 pdf_write_metadata(cairo_surface_t *surf, const char *title)
 {
     cairo_pdf_surface_set_metadata(surf, CAIRO_PDF_METADATA_CREATOR,
-                                   "Northstar Web Browser");
+                                   "Weststar SDL Browser");
     if (title && *title)
         cairo_pdf_surface_set_metadata(surf, CAIRO_PDF_METADATA_TITLE, title);
     time_t now = time(NULL);

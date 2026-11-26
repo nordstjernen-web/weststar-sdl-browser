@@ -26,12 +26,12 @@
 #   --list            print the enumerated test URLs and exit
 #
 # Environment overrides:
-#   NS_BIN       browser binary (default builddir/src/gtk/northstar)
+#   NS_BIN       browser binary (default builddir/src/sdl/weststar)
 #   NS_WPT_ROOT  default for --wpt-root
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-BIN=${NS_BIN:-$ROOT/builddir/src/gtk/northstar}
+BIN=${NS_BIN:-$ROOT/builddir/src/sdl/weststar}
 export NS_ALLOW_ROOT=${NS_ALLOW_ROOT:-1}
 WPT_ROOT=${NS_WPT_ROOT:-}
 BASE="http://web-platform.test:8000"

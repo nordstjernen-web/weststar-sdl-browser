@@ -1,4 +1,4 @@
-# Northstar Web Browser UI translations — Dutch / Nederlands
+# Weststar SDL Browser UI translations — Dutch / Nederlands
 # Format: one English-source=translation pair per line; '#' starts a comment.
 # --- Toolbar, address bar, window ---
 Back=Terug
@@ -128,14 +128,14 @@ Changes apply to newly opened pages.=Wijzigingen gelden voor nieuw geopende pagi
 # --- History page (about:history) ---
 Recently visited pages.=Recent bezochte pagina’s.
 No history yet.=Nog geen geschiedenis.
-# --- About page (about:northstar) and license pages ---
-About Northstar Web Browser=Over Northstar Web Browser
+# --- About page (about:weststar) and license pages ---
+About Weststar SDL Browser=Over Weststar SDL Browser
 Version=Versie
 Start=Start
 A small, independent web browser written in C.=Een kleine, onafhankelijke webbrowser, geschreven in C.
 Release notes=Releaseopmerkingen
 Technical details=Technische details
-Northstar Web Browser is free software, distributed under the GNU General Public License, version 3 or later.=Northstar Web Browser is vrije software, verspreid onder de GNU General Public License, versie 3 of later.
+Weststar SDL Browser is free software, distributed under the GNU General Public License, version 3 or later.=Weststar SDL Browser is vrije software, verspreid onder de GNU General Public License, versie 3 of later.
 GNU General Public License (GPL-3.0)=GNU General Public License (GPL-3.0)
 GNU General Public License=GNU General Public License
 Third-party software notices=Kennisgevingen voor software van derden

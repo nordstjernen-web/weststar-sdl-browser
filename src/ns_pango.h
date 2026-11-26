@@ -1,4 +1,4 @@
-/* Northstar Web Browser — the text layer the engine talks to.
+/* Weststar SDL Browser — the text layer the engine talks to.
  * Wraps web-text-lib, the in-tree Pango fork; the engine reaches text shaping only through here.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

@@ -1,4 +1,4 @@
-/* Northstar Web Browser — video stream API: MPEG-1 or MSE-backed, frames, clock and duration.
+/* Weststar SDL Browser — video stream API: MPEG-1 or MSE-backed, frames, clock and duration.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

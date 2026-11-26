@@ -1,4 +1,4 @@
-/* Northstar Web Browser — video layer API: clock-driven frame presentation for compositing.
+/* Weststar SDL Browser — video layer API: clock-driven frame presentation for compositing.
  * Copyright 2026 Gabriel Ferreira
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

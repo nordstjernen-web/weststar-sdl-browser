@@ -1,4 +1,4 @@
-/* Northstar Web Browser — the QuickJS-based JavaScript runtime and Web API bindings.
+/* Weststar SDL Browser — the QuickJS-based JavaScript runtime and Web API bindings.
  * Window, DOM, events, timers, fetch/XHR, workers and script loading; called by page and engine.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -9419,7 +9419,7 @@ cors_allows(const char *doc_url, const char *resp_url, const char *cors_header)
 {
     if (resp_url && (g_str_has_prefix(resp_url, "data:") ||
                      g_str_has_prefix(resp_url, "blob:"))) return TRUE;
-    /* Browser about: pages (about:northstar's version list, ...) are for
+    /* Browser about: pages (about:weststar's version list, ...) are for
      * the browser's own pages to read, not for web content. */
     if (resp_url && g_ascii_strncasecmp(resp_url, "about:", 6) == 0)
         return ns_about_url_is_public(resp_url) ||
@@ -10334,7 +10334,7 @@ ns_audio_analysis_throw(JSContext *ctx, JSValueConst this_val,
         JS_NewString(ctx, "NotSupportedError"),
         JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
     JS_DefinePropertyValueStr(ctx, err, "message",
-        JS_NewString(ctx, "Northstar Web Browser does not implement Web Audio analysis"),
+        JS_NewString(ctx, "Weststar SDL Browser does not implement Web Audio analysis"),
         JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
     JS_DefinePropertyValueStr(ctx, err, "code",
         JS_NewInt32(ctx, 9),
@@ -11203,7 +11203,7 @@ ns_ua_client_hint_brands(JSContext *ctx, gboolean full_version)
 {
     JSValue arr = JS_NewArray(ctx);
     const struct { const char *brand; const char *version; } entries[] = {
-        { "Northstar",   full_version ? NS_VERSION : "1" },
+        { "Weststar",    full_version ? NS_VERSION : "1" },
         { "Not=A?Brand", full_version ? "24.0.0.0" : "24" },
     };
     for (uint32_t i = 0; i < G_N_ELEMENTS(entries); i++) {
@@ -11752,7 +11752,7 @@ ns_media_set_media_keys(JSContext *ctx, JSValueConst this_val,
                       JS_NewString(ctx, "NotSupportedError"));
     JS_SetPropertyStr(ctx, err, "message",
                       JS_NewString(ctx,
-                          "Northstar Web Browser does not implement EME / DRM"));
+                          "Weststar SDL Browser does not implement EME / DRM"));
     JS_SetPropertyStr(ctx, err, "code", JS_NewInt32(ctx, 9));
     JS_Call(ctx, resolvers[1], JS_UNDEFINED, 1, &err);
     JS_FreeValue(ctx, err);

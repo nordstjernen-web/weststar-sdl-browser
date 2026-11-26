@@ -1,4 +1,4 @@
-/* Northstar Web Browser — H.264 video decoder API over OpenH264.
+/* Weststar SDL Browser — H.264 video decoder API over OpenH264.
  * Copyright 2026 Gabriel Ferreira
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

@@ -1,4 +1,4 @@
-/* Northstar Web Browser — the policy check every subresource request passes.
+/* Weststar SDL Browser — the policy check every subresource request passes.
  * file: access, mixed-content blocking or upgrade, and per-destination CSP directives.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

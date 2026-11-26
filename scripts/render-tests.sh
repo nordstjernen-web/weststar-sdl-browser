@@ -9,7 +9,7 @@
 set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-bin="$root/builddir/src/gtk/northstar"
+bin="$root/builddir/src/sdl/weststar"
 src="$root/data/render-tests"
 out="${1:-$root/render-tests-out}"
 port=8137

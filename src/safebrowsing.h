@@ -1,4 +1,4 @@
-/* Northstar Web Browser — phishing/malware checks (local list and Google Safe Browsing) and the warning interstitial.
+/* Weststar SDL Browser — phishing/malware checks (local list and Google Safe Browsing) and the warning interstitial.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

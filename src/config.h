@@ -1,4 +1,4 @@
-/* Northstar Web Browser — runtime config: the ns_config settings struct and global accessors.
+/* Weststar SDL Browser — runtime config: the ns_config settings struct and global accessors.
  * Policy enums (referrer, cookies, color scheme, reduced motion) and a lock for writers.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -84,7 +84,7 @@ gboolean         ns_config_save(GError **error);
 void             ns_config_lock(void);
 void             ns_config_unlock(void);
 
-#define NS_APP_DIR_NAME "northstar"
+#include "brand.h"
 
 G_END_DECLS
 

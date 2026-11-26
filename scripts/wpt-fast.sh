@@ -21,7 +21,7 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-BIN=${NS_BIN:-$ROOT/builddir/src/gtk/northstar}
+BIN=${NS_BIN:-$ROOT/builddir/src/sdl/weststar}
 export NS_ALLOW_ROOT=${NS_ALLOW_ROOT:-1}
 FAST_ROOT=${NS_WPT_FAST_ROOT:-$HOME/wpt-fast}
 PORT=8100

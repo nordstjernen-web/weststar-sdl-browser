@@ -1,4 +1,4 @@
-/* Northstar Web Browser — image cache API: decode, frames and animation timelines.
+/* Weststar SDL Browser — image cache API: decode, frames and animation timelines.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

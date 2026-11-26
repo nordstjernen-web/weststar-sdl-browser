@@ -1,4 +1,4 @@
-/* Northstar Web Browser — which media types the compiled decoders can play.
+/* Weststar SDL Browser — which media types the compiled decoders can play.
  * Support query behind canPlayType/isTypeSupported, plus media resource selection.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

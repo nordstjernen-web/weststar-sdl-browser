@@ -1,4 +1,4 @@
-/* Northstar Web Browser — WHATWG Encoding Standard decoders and encoders on lexbor's tables.
+/* Weststar SDL Browser — WHATWG Encoding Standard decoders and encoders on lexbor's tables.
  * Label lookup, streaming decode with BOM sniffing, CJK index encoders and URL percent-encoding.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

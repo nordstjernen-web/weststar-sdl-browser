@@ -1,4 +1,4 @@
-/* Northstar Web Browser — UI scale for displays GTK does not scale itself.
+/* Weststar SDL Browser — UI scale for displays GTK does not scale itself.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

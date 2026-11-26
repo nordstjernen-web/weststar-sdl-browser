@@ -1,4 +1,4 @@
-/* Northstar Web Browser — HTML canvas 2D, Path2D, ImageBitmap, DOMMatrix (QuickJS).
+/* Weststar SDL Browser — HTML canvas 2D, Path2D, ImageBitmap, DOMMatrix (QuickJS).
  * Cairo-backed: gradients, shadows, compositing, ImageData, OffscreenCanvas, PNG toBlob.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

@@ -137,7 +137,7 @@ MinGW libraries. `scripts/_msys_build.sh` does that from any shell: it
 sets up the UCRT64 environment (or MINGW64, on a machine where only that
 one has GTK 4 installed), defaults `CC` to `clang`, configures
 `builddir` on first use and compiles. The binary is
-`builddir/src/gtk/northstar.exe`.
+`builddir/src/sdl/weststar.exe`.
 
 ```sh
 C:/msys64/usr/bin/bash.exe -lc "bash /c/path/to/northstar/scripts/_msys_build.sh"
@@ -173,7 +173,7 @@ and `makeappx.exe` from the Windows SDK, or `makemsix`.
 Open `northstar.sln` in Visual Studio. The project is an NMake wrapper around
 the existing Meson/MSYS2 build, not an MSVC port: **Build**, **Rebuild** and
 **Clean** run the corresponding operations with MSYS2, and **Start** launches
-`builddir/src/gtk/northstar.exe` with `about:start`. The project expects MSYS2
+`builddir/src/sdl/weststar.exe` with `about:start`. The project expects MSYS2
 at `C:\msys64` and the Windows dependencies described above. Update
 `scripts/vs-build.ps1` if MSYS2 is installed elsewhere. The Visual Studio
 Debug and Release configurations both use the existing `builddir` Meson
@@ -194,7 +194,7 @@ on all three platforms; [vscode.md](vscode.md) walks through the setup.
 ```sh
 meson setup builddir
 meson compile -C builddir
-./builddir/src/gtk/northstar
+./builddir/src/sdl/weststar
 ```
 
 `meson setup` resolves two upstream projects through
@@ -245,7 +245,7 @@ tested on Linux only.
 ```sh
 muon setup builddir
 muon -C builddir samu
-./builddir/src/gtk/northstar
+./builddir/src/sdl/weststar
 ```
 
 Options are given as with meson (`-Dwebgl=disabled`, `-Db_lto=false`);
@@ -340,9 +340,9 @@ and on, require the two sets to be identical, then check that
 ```sh
 for f in data/render-tests/*.html; do
     n=$(basename "$f" .html)
-    NS_PANGO_SHAPE_CACHE=0 ./builddir/src/gtk/northstar --headless \
+    NS_PANGO_SHAPE_CACHE=0 ./builddir/src/sdl/weststar --headless \
         --dump=layout "$f" > "/tmp/off-$n.txt"
-    ./builddir/src/gtk/northstar --headless --dump=layout "$f" > "/tmp/on-$n.txt"
+    ./builddir/src/sdl/weststar --headless --dump=layout "$f" > "/tmp/on-$n.txt"
     cmp -s "/tmp/off-$n.txt" "/tmp/on-$n.txt" || echo "differs: $n"
 done
 ```
@@ -437,15 +437,15 @@ or `--wpt` selects it; headless runs are never supervised by the watchdog.
 
 ```sh
 # Dump a page to PNG
-./builddir/src/gtk/northstar --headless \
+./builddir/src/sdl/weststar --headless \
     --url="https://example.com/" --dump="png:/tmp/out.png" --viewport=1000
 
 # Export a page to PDF
-./builddir/src/gtk/northstar \
+./builddir/src/sdl/weststar \
     --url="http://localhost:8080/book.html" --export="pdf:/tmp/book.pdf"
 
 # Evaluate JavaScript against a loaded page and print the result
-./builddir/src/gtk/northstar --headless \
+./builddir/src/sdl/weststar --headless \
     --url="file://$HOME/Downloads/page.html" --eval="document.title"
 ```
 

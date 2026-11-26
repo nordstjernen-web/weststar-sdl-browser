@@ -1,4 +1,4 @@
-# Northstar Web Browser UI translations — Marathi / मराठी
+# Weststar SDL Browser UI translations — Marathi / मराठी
 # Format: one English-source=translation pair per line; '#' starts a comment.
 # --- Toolbar, address bar, window ---
 Back=मागे
@@ -128,14 +128,14 @@ Changes apply to newly opened pages.=बदल नव्याने उघड�
 # --- History page (about:history) ---
 Recently visited pages.=अलीकडे भेट दिलेली पृष्ठे.
 No history yet.=अद्याप इतिहास नाही.
-# --- About page (about:northstar) and license pages ---
-About Northstar Web Browser=Northstar Web Browser बद्दल
+# --- About page (about:weststar) and license pages ---
+About Weststar SDL Browser=Weststar SDL Browser बद्दल
 Version=आवृत्ती
 Start=सुरुवात
 A small, independent web browser written in C.=C मध्ये लिहिलेला एक लहान, स्वतंत्र वेब ब्राउझर.
 Release notes=प्रकाशन टिपा
 Technical details=तांत्रिक तपशील
-Northstar Web Browser is free software, distributed under the GNU General Public License, version 3 or later.=Northstar Web Browser हे मुक्त सॉफ्टवेअर आहे, जे GNU General Public License, आवृत्ती 3 किंवा नंतरच्या आवृत्तीअंतर्गत वितरित केले जाते.
+Weststar SDL Browser is free software, distributed under the GNU General Public License, version 3 or later.=Weststar SDL Browser हे मुक्त सॉफ्टवेअर आहे, जे GNU General Public License, आवृत्ती 3 किंवा नंतरच्या आवृत्तीअंतर्गत वितरित केले जाते.
 GNU General Public License (GPL-3.0)=GNU General Public License (GPL-3.0)
 GNU General Public License=GNU General Public License
 Third-party software notices=तृतीय-पक्ष सॉफ्टवेअर सूचना

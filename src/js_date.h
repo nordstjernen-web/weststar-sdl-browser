@@ -1,4 +1,4 @@
-/* Northstar Web Browser — installs the ISO/UTC-only Temporal global into a QuickJS context.
+/* Weststar SDL Browser — installs the ISO/UTC-only Temporal global into a QuickJS context.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

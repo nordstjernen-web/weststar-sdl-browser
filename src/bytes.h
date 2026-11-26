@@ -1,4 +1,4 @@
-/* Northstar Web Browser — unaligned little/big-endian byte readers and writers for the decoders.
+/* Weststar SDL Browser — unaligned little/big-endian byte readers and writers for the decoders.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

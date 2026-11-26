@@ -1,4 +1,4 @@
-/* Northstar Web Browser — incremental WebM (Matroska subset) demuxer for Media Source.
+/* Weststar SDL Browser — incremental WebM (Matroska subset) demuxer for Media Source.
  * EBML parsing of tracks, clusters and laced blocks into MP4-style tracks and samples.
  * Copyright 2026 Gabriel Ferreira
  * SPDX-License-Identifier: GPL-3.0-or-later

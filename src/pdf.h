@@ -1,4 +1,4 @@
-/* Northstar Web Browser — PDF documents shown in a sandboxed PDF.js viewer page.
+/* Weststar SDL Browser — PDF documents shown in a sandboxed PDF.js viewer page.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

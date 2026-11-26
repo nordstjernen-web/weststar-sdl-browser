@@ -1,4 +1,4 @@
-/* Northstar Web Browser — optional spell checking API: word lookup by language.
+/* Weststar SDL Browser — optional spell checking API: word lookup by language.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

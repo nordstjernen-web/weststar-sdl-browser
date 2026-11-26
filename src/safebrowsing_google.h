@@ -1,4 +1,4 @@
-/* Northstar Web Browser — Google Safe Browsing v5 local-list client.
+/* Weststar SDL Browser — Google Safe Browsing v5 local-list client.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

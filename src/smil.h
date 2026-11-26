@@ -1,4 +1,4 @@
-/* Northstar Web Browser — SVG SMIL animation timeline API: animate, set, animateTransform, animateMotion.
+/* Weststar SDL Browser — SVG SMIL animation timeline API: animate, set, animateTransform, animateMotion.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

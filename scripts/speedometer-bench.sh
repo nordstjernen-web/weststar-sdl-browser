@@ -20,7 +20,7 @@
 #   only suites whose path contains the substring run (e.g. "react", "complex").
 #
 # Environment overrides:
-#   NS_BIN              browser binary (default builddir/src/gtk/northstar)
+#   NS_BIN              browser binary (default builddir/src/sdl/weststar)
 #   NS_SPEEDOMETER_DIR  scratch checkout (default $TMPDIR/nd-speedometer31)
 #   NS_ITERS            iterations per suite, median reported (default 3)
 #   NS_SETTLE           headless settle budget in ms (default 8000)
@@ -29,7 +29,7 @@ set -euo pipefail
 export LC_NUMERIC=C
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-BIN=${NS_BIN:-$ROOT/builddir/src/gtk/northstar}
+BIN=${NS_BIN:-$ROOT/builddir/src/sdl/weststar}
 export NS_ALLOW_ROOT=${NS_ALLOW_ROOT:-1}
 WORK=${NS_SPEEDOMETER_DIR:-${TMPDIR:-/tmp}/nd-speedometer31}
 PORT=${NS_PORT:-8123}

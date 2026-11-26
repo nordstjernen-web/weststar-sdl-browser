@@ -1,4 +1,4 @@
-# Northstar Web Browser UI translations — Yoruba / Yorùbá
+# Weststar SDL Browser UI translations — Yoruba / Yorùbá
 # Format: one English-source=translation pair per line; '#' starts a comment.
 # --- Toolbar, address bar, window ---
 Back=Padà sẹ́yìn
@@ -128,14 +128,14 @@ Changes apply to newly opened pages.=Àwọn àyípadà kan àwọn ojú-ìwé t
 # --- History page (about:history) ---
 Recently visited pages.=Àwọn ojú-ìwé tí a ṣàbẹ̀wò sí láìpẹ́.
 No history yet.=Kò sí ìtàn síbẹ̀.
-# --- About page (about:northstar) and license pages ---
-About Northstar Web Browser=Nípa Northstar Web Browser
+# --- About page (about:weststar) and license pages ---
+About Weststar SDL Browser=Nípa Weststar SDL Browser
 Version=Ẹ̀yà
 Start=Ìbẹ̀rẹ̀
 A small, independent web browser written in C.=Aṣàwákiri wẹ́ẹ̀bù kékeré, aláìdúrólé, tí a kọ ní C.
 Release notes=Àkọsílẹ̀ ìtújáde
 Technical details=Àlàyé ìmọ̀-ẹ̀rọ
-Northstar Web Browser is free software, distributed under the GNU General Public License, version 3 or later.=Northstar Web Browser jẹ́ sọ́fítíwía ọ̀fẹ́, tí a pín kiri lábẹ́ GNU General Public License, ẹ̀yà 3 tàbí èyí tó tẹ̀lé e.
+Weststar SDL Browser is free software, distributed under the GNU General Public License, version 3 or later.=Weststar SDL Browser jẹ́ sọ́fítíwía ọ̀fẹ́, tí a pín kiri lábẹ́ GNU General Public License, ẹ̀yà 3 tàbí èyí tó tẹ̀lé e.
 GNU General Public License (GPL-3.0)=GNU General Public License (GPL-3.0)
 GNU General Public License=GNU General Public License
 Third-party software notices=Àwọn àkíyèsí sọ́fítíwía ẹgbẹ́-kẹta

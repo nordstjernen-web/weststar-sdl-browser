@@ -1,4 +1,4 @@
-/* Northstar Web Browser — common QuickJS API over quickjs-ng or original QuickJS.
+/* Weststar SDL Browser — common QuickJS API over quickjs-ng or original QuickJS.
  * Engine is chosen at build time with NS_QUICKJS_ORIGINAL; declares the browser's patched hooks.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

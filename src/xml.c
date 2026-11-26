@@ -1,4 +1,4 @@
-/* Northstar Web Browser — namespaced XML parser building the DOM, for XHTML and DOMParser.
+/* Weststar SDL Browser — namespaced XML parser building the DOM, for XHTML and DOMParser.
  * Checks well-formedness, expands internal entities and reports error line and column.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

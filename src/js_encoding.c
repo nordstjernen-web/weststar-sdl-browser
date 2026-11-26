@@ -1,4 +1,4 @@
-/* Northstar Web Browser — TextDecoder and TextEncoder from the Encoding Standard (QuickJS).
+/* Weststar SDL Browser — TextDecoder and TextEncoder from the Encoding Standard (QuickJS).
  * Built on encoding.c's streaming decoders, with fatal and ignoreBOM options and encodeInto.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

@@ -1,4 +1,4 @@
-/* Northstar Web Browser — minimalist WebGL: canvas.getContext mapped onto GLES.
+/* Weststar SDL Browser — minimalist WebGL: canvas.getContext mapped onto GLES.
  * Ported from Nordstjernen Sol (src/webgl.c), taken under its GPL-3.0-or-later option.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -98,7 +98,7 @@ ns_webgl_startup(void)
         if (cfg && cfg->private_mode) {
             g_setenv("MESA_SHADER_CACHE_DISABLE", "true", FALSE);
         } else if (!g_getenv("MESA_SHADER_CACHE_DIR")) {
-            char *dir = g_build_filename(g_get_user_cache_dir(), "northstar",
+            char *dir = g_build_filename(g_get_user_cache_dir(), NS_APP_DIR_NAME,
                                          "mesa", NULL);
             g_setenv("MESA_SHADER_CACHE_DIR", dir, TRUE);
             g_free(dir);

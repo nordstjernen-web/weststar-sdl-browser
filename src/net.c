@@ -1,4 +1,4 @@
-/* Northstar Web Browser — libcurl-backed async fetcher and WHATWG URL handling.
+/* Weststar SDL Browser — libcurl-backed async fetcher and WHATWG URL handling.
  * Cookies, HSTS, CORS preflight, proxies, caching, and data:, file:, ftp: and about: schemes.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -3272,7 +3272,7 @@ about_diagnostics_html(void)
     g_free(cores);
 
     diag_heading(s, "Version & libraries");
-    diag_kv(s, "Northstar Web Browser", NS_VERSION " (built " NS_BUILD_DATE ")");
+    diag_kv(s, "Weststar SDL Browser", NS_VERSION " (built " NS_BUILD_DATE ")");
     {
         const ns_config *ua_cfg = ns_config_get();
         const char *ua = ua_cfg && ua_cfg->user_agent && *ua_cfg->user_agent
@@ -3403,16 +3403,16 @@ static char *
 build_about_license(void)
 {
     static const char *const paths[] = {
-        "northstar/LICENSE",
-        "share/northstar/LICENSE",
-        "../share/northstar/LICENSE",
+        "weststar/LICENSE",
+        "share/weststar/LICENSE",
+        "../share/weststar/LICENSE",
         "../../../LICENSE",
         "../../LICENSE",
         "LICENSE",
         NULL,
     };
     return build_about_markdown_page(paths, "GNU General Public License",
-                                     "about:northstar", "About Northstar Web Browser",
+                                     "about:weststar", "About Weststar SDL Browser",
                                      "LICENSE");
 }
 
@@ -3421,16 +3421,16 @@ static char *
 build_about_third_party(void)
 {
     static const char *const paths[] = {
-        "northstar/THIRD-PARTY-LICENSES.md",
-        "share/northstar/THIRD-PARTY-LICENSES.md",
-        "../share/northstar/THIRD-PARTY-LICENSES.md",
+        "weststar/THIRD-PARTY-LICENSES.md",
+        "share/weststar/THIRD-PARTY-LICENSES.md",
+        "../share/weststar/THIRD-PARTY-LICENSES.md",
         "../../../THIRD-PARTY-LICENSES.md",
         "../../THIRD-PARTY-LICENSES.md",
         "THIRD-PARTY-LICENSES.md",
         NULL,
     };
     return build_about_markdown_page(paths, "Third-party software notices",
-                                     "about:northstar", "About Northstar Web Browser",
+                                     "about:weststar", "About Weststar SDL Browser",
                                      "THIRD-PARTY-LICENSES.md");
 }
 
@@ -3469,14 +3469,14 @@ classify_error(const char *url, long status, const char *transport_error,
         "📡",
         "Can't reach the network",
         "Can't reach the network",
-        "Northstar Web Browser couldn't connect to any server. Your device may be "
+        "Weststar SDL Browser couldn't connect to any server. Your device may be "
         "offline, or a firewall is blocking outbound traffic."
     };
     static const ns_error_info DNS = {
         "🔍",
         "Server address not found",
         "Server address not found",
-        "Northstar Web Browser couldn't look up the host name. The address may be "
+        "Weststar SDL Browser couldn't look up the host name. The address may be "
         "mistyped, or your DNS resolver isn't responding."
     };
     static const ns_error_info REFUSED = {
@@ -3497,7 +3497,7 @@ classify_error(const char *url, long status, const char *transport_error,
         "🔒",
         "Secure connection failed",
         "Secure connection failed",
-        "Northstar Web Browser couldn't establish a trustworthy TLS connection. "
+        "Weststar SDL Browser couldn't establish a trustworthy TLS connection. "
         "The certificate may be invalid, expired, or self-signed."
     };
     static const ns_error_info BAD_URL = {
@@ -3524,7 +3524,7 @@ classify_error(const char *url, long status, const char *transport_error,
         "🔐",
         "Authentication required",
         "Authentication required",
-        "The server needs credentials Northstar Web Browser doesn't have. Sign in "
+        "The server needs credentials Weststar SDL Browser doesn't have. Sign in "
         "elsewhere first, or try a different URL."
     };
     static const ns_error_info HTTP_403 = {
@@ -3602,7 +3602,7 @@ classify_error(const char *url, long status, const char *transport_error,
         "🔒",
         "Outside the browser's sandbox",
         "The sandbox keeps the browser out of this location",
-        "Northstar Web Browser reads only a few folders on this computer, "
+        "Weststar SDL Browser reads only a few folders on this computer, "
         "so that a page that takes over the browser still cannot reach "
         "private files such as your documents, SSH keys or shell "
         "history. This file or folder is outside them."
@@ -3693,7 +3693,7 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
         "<!doctype html><html><head><meta charset=\"utf-8\">"
         "<title>");
     g_string_append(out, esc_title);
-    g_string_append(out, " — Northstar Web Browser</title>"
+    g_string_append(out, " — Weststar SDL Browser</title>"
         "<style>"
         "body{font-family:system-ui,-apple-system,\"Segoe UI\","
         "Helvetica,Arial,sans-serif;background:#f5f5f8;color:#1b1b22;"
@@ -4621,7 +4621,7 @@ static const char k_about_start_template[] =
     "<meta charset=\"utf-8\">"
     "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
     "<meta name=\"color-scheme\" content=\"light dark\">"
-    "<title>Northstar</title>"
+    "<title>Weststar</title>"
     "<style>\n" NS_ABOUT_BASE_CSS
     ".wrap { max-width: 720px; padding-top:34px; text-align:center; }\n"
     ".mark-img { display:block; width:96px; height:96px;"
@@ -4646,7 +4646,7 @@ static const char k_about_start_template[] =
     "</style></head>"
     "<body><main class=\"wrap\">"
     "__ND_LOGO_MARK__"
-    "<h1 class=\"title\">Northstar</h1>"
+    "<h1 class=\"title\">Weststar</h1>"
     "<form class=\"search\" id=\"dsearch\" role=\"search\">"
     "<input id=\"sq\" name=\"q\" type=\"search\" autocomplete=\"off\""
     " autofocus dir=\"auto\" aria-label=\"{{Search the web}}\""
@@ -4656,7 +4656,7 @@ static const char k_about_start_template[] =
     "<nav class=\"links\">"
     "<a href=\"about:history\">{{History}}</a> \xc2\xb7 "
     "<a href=\"about:settings\">{{Settings}}</a> \xc2\xb7 "
-    "<a href=\"about:northstar\">{{About Northstar Web Browser}}</a>"
+    "<a href=\"about:weststar\">{{About Weststar SDL Browser}}</a>"
     "</nav>"
     "</main>"
     "<script>\n"
@@ -4676,7 +4676,7 @@ static const char k_about_northstar_template[] =
     "<meta charset=\"utf-8\">"
     "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
     "<meta name=\"color-scheme\" content=\"light dark\">"
-    "<title>{{About Northstar Web Browser}}</title>"
+    "<title>{{About Weststar SDL Browser}}</title>"
     "<style>\n" NS_ABOUT_BASE_CSS
     ".wrap { max-width: 600px; }\n"
     ".head { text-align:center; }\n"
@@ -4715,12 +4715,12 @@ static const char k_about_northstar_template[] =
     "<body><main class=\"wrap\">"
     "<header class=\"head\">"
     "__ND_LOGO_MARK__"
-    "<h1>Northstar Web Browser</h1>"
+    "<h1>Weststar SDL Browser</h1>"
     "<p class=\"ver\">{{Version}} " NS_VERSION " \xc2\xb7 "
     "<a href=\"https://github.com/nordstjernen-web/northstar-web-browser/"
     "releases\">{{Release notes}}</a></p>"
     "<p>{{A small, independent web browser written in C.}}</p>"
-    "<p>{{Northstar Web Browser is free software, distributed under the GNU "
+    "<p>{{Weststar SDL Browser is free software, distributed under the GNU "
     "General Public License, version 3 or later.}} \xc2\xa9 2026 Andreas "
     "R\xc3\xb8sdal</p>"
     "<p class=\"docs\">"
@@ -5098,7 +5098,7 @@ synthesize_about_response(const char *url, const char *top_url,
         g_byte_array_append(resp->body, (const guint8 *)body,
                             (guint)strlen(body));
         g_free(body);
-    } else if (g_str_equal(what, "northstar") || g_str_equal(what, "about")) {
+    } else if (g_str_equal(what, "weststar") || g_str_equal(what, "northstar") || g_str_equal(what, "about")) {
         char *logo_markup = about_logo_markup();
         g_autofree char *about_page = ns_i18n_expand(k_about_northstar_template);
         char *with_logo = about_substitute(about_page,
@@ -5113,7 +5113,7 @@ synthesize_about_response(const char *url, const char *top_url,
     } else if (g_str_equal(what, "book")) {
         const char *body =
             "<!doctype html><html><head><meta charset=\"utf-8\">"
-            "<title>The Book of Northstar Web Browser</title><style>"
+            "<title>The Book of Weststar SDL Browser</title><style>"
             "body{background:#fff;color:#7a0000;margin:0;height:100vh;"
             "display:flex;align-items:center;justify-content:center}"
             "p{font-family:serif;font-style:italic;font-size:1.3em;"
@@ -5123,7 +5123,7 @@ synthesize_about_response(const char *url, const char *top_url,
             "a small light rose in the north, written by hand and beholden "
             "to no one. It asked for nothing, reported to nowhere, and "
             "carried the travellers over the wire by the old free roads."
-            "<br><br>from <strong>The Book of Northstar Web Browser,</strong> 1:1"
+            "<br><br>from <strong>The Book of Weststar SDL Browser,</strong> 1:1"
             "</p></body></html>";
         g_byte_array_append(resp->body, (const guint8 *)body,
                             (guint)strlen(body));
@@ -5181,7 +5181,7 @@ synthesize_about_response(const char *url, const char *top_url,
         }
         about_emit_json(resp, g_strdup("{\"ok\":true}"));
     } else {
-        const char *body = "<!doctype html><title>Northstar Web Browser</title>";
+        const char *body = "<!doctype html><title>Weststar SDL Browser</title>";
         g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
     }
     return TRUE;
@@ -5893,7 +5893,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         gboolean chromium_ua = ns_user_agent_has_client_hints(effective_ua);
         if (chromium_ua) {
             headers = curl_slist_append(headers,
-                "Sec-CH-UA: \"Northstar\";v=\"1\", "
+                "Sec-CH-UA: \"Weststar\";v=\"1\", "
                 "\"Not=A?Brand\";v=\"24\"");
             headers = curl_slist_append(headers,
                                         "Sec-CH-UA-Mobile: " NS_SEC_CH_UA_MOBILE);
@@ -7512,7 +7512,7 @@ ns_multipart_boundary(void)
         r[0] = g_random_int(); r[1] = g_random_int();
         r[2] = g_random_int(); r[3] = g_random_int();
     }
-    return g_strdup_printf("----NorthstarFormBoundary%08x%08x%08x%08x",
+    return g_strdup_printf("----WeststarFormBoundary%08x%08x%08x%08x",
                            r[0], r[1], r[2], r[3]);
 }
 

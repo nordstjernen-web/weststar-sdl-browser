@@ -1,4 +1,4 @@
-/* Northstar Web Browser — SIGQUIT-triggered dump of this process's threads to stderr.
+/* Weststar SDL Browser — SIGQUIT-triggered dump of this process's threads to stderr.
  * Reads state, CPU time and names from /proc/<pid>/task; a helper thread does the writing.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

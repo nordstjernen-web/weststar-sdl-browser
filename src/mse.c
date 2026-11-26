@@ -1,4 +1,4 @@
-/* Northstar Web Browser — Media Source Extensions: source buffers holding demuxed coded frames.
+/* Weststar SDL Browser — Media Source Extensions: source buffers holding demuxed coded frames.
  * MP4/WebM demux, codec support checks, frame eviction, buffered ranges; also file playback.
  * Copyright 2026 Gabriel Ferreira
  * SPDX-License-Identifier: GPL-3.0-or-later

@@ -14,7 +14,7 @@ sudo pacman -S --needed base-devel git meson python gtk4 curl \
 git clone https://github.com/nordstjernen-web/northstar-web-browser.git
 cd northstar-web-browser
 meson setup builddir && meson compile -C builddir
-./builddir/src/gtk/northstar
+./builddir/src/sdl/weststar
 ```
 
 ## Build the package

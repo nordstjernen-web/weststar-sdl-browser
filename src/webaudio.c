@@ -1,4 +1,4 @@
-/* Northstar Web Browser — Web Audio graph rendering for AudioContext and OfflineAudioContext.
+/* Weststar SDL Browser — Web Audio graph rendering for AudioContext and OfflineAudioContext.
  * Renders oscillator, buffer source, constant, gain, biquad, delay, compressor and
  * waveshaper nodes in 128-frame blocks with AudioParam automation.  A realtime
  * AudioContext renders a little ahead of the output clock into a mixer stream.

@@ -1,4 +1,4 @@
-/* Northstar Web Browser — toolkit-independent offscreen GLES context for WebGL.
+/* Weststar SDL Browser — toolkit-independent offscreen GLES context for WebGL.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

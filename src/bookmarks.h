@@ -1,4 +1,4 @@
-/* Northstar Web Browser — bookmarks API: load, query, add and remove saved url/title pairs.
+/* Weststar SDL Browser — bookmarks API: load, query, add and remove saved url/title pairs.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

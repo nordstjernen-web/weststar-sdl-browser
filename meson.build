@@ -1,5 +1,5 @@
 project(
-  'northstar',
+  'weststar',
   'c',
   version: '1.0.27-dev',
   license: 'GPL-3.0-or-later',
@@ -75,7 +75,7 @@ add_project_link_arguments(
 ns_buildtype = get_option('buildtype')
 ns_is_release = (ns_buildtype == 'release' or ns_buildtype == 'minsize')
 # Every build profile gets -O3 (via default_options optimization=3) plus
-# dead-section pruning. Northstar Web Browser leans on the optimizer to inline the
+# dead-section pruning. The browser leans on the optimizer to inline the
 # lexbor parser walks, QuickJS interpreter dispatch, and our box-layout
 # loops; -O2 left ~30% on the table for JS-heavy pages. The -O level is
 # left to meson's optimization option so it isn't passed twice (which
@@ -125,7 +125,7 @@ if get_option('b_lto') and cc.get_id() == 'gcc'
 endif
 
 ns_release_profile = get_option('b_lto') ? 'release (LTO + stripped + hardened)' : 'release (stripped + hardened)'
-message('northstar build profile: ' +
+message('weststar build profile: ' +
         (ns_is_release ? ns_release_profile
                        : 'development (debug symbols + frame pointer + hardened)'))
 
@@ -154,7 +154,7 @@ foreach name, floor : ns_floors
   endif
 endforeach
 if ns_unmet_floors.length() > 0
-  error('Northstar Web Browser needs newer system libraries than this machine has:\n' +
+  error('Weststar SDL Browser needs newer system libraries than this machine has:\n' +
         '\n'.join(ns_unmet_floors) + '\n' +
         'Ubuntu 24.04, Debian 13 and Fedora 40 are the oldest releases of ' +
         'their distributions that ship all of them; see docs/building.md.')
@@ -521,27 +521,27 @@ install_subdir(
 install_data(
   'LICENSE',
   'THIRD-PARTY-LICENSES.md',
-  install_dir: get_option('datadir') / 'northstar',
+  install_dir: get_option('datadir') / 'weststar',
 )
 
 install_data(
   'data/safebrowsing.list',
-  install_dir: get_option('datadir') / 'northstar',
+  install_dir: get_option('datadir') / 'weststar',
 )
 
 install_subdir(
   'data/i18n',
-  install_dir: get_option('datadir') / 'northstar',
+  install_dir: get_option('datadir') / 'weststar',
 )
 
 install_data(
-  'data/northstar.desktop',
+  'data/weststar.desktop',
   install_dir: get_option('datadir') / 'applications',
-  rename: 'org.northstar.WebBrowser.desktop',
+  rename: 'org.weststar.SdlBrowser.desktop',
 )
 
 install_data(
-  'data/org.northstar.WebBrowser.metainfo.xml',
+  'data/org.weststar.SdlBrowser.metainfo.xml',
   install_dir: get_option('datadir') / 'metainfo',
 )
 

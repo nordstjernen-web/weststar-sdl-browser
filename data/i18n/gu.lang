@@ -1,4 +1,4 @@
-# Northstar Web Browser UI translations — Gujarati / ગુજરાતી
+# Weststar SDL Browser UI translations — Gujarati / ગુજરાતી
 # Format: one English-source=translation pair per line; '#' starts a comment.
 # --- Toolbar, address bar, window ---
 Back=પાછળ
@@ -128,14 +128,14 @@ Changes apply to newly opened pages.=ફેરફારો નવા ખોલ�
 # --- History page (about:history) ---
 Recently visited pages.=તાજેતરમાં મુલાકાત લીધેલા પેજ.
 No history yet.=હજી સુધી કોઈ ઇતિહાસ નથી.
-# --- About page (about:northstar) and license pages ---
-About Northstar Web Browser=Northstar Web Browser વિશે
+# --- About page (about:weststar) and license pages ---
+About Weststar SDL Browser=Weststar SDL Browser વિશે
 Version=સંસ્કરણ
 Start=શરૂઆત
 A small, independent web browser written in C.=C માં લખાયેલું એક નાનું, સ્વતંત્ર વેબ બ્રાઉઝર.
 Release notes=રિલીઝ નોંધો
 Technical details=તકનીકી વિગતો
-Northstar Web Browser is free software, distributed under the GNU General Public License, version 3 or later.=Northstar Web Browser મુક્ત સૉફ્ટવેર છે, જે GNU General Public License, સંસ્કરણ 3 અથવા પછીના સંસ્કરણ હેઠળ વિતરિત થાય છે.
+Weststar SDL Browser is free software, distributed under the GNU General Public License, version 3 or later.=Weststar SDL Browser મુક્ત સૉફ્ટવેર છે, જે GNU General Public License, સંસ્કરણ 3 અથવા પછીના સંસ્કરણ હેઠળ વિતરિત થાય છે.
 GNU General Public License (GPL-3.0)=GNU General Public License (GPL-3.0)
 GNU General Public License=GNU General Public License
 Third-party software notices=તૃતીય-પક્ષ સૉફ્ટવેર સૂચનાઓ

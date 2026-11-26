@@ -1,4 +1,4 @@
-# Northstar Web Browser UI translations — Indonesian / Bahasa Indonesia
+# Weststar SDL Browser UI translations — Indonesian / Bahasa Indonesia
 # Format: one English-source=translation pair per line; '#' starts a comment.
 # --- Toolbar, address bar, window ---
 Back=Kembali
@@ -128,14 +128,14 @@ Changes apply to newly opened pages.=Perubahan berlaku untuk halaman yang baru d
 # --- History page (about:history) ---
 Recently visited pages.=Halaman yang baru dikunjungi.
 No history yet.=Belum ada riwayat.
-# --- About page (about:northstar) and license pages ---
-About Northstar Web Browser=Tentang Northstar Web Browser
+# --- About page (about:weststar) and license pages ---
+About Weststar SDL Browser=Tentang Weststar SDL Browser
 Version=Versi
 Start=Mulai
 A small, independent web browser written in C.=Peramban web kecil dan independen, ditulis dalam C.
 Release notes=Catatan rilis
 Technical details=Detail teknis
-Northstar Web Browser is free software, distributed under the GNU General Public License, version 3 or later.=Northstar Web Browser adalah perangkat lunak bebas, didistribusikan di bawah GNU General Public License, versi 3 atau yang lebih baru.
+Weststar SDL Browser is free software, distributed under the GNU General Public License, version 3 or later.=Weststar SDL Browser adalah perangkat lunak bebas, didistribusikan di bawah GNU General Public License, versi 3 atau yang lebih baru.
 GNU General Public License (GPL-3.0)=GNU General Public License (GPL-3.0)
 GNU General Public License=GNU General Public License
 Third-party software notices=Pemberitahuan perangkat lunak pihak ketiga

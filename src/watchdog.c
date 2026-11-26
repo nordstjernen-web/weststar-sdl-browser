@@ -1,4 +1,4 @@
-/* Northstar Web Browser — supervisor process that restarts the browser on crash or hang.
+/* Weststar SDL Browser — supervisor process that restarts the browser on crash or hang.
  * Respawns with backoff and recovery mode; the child runs a main-loop heartbeat hang monitor.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -189,7 +189,7 @@ ns_watchdog_report_failure(const char *detail)
 #ifdef G_OS_WIN32
     const char *log = ns_debug_log_file_path();
     char *body = g_strdup_printf(
-        "Northstar Web Browser could not start.\n\n%s\n\n"
+        "Weststar SDL Browser could not start.\n\n%s\n\n"
         "A diagnostic log was written to:\n%s\n\n"
         "If this persists, try launching with the cairo renderer by setting "
         "the environment variable NS_GSK_RENDERER=cairo before starting.",
@@ -197,7 +197,7 @@ ns_watchdog_report_failure(const char *detail)
         log ? log : "(log file unavailable)");
     wchar_t *wbody = (wchar_t *)g_utf8_to_utf16(body, -1, NULL, NULL, NULL);
     if (wbody) {
-        MessageBoxW(NULL, wbody, L"Northstar Web Browser",
+        MessageBoxW(NULL, wbody, L"Weststar SDL Browser",
                     MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
         g_free(wbody);
     }
@@ -549,7 +549,7 @@ ns_watchdog_run_supervisor(const char *self_exe, int argc, char **argv)
     ns_watchdog wd = { 0 };
 
     char *uuid = g_uuid_string_random();
-    char *name = g_strconcat("northstar-watchdog-", uuid, ".session", NULL);
+    char *name = g_strconcat("weststar-watchdog-", uuid, ".session", NULL);
     wd.session_path = g_build_filename(g_get_user_runtime_dir(), name, NULL);
     g_free(name);
     g_free(uuid);

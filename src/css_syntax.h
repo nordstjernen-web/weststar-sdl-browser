@@ -1,4 +1,4 @@
-/* Northstar Web Browser — CSS Syntax token and component-value API. */
+/* Weststar SDL Browser — CSS Syntax token and component-value API. */
 
 #ifndef NS_CSS_SYNTAX_H
 #define NS_CSS_SYNTAX_H

@@ -1,4 +1,4 @@
-# Northstar Web Browser UI translations — Greek / Ελληνικά
+# Weststar SDL Browser UI translations — Greek / Ελληνικά
 # Format: one English-source=translation pair per line; '#' starts a comment.
 # --- Toolbar, address bar, window ---
 Back=Πίσω
@@ -128,14 +128,14 @@ Changes apply to newly opened pages.=Οι αλλαγές ισχύουν για �
 # --- History page (about:history) ---
 Recently visited pages.=Πρόσφατα επισκεφθείσες σελίδες.
 No history yet.=Δεν υπάρχει ακόμα ιστορικό.
-# --- About page (about:northstar) and license pages ---
-About Northstar Web Browser=Σχετικά με το Northstar Web Browser
+# --- About page (about:weststar) and license pages ---
+About Weststar SDL Browser=Σχετικά με το Weststar SDL Browser
 Version=Έκδοση
 Start=Έναρξη
 A small, independent web browser written in C.=Ένα μικρό, ανεξάρτητο πρόγραμμα περιήγησης, γραμμένο σε C.
 Release notes=Σημειώσεις έκδοσης
 Technical details=Τεχνικές λεπτομέρειες
-Northstar Web Browser is free software, distributed under the GNU General Public License, version 3 or later.=Το Northstar Web Browser είναι ελεύθερο λογισμικό, που διανέμεται υπό την GNU General Public License, έκδοση 3 ή νεότερη.
+Weststar SDL Browser is free software, distributed under the GNU General Public License, version 3 or later.=Το Weststar SDL Browser είναι ελεύθερο λογισμικό, που διανέμεται υπό την GNU General Public License, έκδοση 3 ή νεότερη.
 GNU General Public License (GPL-3.0)=GNU General Public License (GPL-3.0)
 GNU General Public License=GNU General Public License
 Third-party software notices=Σημειώσεις λογισμικού τρίτων

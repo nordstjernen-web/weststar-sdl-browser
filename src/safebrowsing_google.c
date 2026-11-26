@@ -1,4 +1,4 @@
-/* Northstar Web Browser — Google Safe Browsing v5 local-list client: hash-prefix lists on disk, full-hash confirmation online.
+/* Weststar SDL Browser — Google Safe Browsing v5 local-list client: hash-prefix lists on disk, full-hash confirmation online.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

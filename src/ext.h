@@ -1,4 +1,4 @@
-/* Northstar Web Browser — WebExtensions API: content scripts per URL, blocking, resources.
+/* Weststar SDL Browser — WebExtensions API: content scripts per URL, blocking, resources.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

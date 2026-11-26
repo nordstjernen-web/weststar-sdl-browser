@@ -1,4 +1,4 @@
-/* Northstar Web Browser — AVIF decode via libavif to premultiplied BGRA textures.
+/* Weststar SDL Browser — AVIF decode via libavif to premultiplied BGRA textures.
  * Sniffs the ftyp AVIF/HEIF brand; decodes the first frame only, within size limits.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

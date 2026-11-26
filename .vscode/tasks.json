@@ -57,7 +57,7 @@
         {
             "label": "Run",
             "type": "shell",
-            "command": "./builddir/src/gtk/northstar about:start",
+            "command": "./builddir/src/sdl/weststar about:start",
             "windows": {
                 "type": "process",
                 "command": "powershell.exe",

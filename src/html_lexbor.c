@@ -1,4 +1,4 @@
-/* Northstar Web Browser — HTML parser built on lexbor, converting its tree into ns_node.
+/* Weststar SDL Browser — HTML parser built on lexbor, converting its tree into ns_node.
  * Declarative shadow DOM, streaming document.write fragments, script lines, video metadata.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

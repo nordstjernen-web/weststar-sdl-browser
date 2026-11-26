@@ -1,4 +1,4 @@
-/* Northstar Web Browser — MP4 (ISO BMFF) demuxer API for MSE streams and whole files.
+/* Weststar SDL Browser — MP4 (ISO BMFF) demuxer API for MSE streams and whole files.
  * Copyright 2026 Gabriel Ferreira
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

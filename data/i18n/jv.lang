@@ -1,4 +1,4 @@
-# Northstar Web Browser UI translations — Javanese / Basa Jawa
+# Weststar SDL Browser UI translations — Javanese / Basa Jawa
 # Format: one English-source=translation pair per line; '#' starts a comment.
 # --- Toolbar, address bar, window ---
 Back=Bali
@@ -128,14 +128,14 @@ Changes apply to newly opened pages.=Owah-owahan ditrapake ing kaca sing mentas 
 # --- History page (about:history) ---
 Recently visited pages.=Kaca sing bubar ditekani.
 No history yet.=Durung ana riwayat.
-# --- About page (about:northstar) and license pages ---
-About Northstar Web Browser=Babagan Northstar Web Browser
+# --- About page (about:weststar) and license pages ---
+About Weststar SDL Browser=Babagan Weststar SDL Browser
 Version=Versi
 Start=Wiwitan
 A small, independent web browser written in C.=Panjlajah web cilik lan mandhiri, ditulis nganggo C.
 Release notes=Cathetan rilis
 Technical details=Rincian teknis
-Northstar Web Browser is free software, distributed under the GNU General Public License, version 3 or later.=Northstar Web Browser iku piranti lunak bebas, disebarake miturut GNU General Public License, versi 3 utawa sabanjure.
+Weststar SDL Browser is free software, distributed under the GNU General Public License, version 3 or later.=Weststar SDL Browser iku piranti lunak bebas, disebarake miturut GNU General Public License, versi 3 utawa sabanjure.
 GNU General Public License (GPL-3.0)=GNU General Public License (GPL-3.0)
 GNU General Public License=GNU General Public License
 Third-party software notices=Wara-wara piranti lunak pihak katelu

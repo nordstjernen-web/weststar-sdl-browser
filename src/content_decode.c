@@ -1,4 +1,4 @@
-/* Northstar Web Browser — HTTP Content-Encoding decoder that passes unknown codings through.
+/* Weststar SDL Browser — HTTP Content-Encoding decoder that passes unknown codings through.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

@@ -1,4 +1,4 @@
-# Northstar Web Browser UI translations — Tagalog / Filipino
+# Weststar SDL Browser UI translations — Tagalog / Filipino
 # Format: one English-source=translation pair per line; '#' starts a comment.
 # --- Toolbar, address bar, window ---
 Back=Bumalik
@@ -128,14 +128,14 @@ Changes apply to newly opened pages.=Ilalapat ang mga pagbabago sa mga bagong bu
 # --- History page (about:history) ---
 Recently visited pages.=Mga kamakailang binisitang pahina.
 No history yet.=Wala pang history.
-# --- About page (about:northstar) and license pages ---
-About Northstar Web Browser=Tungkol sa Northstar Web Browser
+# --- About page (about:weststar) and license pages ---
+About Weststar SDL Browser=Tungkol sa Weststar SDL Browser
 Version=Bersyon
 Start=Simula
 A small, independent web browser written in C.=Isang maliit at malayang web browser, isinulat sa C.
 Release notes=Mga tala ng release
 Technical details=Mga teknikal na detalye
-Northstar Web Browser is free software, distributed under the GNU General Public License, version 3 or later.=Ang Northstar Web Browser ay libreng software, na ipinamamahagi sa ilalim ng GNU General Public License, bersyon 3 o mas bago.
+Weststar SDL Browser is free software, distributed under the GNU General Public License, version 3 or later.=Ang Weststar SDL Browser ay libreng software, na ipinamamahagi sa ilalim ng GNU General Public License, bersyon 3 o mas bago.
 GNU General Public License (GPL-3.0)=GNU General Public License (GPL-3.0)
 GNU General Public License=GNU General Public License
 Third-party software notices=Mga abiso tungkol sa third-party na software

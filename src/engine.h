@@ -1,4 +1,4 @@
-/* Northstar Web Browser — fetch/cascade/layout/capture pipeline shared by the browser drivers.
+/* Weststar SDL Browser — fetch/cascade/layout/capture pipeline shared by the browser drivers.
  * Blocking fetch, cascade and relayout entry points, image fetch sessions, PNG/PDF/text dumps.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

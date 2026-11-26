@@ -1,4 +1,4 @@
-/* Northstar Web Browser — text selection on the rendered page.
+/* Weststar SDL Browser — text selection on the rendered page.
  * Hit-tests text boxes, word/block/all selection, highlight runs and clipboard text.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

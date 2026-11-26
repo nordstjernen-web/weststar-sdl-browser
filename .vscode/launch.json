@@ -6,7 +6,7 @@
             "type": "cppdbg",
             "request": "launch",
             "preLaunchTask": "Build (debug)",
-            "program": "${workspaceFolder}/builddir-debug/src/gtk/northstar",
+            "program": "${workspaceFolder}/builddir-debug/src/sdl/weststar",
             "args": ["about:start"],
             "cwd": "${workspaceFolder}",
             "stopAtEntry": false,
@@ -21,7 +21,7 @@
                 "setupCommands": []
             },
             "windows": {
-                "program": "${workspaceFolder}/builddir-debug/src/gtk/northstar.exe",
+                "program": "${workspaceFolder}/builddir-debug/src/sdl/weststar.exe",
                 "cwd": "${workspaceFolder}/builddir-debug/src/gtk",
                 "miDebuggerPath": "${input:msys2Bin}/gdb.exe",
                 "environment": [
@@ -37,7 +37,7 @@
             "type": "cppdbg",
             "request": "launch",
             "preLaunchTask": "Build (debug)",
-            "program": "${workspaceFolder}/builddir-debug/src/gtk/northstar",
+            "program": "${workspaceFolder}/builddir-debug/src/sdl/weststar",
             "args": ["--headless", "--dump=text", "${input:url}"],
             "cwd": "${workspaceFolder}",
             "stopAtEntry": false,
@@ -52,7 +52,7 @@
                 "setupCommands": []
             },
             "windows": {
-                "program": "${workspaceFolder}/builddir-debug/src/gtk/northstar.exe",
+                "program": "${workspaceFolder}/builddir-debug/src/sdl/weststar.exe",
                 "miDebuggerPath": "${input:msys2Bin}/gdb.exe",
                 "environment": [
                     { "name": "PATH", "value": "${input:msys2Bin};${env:PATH}" }

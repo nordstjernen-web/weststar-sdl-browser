@@ -1,4 +1,4 @@
-/* Northstar Web Browser — progressive <video src> download of MP4/WebM via ranged fetches.
+/* Weststar SDL Browser — progressive <video src> download of MP4/WebM via ranged fetches.
  * Feeds Media Source buffers: finds moov, sizes chunks by bitrate, evicts and refetches on seek.
  * Copyright 2026 Gabriel Ferreira
  * SPDX-License-Identifier: GPL-3.0-or-later

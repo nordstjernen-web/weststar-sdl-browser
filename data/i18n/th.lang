@@ -1,4 +1,4 @@
-# Northstar Web Browser UI translations — Thai / ไทย
+# Weststar SDL Browser UI translations — Thai / ไทย
 # Format: one English-source=translation pair per line; '#' starts a comment.
 # --- Toolbar, address bar, window ---
 Back=ย้อนกลับ
@@ -128,14 +128,14 @@ Changes apply to newly opened pages.=การเปลี่ยนแปลง�
 # --- History page (about:history) ---
 Recently visited pages.=หน้าที่เยี่ยมชมล่าสุด
 No history yet.=ยังไม่มีประวัติ
-# --- About page (about:northstar) and license pages ---
-About Northstar Web Browser=เกี่ยวกับ Northstar Web Browser
+# --- About page (about:weststar) and license pages ---
+About Weststar SDL Browser=เกี่ยวกับ Weststar SDL Browser
 Version=รุ่น
 Start=หน้าเริ่มต้น
 A small, independent web browser written in C.=เว็บเบราว์เซอร์ขนาดเล็กที่เป็นอิสระ เขียนด้วยภาษา C
 Release notes=บันทึกประจำรุ่น
 Technical details=รายละเอียดทางเทคนิค
-Northstar Web Browser is free software, distributed under the GNU General Public License, version 3 or later.=Northstar Web Browser เป็นซอฟต์แวร์เสรี เผยแพร่ภายใต้ GNU General Public License รุ่น 3 หรือใหม่กว่า
+Weststar SDL Browser is free software, distributed under the GNU General Public License, version 3 or later.=Weststar SDL Browser เป็นซอฟต์แวร์เสรี เผยแพร่ภายใต้ GNU General Public License รุ่น 3 หรือใหม่กว่า
 GNU General Public License (GPL-3.0)=GNU General Public License (GPL-3.0)
 GNU General Public License=GNU General Public License
 Third-party software notices=ประกาศเกี่ยวกับซอฟต์แวร์ของบุคคลที่สาม

@@ -1,4 +1,4 @@
-/* Northstar Web Browser — installs WebIDL receiver checks on Node-derived interface members.
+/* Weststar SDL Browser — installs WebIDL receiver checks on Node-derived interface members.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

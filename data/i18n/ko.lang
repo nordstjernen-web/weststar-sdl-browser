@@ -1,4 +1,4 @@
-# Northstar Web Browser UI translations — Korean / 한국어
+# Weststar SDL Browser UI translations — Korean / 한국어
 # Format: one English-source=translation pair per line; '#' starts a comment.
 # --- Toolbar, address bar, window ---
 Back=뒤로
@@ -128,14 +128,14 @@ Changes apply to newly opened pages.=변경 사항은 새로 여는 페이지에
 # --- History page (about:history) ---
 Recently visited pages.=최근 방문한 페이지입니다.
 No history yet.=방문 기록이 아직 없습니다.
-# --- About page (about:northstar) and license pages ---
-About Northstar Web Browser=Northstar Web Browser 정보
+# --- About page (about:weststar) and license pages ---
+About Weststar SDL Browser=Weststar SDL Browser 정보
 Version=버전
 Start=시작
 A small, independent web browser written in C.=C로 작성한 작고 독립적인 웹 브라우저입니다.
 Release notes=릴리스 노트
 Technical details=기술 세부 정보
-Northstar Web Browser is free software, distributed under the GNU General Public License, version 3 or later.=Northstar Web Browser는 자유 소프트웨어이며 GNU General Public License 버전 3 이상에 따라 배포됩니다.
+Weststar SDL Browser is free software, distributed under the GNU General Public License, version 3 or later.=Weststar SDL Browser는 자유 소프트웨어이며 GNU General Public License 버전 3 이상에 따라 배포됩니다.
 GNU General Public License (GPL-3.0)=GNU General Public License (GPL-3.0)
 GNU General Public License=GNU General Public License
 Third-party software notices=타사 소프트웨어 고지

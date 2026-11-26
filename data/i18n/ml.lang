@@ -1,4 +1,4 @@
-# Northstar Web Browser UI translations — Malayalam / മലയാളം
+# Weststar SDL Browser UI translations — Malayalam / മലയാളം
 # Format: one English-source=translation pair per line; '#' starts a comment.
 # --- Toolbar, address bar, window ---
 Back=പിന്നോട്ട്
@@ -128,14 +128,14 @@ Changes apply to newly opened pages.=മാറ്റങ്ങൾ പുതുത
 # --- History page (about:history) ---
 Recently visited pages.=അടുത്തിടെ സന്ദർശിച്ച പേജുകൾ.
 No history yet.=ഇതുവരെ ചരിത്രമൊന്നുമില്ല.
-# --- About page (about:northstar) and license pages ---
-About Northstar Web Browser=Northstar Web Browser-നെക്കുറിച്ച്
+# --- About page (about:weststar) and license pages ---
+About Weststar SDL Browser=Weststar SDL Browser-നെക്കുറിച്ച്
 Version=പതിപ്പ്
 Start=ആരംഭം
 A small, independent web browser written in C.=C-യിൽ എഴുതിയ ചെറുതും സ്വതന്ത്രവുമായ ഒരു വെബ് ബ്രൗസർ.
 Release notes=റിലീസ് കുറിപ്പുകൾ
 Technical details=സാങ്കേതിക വിശദാംശങ്ങൾ
-Northstar Web Browser is free software, distributed under the GNU General Public License, version 3 or later.=Northstar Web Browser ഒരു സ്വതന്ത്ര സോഫ്റ്റ്‌വെയറാണ്, GNU General Public License, പതിപ്പ് 3 അല്ലെങ്കിൽ പിന്നീടുള്ളതിന് കീഴിൽ വിതരണം ചെയ്യുന്നു.
+Weststar SDL Browser is free software, distributed under the GNU General Public License, version 3 or later.=Weststar SDL Browser ഒരു സ്വതന്ത്ര സോഫ്റ്റ്‌വെയറാണ്, GNU General Public License, പതിപ്പ് 3 അല്ലെങ്കിൽ പിന്നീടുള്ളതിന് കീഴിൽ വിതരണം ചെയ്യുന്നു.
 GNU General Public License (GPL-3.0)=GNU General Public License (GPL-3.0)
 GNU General Public License=GNU General Public License
 Third-party software notices=മൂന്നാം കക്ഷി സോഫ്റ്റ്‌വെയർ അറിയിപ്പുകൾ

@@ -1,10 +1,11 @@
-/* Northstar Web Browser — @font-face web font loader: fetch, WOFF/WOFF2 unpack, install.
+/* Weststar SDL Browser — @font-face web font loader: fetch, WOFF/WOFF2 unpack, install.
  * Caches files on disk, adds them to fontconfig under the CSS family, wakes idle waiters.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 #include "font.h"
+#include "brand.h"
 #include "bytes.h"
 
 #include <gio/gio.h>
@@ -125,7 +126,7 @@ ns_font_init(void)
     char *base = xdg && *xdg
         ? g_strdup(xdg)
         : g_build_filename(g_get_home_dir(), ".cache", NULL);
-    g_cache_dir = g_build_filename(base, "northstar", "webfonts", NULL);
+    g_cache_dir = g_build_filename(base, NS_APP_DIR_NAME, "webfonts", NULL);
     g_free(base);
     g_mkdir_with_parents(g_cache_dir, 0700);
     ns_paint_register_font_oracle();

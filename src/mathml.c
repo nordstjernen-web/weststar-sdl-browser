@@ -1,4 +1,4 @@
-/* Northstar Web Browser — small MathML presentation renderer drawing with Pango and cairo.
+/* Weststar SDL Browser — small MathML presentation renderer drawing with Pango and cairo.
  * Tokens, scripts, fractions, radicals, under/over, tables and fenced rows.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

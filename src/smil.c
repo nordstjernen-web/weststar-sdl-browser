@@ -1,4 +1,4 @@
-/* Northstar Web Browser — SVG SMIL animation timeline: animate, set, animateTransform, animateMotion.
+/* Weststar SDL Browser — SVG SMIL animation timeline: animate, set, animateTransform, animateMotion.
  * Resolves begin/end instances per document, samples the running and frozen animations each
  * tick and keeps the result as animated values that the SVG renderer reads over the DOM's.
  * Copyright 2026 Andreas Røsdal

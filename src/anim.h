@@ -1,4 +1,4 @@
-/* Northstar Web Browser — animation engine API: CSS transitions, keyframes and script runs.
+/* Weststar SDL Browser — animation engine API: CSS transitions, keyframes and script runs.
  * Style observation, ticking, animated-value lookup for paint, events and Web Animations control.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

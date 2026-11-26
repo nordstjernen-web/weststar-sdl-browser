@@ -1,4 +1,4 @@
-/* Northstar Web Browser — Cairo painter for the layout box tree.
+/* Weststar SDL Browser — Cairo painter for the layout box tree.
  * Backgrounds, borders, text via ns-pango, stacking, transforms, list markers and media controls.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

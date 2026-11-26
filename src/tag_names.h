@@ -1,4 +1,4 @@
-/* Northstar Web Browser — tag ids for the HTML, SVG and MathML element names the HTML parser knows.
+/* Weststar SDL Browser — tag ids for the HTML, SVG and MathML element names the HTML parser knows.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

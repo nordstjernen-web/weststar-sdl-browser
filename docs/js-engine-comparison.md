@@ -416,14 +416,14 @@ meson setup builddir && meson compile -C builddir
 meson setup builddir-quickjs -Djs_engine=quickjs && meson compile -C builddir-quickjs
 
 ./scripts/dev.sh smoke
-NS_BIN=$PWD/builddir-quickjs/src/gtk/northstar ./scripts/dev.sh smoke
+NS_BIN=$PWD/builddir-quickjs/src/sdl/weststar ./scripts/dev.sh smoke
 
-NS_BIN=$PWD/builddir/src/gtk/northstar ./scripts/speedometer-bench.sh
-NS_BIN=$PWD/builddir-quickjs/src/gtk/northstar ./scripts/speedometer-bench.sh
+NS_BIN=$PWD/builddir/src/sdl/weststar ./scripts/speedometer-bench.sh
+NS_BIN=$PWD/builddir-quickjs/src/sdl/weststar ./scripts/speedometer-bench.sh
 
 cd ~/wpt && ./wpt make-hosts-file | sudo tee -a /etc/hosts && ./wpt serve &
 scripts/wpt-run.sh --wpt-root=$HOME/wpt --no-serve dom/nodes dom/ranges webidl
-NS_BIN=$PWD/builddir-quickjs/src/gtk/northstar \
+NS_BIN=$PWD/builddir-quickjs/src/sdl/weststar \
     scripts/wpt-run.sh --wpt-root=$HOME/wpt --no-serve dom/nodes dom/ranges webidl
 ```
 

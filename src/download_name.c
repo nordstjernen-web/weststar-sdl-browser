@@ -1,4 +1,4 @@
-/* Northstar Web Browser — download file-name sanitising.
+/* Weststar SDL Browser — download file-name sanitising.
  * A page chooses the name a download is saved under; this makes it name a plain file.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

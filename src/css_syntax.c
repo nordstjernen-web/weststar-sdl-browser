@@ -1,4 +1,4 @@
-/* Northstar Web Browser — CSS Syntax tokenizer and component-value parser.
+/* Weststar SDL Browser — CSS Syntax tokenizer and component-value parser.
  * Validity and self-containment checks over raw CSS text, used by css.c and @property matching.
  */
 

@@ -1,4 +1,4 @@
-# Northstar Web Browser UI translations — Romanian / Română
+# Weststar SDL Browser UI translations — Romanian / Română
 # Format: one English-source=translation pair per line; '#' starts a comment.
 # --- Toolbar, address bar, window ---
 Back=Înapoi
@@ -128,14 +128,14 @@ Changes apply to newly opened pages.=Modificările se aplică paginilor deschise
 # --- History page (about:history) ---
 Recently visited pages.=Pagini vizitate recent.
 No history yet.=Încă nu există istoric.
-# --- About page (about:northstar) and license pages ---
-About Northstar Web Browser=Despre Northstar Web Browser
+# --- About page (about:weststar) and license pages ---
+About Weststar SDL Browser=Despre Weststar SDL Browser
 Version=Versiune
 Start=Start
 A small, independent web browser written in C.=Un browser web mic și independent, scris în C.
 Release notes=Note de lansare
 Technical details=Detalii tehnice
-Northstar Web Browser is free software, distributed under the GNU General Public License, version 3 or later.=Northstar Web Browser este software liber, distribuit sub GNU General Public License, versiunea 3 sau ulterioară.
+Weststar SDL Browser is free software, distributed under the GNU General Public License, version 3 or later.=Weststar SDL Browser este software liber, distribuit sub GNU General Public License, versiunea 3 sau ulterioară.
 GNU General Public License (GPL-3.0)=GNU General Public License (GPL-3.0)
 GNU General Public License=GNU General Public License
 Third-party software notices=Notificări privind software-ul terților

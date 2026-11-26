@@ -1,7 +1,0 @@
-Version: 5
-
-Template: Github
-Owner: nordstjernen-web
-Project: northstar-web-browser
-Repack-Suffix: +ds
-Dversion-Mangle: auto

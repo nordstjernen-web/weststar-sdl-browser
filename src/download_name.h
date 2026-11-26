@@ -1,4 +1,4 @@
-/* Northstar Web Browser — download file-name sanitising.
+/* Weststar SDL Browser — download file-name sanitising.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

@@ -1,4 +1,4 @@
-/* Northstar Web Browser — UI scale for displays GTK does not scale itself.
+/* Weststar SDL Browser — UI scale for displays GTK does not scale itself.
  * GTK on Windows scales widgets by whole factors only: at 125%, 150% or 175%
  * it scales text (gtk-xft-dpi) and leaves every pixel length at 100%.
  * Copyright 2026 Andreas Røsdal

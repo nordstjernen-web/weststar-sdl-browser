@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2026 Andreas Røsdal -->
+<component type="desktop-application">
+  <id>org.weststar.SdlBrowser</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Weststar SDL Browser</name>
+  <summary>A small, hand-written web browser on SDL</summary>
+  <developer id="org.weststar">
+    <name>Andreas Røsdal</name>
+  </developer>
+
+  <description>
+    <p>
+      Weststar SDL Browser is a fork of the Northstar Web Browser in which
+      the GTK user interface and the Cairo renderer are replaced by SDL3.
+      The page engine (HTML, CSS, JavaScript) is the same hand-written C
+      engine as Northstar's.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">org.weststar.SdlBrowser.desktop</launchable>
+  <url type="homepage">https://github.com/nordstjernen-web/weststar-sdl-browser</url>
+  <content_rating type="oars-1.1"/>
+</component>

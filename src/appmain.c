@@ -1,4 +1,4 @@
-/* Northstar Web Browser — process entry point: environment setup, sandbox, then GUI or headless.
+/* Weststar SDL Browser — process entry point: environment setup, sandbox, then GUI or headless.
  * Locates bundled data (Windows/macOS), picks the GSK renderer and filters GLib logging.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -161,7 +161,7 @@ SetCurrentProcessExplicitAppUserModelID(PCWSTR AppID);
 static void
 ns_win32_set_app_id(void)
 {
-    (void)SetCurrentProcessExplicitAppUserModelID(L"Northstar.Browser");
+    (void)SetCurrentProcessExplicitAppUserModelID(L"Weststar.Browser");
 }
 
 /* Points fontconfig at the bundled fonts.conf and forces the fc Pango backend (Windows). */
@@ -413,7 +413,7 @@ ns_preopen_screenshot_outputs(int argc, char **argv)
         if (dir && *dir) g_mkdir_with_parents(dir, 0700);
         g_free(dir);
         if (!ns_engine_preopen_output(p))
-            g_printerr("northstar: cannot write to %s\n", p);
+            g_printerr("weststar: cannot write to %s\n", p);
         /* Headless --dump captures also write a "-initial" render. */
         if (g_str_has_prefix(argv[i], "--dump=png:")) {
             g_autofree char *initial = ns_engine_suffix_before_ext(p, "-initial");
@@ -555,7 +555,7 @@ main(int argc, char **argv)
 #endif
     for (int i = 1; i < argc; i++) {
         if (g_strcmp0(argv[i], "--version") == 0) {
-            g_print("Northstar Web Browser %s\n", NS_VERSION);
+            g_print("Weststar SDL Browser %s\n", NS_VERSION);
             return 0;
         }
     }
@@ -589,7 +589,7 @@ main(int argc, char **argv)
     for (int i = 1; i < argc; i++)
         if (g_str_has_prefix(argv[i], "--trace=") &&
             !ns_trace_open(argv[i] + 8))
-            g_printerr("northstar: cannot write a trace to %s\n", argv[i] + 8);
+            g_printerr("weststar: cannot write a trace to %s\n", argv[i] + 8);
 
     /* Decided once, before the sandbox: the content filter below either
      * leaves room for a GPU driver or does not, for the whole run. */
@@ -609,7 +609,7 @@ main(int argc, char **argv)
     ns_security_seccomp_init();
     /* Landlock and seccomp only bind threads created after them, so the
      * SIGQUIT dump thread starts here. */
-    ns_thread_dump_install_signal("northstar");
+    ns_thread_dump_install_signal(NS_EXE_NAME);
     ns_debug_log_init();
     g_log_set_writer_func(ns_log_writer, NULL, NULL);
 #ifdef G_OS_WIN32
@@ -672,7 +672,7 @@ main(int argc, char **argv)
             else if (g_str_has_prefix(v, "png:")) { hopts.dump = NS_DUMP_PNG; hopts.out_path = v + 4; }
             else {
                 fprintf(stderr,
-                        "northstar: --dump wants text, dom, layout, none "
+                        "weststar: --dump wants text, dom, layout, none "
                         "or png:FILE, got '%s'%s\n", v,
                         g_str_has_prefix(v, "pdf:")
                             ? "; write a PDF with --export=pdf:FILE" : "");
@@ -686,7 +686,7 @@ main(int argc, char **argv)
                 hopts.out_path = v + 4;
             } else {
                 fprintf(stderr,
-                        "northstar: --export wants pdf:FILE, got '%s'\n", v);
+                        "weststar: --export wants pdf:FILE, got '%s'\n", v);
                 return 2;
             }
         } else if (g_str_has_prefix(argv[i], "--viewport=")) {
@@ -704,7 +704,7 @@ main(int argc, char **argv)
             }
             if (!ok) {
                 fprintf(stderr,
-                        "northstar: --viewport wants WIDTH or WIDTHxHEIGHT, "
+                        "weststar: --viewport wants WIDTH or WIDTHxHEIGHT, "
                         "got '%s'\n", spec);
                 return 2;
             }
@@ -754,7 +754,7 @@ main(int argc, char **argv)
     if (private_window)
         ns_config_mut()->private_mode = TRUE;
     if (ns_net_ignore_cert_errors())
-        g_printerr("northstar: warning: --ignore-certificate-errors is on; "
+        g_printerr("weststar: warning: --ignore-certificate-errors is on; "
                    "pages with an untrusted TLS certificate will load. Use "
                    "it only for servers you control.\n");
     if (!dump_set && (hopts.inspect || hopts.inspect_at || hopts.wpt))

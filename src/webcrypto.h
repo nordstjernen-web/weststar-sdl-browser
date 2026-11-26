@@ -1,4 +1,4 @@
-/* Northstar Web Browser — engine-neutral crypto key and SubtleCrypto operation API.
+/* Weststar SDL Browser — engine-neutral crypto key and SubtleCrypto operation API.
  * Key generation, import/export, sign/verify, encrypt/decrypt and derive bits over OpenSSL.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

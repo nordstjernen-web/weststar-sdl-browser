@@ -1,4 +1,4 @@
-/* Northstar Web Browser — privilege refusal, OS sandboxes and security primitives.
+/* Weststar SDL Browser — privilege refusal, OS sandboxes and security primitives.
  * Landlock/seccomp (Linux), Seatbelt (macOS), Win32 mitigations, CSPRNG, SRI, download tagging.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -8,6 +8,7 @@
 #define _GNU_SOURCE
 #endif
 #include "security.h"
+#include "brand.h"
 
 #include <stddef.h>
 #include <stdlib.h>
@@ -345,11 +346,11 @@ ns_security_refuse_root(void)
 #if defined(__linux__) || defined(__APPLE__)
     if (geteuid() != 0 && getuid() != 0) return TRUE;
     if (ns_env_flag("NS_ALLOW_ROOT")) {
-        g_warning("northstar: running as root because NS_ALLOW_ROOT is set");
+        g_warning("weststar: running as root because NS_ALLOW_ROOT is set");
         return TRUE;
     }
     fprintf(stderr,
-        "northstar: refusing to run as root.\n"
+        "weststar: refusing to run as root.\n"
         "  Web browsers process untrusted content; running as root exposes\n"
         "  the whole system if the renderer is compromised.\n"
         "  Re-run as an unprivileged user, or set NS_ALLOW_ROOT=1 to override.\n");
@@ -357,27 +358,27 @@ ns_security_refuse_root(void)
 #elif defined(G_OS_WIN32)
     if (!ns_win_is_elevated()) return TRUE;
     if (ns_env_flag("NS_ALLOW_ROOT")) {
-        g_warning("northstar: running as Administrator because "
+        g_warning("weststar: running as Administrator because "
                   "NS_ALLOW_ROOT is set");
         return TRUE;
     }
     if (!ns_env_flag("NS_DEELEVATED") && ns_win_relaunch_deelevated()) {
-        g_warning("northstar: dropped Administrator rights by relaunching "
+        g_warning("weststar: dropped Administrator rights by relaunching "
                   "as the current desktop user");
         return FALSE;
     }
 
     const char *msg =
-        "Northstar Web Browser is running as administrator.\n"
+        "Weststar SDL Browser is running as administrator.\n"
         "\n"
-        "Northstar Web Browser tried to restart itself without administrator rights but "
+        "Weststar SDL Browser tried to restart itself without administrator rights but "
         "could not. You do not need administrator rights to browse the web, and "
         "it is much safer without them: if a web page exploited a flaw in the "
         "browser while it has administrator rights, it could take over your "
         "whole PC instead of being limited to your own user account.\n"
         "\n"
-        "How to start Northstar Web Browser normally:\n"
-        "  -  Close this window, then open Northstar Web Browser with a normal click on "
+        "How to start Weststar SDL Browser normally:\n"
+        "  -  Close this window, then open Weststar SDL Browser with a normal click on "
         "its Start-menu or desktop icon. Do not choose \"Run as "
         "administrator\".\n"
         "  -  If you started it from a Command Prompt or PowerShell, use an "
@@ -387,16 +388,16 @@ ns_security_refuse_root(void)
         "administrator\".\n"
         "\n"
         "Do you want to run as administrator anyway?\n"
-        "  -  No (recommended): quit, then reopen Northstar Web Browser normally.\n"
+        "  -  No (recommended): quit, then reopen Weststar SDL Browser normally.\n"
         "  -  Yes: run as administrator this once, at your own risk.";
-    fprintf(stderr, "northstar: %s\n", msg);
+    fprintf(stderr, "weststar: %s\n", msg);
 
     int choice = MessageBoxA(NULL, msg,
-        "Northstar Web Browser - running as administrator",
+        "Weststar SDL Browser - running as administrator",
         MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2 |
         MB_SETFOREGROUND | MB_TOPMOST);
     if (choice == IDYES) {
-        g_warning("northstar: running as Administrator at the user's "
+        g_warning("weststar: running as Administrator at the user's "
                   "request");
         return TRUE;
     }
@@ -603,25 +604,25 @@ ns_security_sandbox_init(const char *self_exe)
     }
 
     char *ns_cfg_root =
-        g_build_filename(g_get_user_config_dir(), "northstar", NULL);
+        g_build_filename(g_get_user_config_dir(), NS_APP_DIR_NAME, NULL);
     g_mkdir_with_parents(ns_cfg_root, 0700);
     add_path_rw(rfd, fs_rw, ns_cfg_root);
     g_free(ns_cfg_root);
 
     char *ns_data_root =
-        g_build_filename(g_get_user_data_dir(), "northstar", NULL);
+        g_build_filename(g_get_user_data_dir(), NS_APP_DIR_NAME, NULL);
     g_mkdir_with_parents(ns_data_root, 0700);
     add_path_rw(rfd, fs_rw, ns_data_root);
     g_free(ns_data_root);
 
     char *ns_cache_top =
-        g_build_filename(g_get_user_cache_dir(), "northstar", NULL);
+        g_build_filename(g_get_user_cache_dir(), NS_APP_DIR_NAME, NULL);
     g_mkdir_with_parents(ns_cache_top, 0700);
     add_path_rw(rfd, fs_rw, ns_cache_top);
     g_free(ns_cache_top);
 
     char *ns_cache_root =
-        g_build_filename(g_get_user_cache_dir(), "northstar", "cache", NULL);
+        g_build_filename(g_get_user_cache_dir(), NS_APP_DIR_NAME, "cache", NULL);
     g_mkdir_with_parents(ns_cache_root, 0700);
     add_path_rw(rfd, fs_rw, ns_cache_root);
     g_free(ns_cache_root);
@@ -668,7 +669,7 @@ ns_security_sandbox_init(const char *self_exe)
             "../data",
             "../../data",
             "../../../data",
-            "../share/northstar",
+            "../share/weststar",
             NULL,
         };
         for (gsize i = 0; dev_data_rel[i]; i++) {
@@ -1239,13 +1240,13 @@ ns_security_sandbox_init(const char *self_exe)
 
     sb_append_subpath(prof, g_get_user_runtime_dir());
 
-    char *cfg = g_build_filename(g_get_user_config_dir(), "northstar", NULL);
+    char *cfg = g_build_filename(g_get_user_config_dir(), NS_APP_DIR_NAME, NULL);
     sb_append_subpath(prof, cfg);
     g_free(cfg);
-    char *data = g_build_filename(g_get_user_data_dir(), "northstar", NULL);
+    char *data = g_build_filename(g_get_user_data_dir(), NS_APP_DIR_NAME, NULL);
     sb_append_subpath(prof, data);
     g_free(data);
-    char *cache = g_build_filename(g_get_user_cache_dir(), "northstar", NULL);
+    char *cache = g_build_filename(g_get_user_cache_dir(), NS_APP_DIR_NAME, NULL);
     sb_append_subpath(prof, cache);
     g_free(cache);
 
@@ -1376,7 +1377,7 @@ ns_security_mark_download_origin(const char *path, const char *url)
 #if defined(__APPLE__)
     (void)url;
     char value[96];
-    g_snprintf(value, sizeof value, "0001;%08x;Northstar Web Browser;",
+    g_snprintf(value, sizeof value, "0001;%08x;Weststar SDL Browser;",
                (unsigned)(g_get_real_time() / G_USEC_PER_SEC));
     setxattr(path, "com.apple.quarantine", value, strlen(value), 0, 0);
 #elif defined(__linux__)

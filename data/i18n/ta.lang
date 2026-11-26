@@ -1,4 +1,4 @@
-# Northstar Web Browser UI translations — Tamil / தமிழ்
+# Weststar SDL Browser UI translations — Tamil / தமிழ்
 # Format: one English-source=translation pair per line; '#' starts a comment.
 # --- Toolbar, address bar, window ---
 Back=பின்செல்
@@ -128,14 +128,14 @@ Changes apply to newly opened pages.=மாற்றங்கள் புதி
 # --- History page (about:history) ---
 Recently visited pages.=சமீபத்தில் பார்வையிட்ட பக்கங்கள்.
 No history yet.=இன்னும் வரலாறு இல்லை.
-# --- About page (about:northstar) and license pages ---
-About Northstar Web Browser=Northstar Web Browser பற்றி
+# --- About page (about:weststar) and license pages ---
+About Weststar SDL Browser=Weststar SDL Browser பற்றி
 Version=பதிப்பு
 Start=தொடக்கம்
 A small, independent web browser written in C.=C-இல் எழுதப்பட்ட சிறிய, சுதந்திரமான இணைய உலாவி.
 Release notes=வெளியீட்டுக் குறிப்புகள்
 Technical details=தொழில்நுட்ப விவரங்கள்
-Northstar Web Browser is free software, distributed under the GNU General Public License, version 3 or later.=Northstar Web Browser ஒரு கட்டற்ற மென்பொருள், GNU General Public License, பதிப்பு 3 அல்லது அதற்குப் பிந்தையதன் கீழ் விநியோகிக்கப்படுகிறது.
+Weststar SDL Browser is free software, distributed under the GNU General Public License, version 3 or later.=Weststar SDL Browser ஒரு கட்டற்ற மென்பொருள், GNU General Public License, பதிப்பு 3 அல்லது அதற்குப் பிந்தையதன் கீழ் விநியோகிக்கப்படுகிறது.
 GNU General Public License (GPL-3.0)=GNU General Public License (GPL-3.0)
 GNU General Public License=GNU General Public License
 Third-party software notices=மூன்றாம் தரப்பு மென்பொருள் அறிவிப்புகள்

@@ -1,4 +1,4 @@
-/* Northstar Web Browser — in-process audio decoding and SDL3 playback on a worker thread.
+/* Weststar SDL Browser — in-process audio decoding and SDL3 playback on a worker thread.
  * Decodes MP3, Vorbis, Opus and MPEG-1 audio, mixes up to 16 players; null output when headless.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -1199,7 +1199,7 @@ audio_worker(gpointer data)
 static void
 audio_open_device(void)
 {
-    SDL_SetAppMetadata("Northstar Web Browser", NS_VERSION, "org.northstar.WebBrowser");
+    SDL_SetAppMetadata("Weststar SDL Browser", NS_VERSION, "org.weststar.SdlBrowser");
     SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "1024");
     if (SDL_InitSubSystem(SDL_INIT_AUDIO)) {
         SDL_AudioSpec spec = { SDL_AUDIO_F32, 2, NS_AUDIO_DEVICE_RATE };
@@ -1314,7 +1314,7 @@ queue_player_command(NsAudioContext *context, ns_audio_op op,
                      op == NS_AUDIO_OP_RELOAD_BYTES;
     if (!g_worker && !opens) return;
     if (!audio_start()) {
-        g_printerr("northstar: audio playback could not initialize\n");
+        g_printerr("weststar: audio playback could not initialize\n");
         return;
     }
     push_command(op, context, token, url, bytes, value);

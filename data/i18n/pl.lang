@@ -1,4 +1,4 @@
-# Northstar Web Browser UI translations — Polish / Polski
+# Weststar SDL Browser UI translations — Polish / Polski
 # Format: one English-source=translation pair per line; '#' starts a comment.
 # --- Toolbar, address bar, window ---
 Back=Wstecz
@@ -128,14 +128,14 @@ Changes apply to newly opened pages.=Zmiany dotyczą nowo otwieranych stron.
 # --- History page (about:history) ---
 Recently visited pages.=Ostatnio odwiedzane strony.
 No history yet.=Historia jest jeszcze pusta.
-# --- About page (about:northstar) and license pages ---
-About Northstar Web Browser=O programie Northstar Web Browser
+# --- About page (about:weststar) and license pages ---
+About Weststar SDL Browser=O programie Weststar SDL Browser
 Version=Wersja
 Start=Start
 A small, independent web browser written in C.=Mała, niezależna przeglądarka internetowa, napisana w C.
 Release notes=Informacje o wydaniu
 Technical details=Szczegóły techniczne
-Northstar Web Browser is free software, distributed under the GNU General Public License, version 3 or later.=Northstar Web Browser jest wolnym oprogramowaniem rozpowszechnianym na warunkach GNU General Public License w wersji 3 lub późniejszej.
+Weststar SDL Browser is free software, distributed under the GNU General Public License, version 3 or later.=Weststar SDL Browser jest wolnym oprogramowaniem rozpowszechnianym na warunkach GNU General Public License w wersji 3 lub późniejszej.
 GNU General Public License (GPL-3.0)=GNU General Public License (GPL-3.0)
 GNU General Public License=GNU General Public License
 Third-party software notices=Informacje o oprogramowaniu innych firm

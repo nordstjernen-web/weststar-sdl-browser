@@ -1,10 +1,11 @@
-/* Northstar Web Browser — in-process debug event log: bounded ring, subscribers, log file.
+/* Weststar SDL Browser — in-process debug event log: bounded ring, subscribers, log file.
  * Fed by engine, network and JS console messages; file logging is on by default on Windows.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 #include "debuglog.h"
+#include "brand.h"
 #include "security.h"
 
 #include <stdio.h>
@@ -51,8 +52,8 @@ ns_debug_log_file_path(void)
             g_dlog_file_path = g_strdup(override);
         else
             g_dlog_file_path = g_build_filename(g_get_user_data_dir(),
-                                                "Northstar",
-                                                "northstar-debug.log", NULL);
+                                                NS_BRAND_SHORT,
+                                                "weststar-debug.log", NULL);
     }
     return g_dlog_file_path;
 }

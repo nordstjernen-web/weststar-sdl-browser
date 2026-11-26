@@ -1,4 +1,4 @@
-/* Northstar Web Browser — network API: async and blocking fetches, responses and URL helpers.
+/* Weststar SDL Browser — network API: async and blocking fetches, responses and URL helpers.
  * Also cookie jar versions, HSTS, proxy, preload and form-encoding helpers.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -39,7 +39,7 @@ G_BEGIN_DECLS
 #define NS_USER_AGENT \
     "Mozilla/5.0 (" NS_UA_PLATFORM_TOKEN ") AppleWebKit/537.36 " \
     "(KHTML, like Gecko) Chrome/" NS_CHROME_VERSION \
-    " Safari/537.36 Northstar/1.0"
+    " Safari/537.36 Weststar/1.0"
 #define NS_UA_LADYBIRD \
     "Mozilla/5.0 (" NS_UA_PLATFORM_TOKEN ") Ladybird/1.0 " \
     "Chrome/146.0.0.0 AppleWebKit/537.36 Safari/537.36"

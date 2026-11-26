@@ -1,4 +1,4 @@
-/* Northstar Web Browser — GTK browser window around the page view: toolbar and address bar.
+/* Weststar SDL Browser — GTK browser window around the page view: toolbar and address bar.
  * Address suggestions, TLS indicator, bookmarks, downloads, fullscreen notice, session saving.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -26,7 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define NS_PROC_APP_ID "org.northstar.WebBrowser"
+#define NS_PROC_APP_ID "org.weststar.SdlBrowser"
 #define NS_SUGGEST_MAX 8
 #define NS_SUGGEST_BOOKMARKS 3
 
@@ -147,7 +147,7 @@ ns_brand_versioned(void)
     static char brand[128];
     if (!brand[0])
         g_snprintf(brand, sizeof brand, "%s %s",
-                   ns_i18n("Northstar Web Browser"), NS_VERSION);
+                   ns_i18n("Weststar SDL Browser"), NS_VERSION);
     return brand;
 }
 
@@ -1980,7 +1980,7 @@ build_app_menu_model(void)
     menu_append_section(menu, tools);
 
     GMenu *about = g_menu_new();
-    g_menu_append(about, ns_i18n("About Northstar Web Browser"), "win.about");
+    g_menu_append(about, ns_i18n("About Weststar SDL Browser"), "win.about");
     menu_append_section(menu, about);
 
     GMenu *quit = g_menu_new();
@@ -2225,7 +2225,7 @@ act_about(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     ProcWindow *pw = user_data;
     NsProcView *v = current_view(pw);
     if (v)
-        ns_proc_view_load(v, "about:northstar");
+        ns_proc_view_load(v, "about:weststar");
 }
 
 static void
@@ -2501,7 +2501,7 @@ show_cert_warning(ProcWindow *pw, const char *url)
     GtkAlertDialog *dlg = gtk_alert_dialog_new(
         "%s", ns_i18n("Certificate errors are being ignored"));
     gtk_alert_dialog_set_detail(dlg, ns_i18n(
-        "Northstar was started with --ignore-certificate-errors. Pages "
+        "Weststar was started with --ignore-certificate-errors. Pages "
         "whose certificate is self-signed, expired or otherwise not "
         "trusted will open, marked “Not secure” in the address bar, "
         "together with their scripts, images and connections.\n\n"
@@ -2572,7 +2572,7 @@ on_proc_activate(GtkApplication *app, gpointer user_data)
 static void
 procapp_clear_cache_dir(const char *name, gint64 min_age_s)
 {
-    char *dir = g_build_filename(g_get_user_cache_dir(), "northstar",
+    char *dir = g_build_filename(g_get_user_cache_dir(), NS_APP_DIR_NAME,
                                  name, NULL);
     gint64 cutoff = g_get_real_time() / G_USEC_PER_SEC - min_age_s;
     GQueue *stack = g_queue_new();

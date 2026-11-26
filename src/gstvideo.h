@@ -1,4 +1,4 @@
-/* Northstar Web Browser — video decoding through GStreamer decoder plugins (the Linux default).
+/* Weststar SDL Browser — video decoding through GStreamer decoder plugins (the Linux default).
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

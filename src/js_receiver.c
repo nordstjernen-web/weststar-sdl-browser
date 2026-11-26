@@ -1,4 +1,4 @@
-/* Northstar Web Browser — WebIDL receiver checks for the members of node interfaces.
+/* Weststar SDL Browser — WebIDL receiver checks for the members of node interfaces.
  * Wraps Node-derived prototype members so calls on a wrong receiver throw Illegal invocation.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

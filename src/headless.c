@@ -1,4 +1,4 @@
-/* Northstar Web Browser — headless engine driver: load a URL, run actions/eval, dump the result.
+/* Weststar SDL Browser — headless engine driver: load a URL, run actions/eval, dump the result.
  * Text/DOM/layout/PNG dumps, box inspection, simulated input and WPT result collection.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

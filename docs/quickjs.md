@@ -135,7 +135,7 @@ Build both configurations with no warnings, GCC and Clang:
 ```sh
 meson setup builddir && meson compile -C builddir
 meson setup builddir-quickjs -Djs_engine=quickjs && meson compile -C builddir-quickjs
-NS_BIN=$PWD/builddir-quickjs/src/gtk/northstar ./scripts/dev.sh smoke
+NS_BIN=$PWD/builddir-quickjs/src/sdl/weststar ./scripts/dev.sh smoke
 ```
 
 A change that calls a quickjs-ng function the original engine lacks fails

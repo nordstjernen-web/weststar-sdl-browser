@@ -1,4 +1,4 @@
-/* Northstar Web Browser — EventSource (Server-Sent Events) client on libcurl worker threads.
+/* Weststar SDL Browser — EventSource (Server-Sent Events) client on libcurl worker threads.
  * Parses the event stream, checks CORS and MIME type, reconnects with Last-Event-ID.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

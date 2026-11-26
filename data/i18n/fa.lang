@@ -1,4 +1,4 @@
-# Northstar Web Browser UI translations — Persian / فارسی
+# Weststar SDL Browser UI translations — Persian / فارسی
 # Format: one English-source=translation pair per line; '#' starts a comment.
 # --- Toolbar, address bar, window ---
 Back=عقب
@@ -128,14 +128,14 @@ Changes apply to newly opened pages.=تغییرات روی صفحه‌هایی �
 # --- History page (about:history) ---
 Recently visited pages.=صفحه‌هایی که اخیراً بازدید شده‌اند.
 No history yet.=هنوز تاریخچه‌ای وجود ندارد.
-# --- About page (about:northstar) and license pages ---
-About Northstar Web Browser=دربارهٔ Northstar Web Browser
+# --- About page (about:weststar) and license pages ---
+About Weststar SDL Browser=دربارهٔ Weststar SDL Browser
 Version=نسخه
 Start=شروع
 A small, independent web browser written in C.=یک مرورگر وب کوچک و مستقل که به زبان C نوشته شده است.
 Release notes=یادداشت‌های انتشار
 Technical details=جزئیات فنی
-Northstar Web Browser is free software, distributed under the GNU General Public License, version 3 or later.=Northstar Web Browser نرم‌افزاری آزاد است که تحت GNU General Public License، نسخهٔ ۳ یا بالاتر، توزیع می‌شود.
+Weststar SDL Browser is free software, distributed under the GNU General Public License, version 3 or later.=Weststar SDL Browser نرم‌افزاری آزاد است که تحت GNU General Public License، نسخهٔ ۳ یا بالاتر، توزیع می‌شود.
 GNU General Public License (GPL-3.0)=GNU General Public License (GPL-3.0)
 GNU General Public License=GNU General Public License
 Third-party software notices=اطلاعیه‌های نرم‌افزارهای شخص ثالث

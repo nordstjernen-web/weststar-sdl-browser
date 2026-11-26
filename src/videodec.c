@@ -1,4 +1,4 @@
-/* Northstar Web Browser — MSE video decoder dispatch over the GStreamer, Media Foundation, AV1, H.264 and VP9 backends.
+/* Weststar SDL Browser — MSE video decoder dispatch over the GStreamer, Media Foundation, AV1, H.264 and VP9 backends.
  * The system's decoders are preferred where they are built: GStreamer on Linux, Media Foundation
  * on Windows. NS_VIDEO_DECODER=native skips them.
  * Copyright 2026 Gabriel Ferreira

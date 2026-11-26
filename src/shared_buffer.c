@@ -1,4 +1,4 @@
-/* Northstar Web Browser — process-wide SharedArrayBuffer storage.
+/* Weststar SDL Browser — process-wide SharedArrayBuffer storage.
  * QuickJS allocates SharedArrayBuffer memory through per-runtime hooks;
  * every runtime here uses this one pool, keyed by data pointer, so a
  * SharedArrayBuffer cloned into a worker (JS_WRITE_OBJ_SAB) refers to the

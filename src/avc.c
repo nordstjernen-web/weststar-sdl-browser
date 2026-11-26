@@ -1,4 +1,4 @@
-/* Northstar Web Browser — MP4 avcC config and length-prefixed H.264 samples to Annex B.
+/* Weststar SDL Browser — MP4 avcC config and length-prefixed H.264 samples to Annex B.
  * Shared by the OpenH264 and Media Foundation decoders.
  * Copyright 2026 Gabriel Ferreira
  * SPDX-License-Identifier: GPL-3.0-or-later

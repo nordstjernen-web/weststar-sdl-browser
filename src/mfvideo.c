@@ -1,4 +1,4 @@
-/* Northstar Web Browser — video decoding through Windows Media Foundation transforms (the Windows default).
+/* Weststar SDL Browser — video decoding through Windows Media Foundation transforms (the Windows default).
  * Each decoder is one synchronous IMFTransform from the system's codecs (the H.264 decoder that
  * ships with Windows, and the AV1 and VP9 Video Extensions where installed), fed one coded frame
  * at a time from the video worker thread. mfplat.dll loads at runtime, so Windows N editions

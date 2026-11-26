@@ -1,4 +1,4 @@
-# Northstar Web Browser UI translations — Chinese / 中文
+# Weststar SDL Browser UI translations — Chinese / 中文
 # Format: one English-source=translation pair per line; '#' starts a comment.
 # --- Toolbar, address bar, window ---
 Back=后退
@@ -128,14 +128,14 @@ Changes apply to newly opened pages.=更改将应用于新打开的页面。
 # --- History page (about:history) ---
 Recently visited pages.=最近访问的页面。
 No history yet.=暂无历史记录。
-# --- About page (about:northstar) and license pages ---
-About Northstar Web Browser=关于 Northstar Web Browser
+# --- About page (about:weststar) and license pages ---
+About Weststar SDL Browser=关于 Weststar SDL Browser
 Version=版本
 Start=起始页
 A small, independent web browser written in C.=一款小巧、独立的网页浏览器，用 C 编写。
 Release notes=发行说明
 Technical details=技术详情
-Northstar Web Browser is free software, distributed under the GNU General Public License, version 3 or later.=Northstar Web Browser 是自由软件，依据 GNU General Public License 第 3 版或更高版本发布。
+Weststar SDL Browser is free software, distributed under the GNU General Public License, version 3 or later.=Weststar SDL Browser 是自由软件，依据 GNU General Public License 第 3 版或更高版本发布。
 GNU General Public License (GPL-3.0)=GNU General Public License (GPL-3.0)
 GNU General Public License=GNU General Public License
 Third-party software notices=第三方软件声明

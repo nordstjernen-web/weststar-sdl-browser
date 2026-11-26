@@ -1,4 +1,4 @@
-/* Northstar Web Browser — video decoding through GStreamer decoder plugins (the Linux default).
+/* Weststar SDL Browser — video decoding through GStreamer decoder plugins (the Linux default).
  * Each decoder is a small pipeline (pad → [parser] → decoder → videoconvert → appsink) fed
  * synchronously from the video worker thread: a buffer pushed into it has been decoded,
  * and its picture handed to the appsink, by the time the push returns.

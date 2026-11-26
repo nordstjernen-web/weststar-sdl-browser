@@ -1,4 +1,4 @@
-/* Northstar Web Browser — UI string translation from data/i18n .lang catalogues.
+/* Weststar SDL Browser — UI string translation from data/i18n .lang catalogues.
  * Loads a catalogue for every language in the OS language list, in priority order, and
  * falls back down that chain when a higher-priority catalogue lacks a translation.
  * Copyright 2026 Andreas Røsdal
@@ -34,9 +34,9 @@ find_catalogue(const char *self_exe, const char *lang)
     if (override && *override) return catalogue_path_in(override, lang);
 
     static const char *const rel[] = {
-        "../Resources/share/northstar/i18n",
-        "../share/northstar/i18n",
-        "share/northstar/i18n",
+        "../Resources/share/weststar/i18n",
+        "../share/weststar/i18n",
+        "share/weststar/i18n",
         "data/i18n",
         "../data/i18n",
         "../../data/i18n",

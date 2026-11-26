@@ -323,7 +323,7 @@ common WebGL content, not a full conformance suite.
 
 ```sh
 meson compile -C builddir
-./builddir/src/gtk/northstar --headless --dump=png:out.png your-webgl-page.html
+./builddir/src/sdl/weststar --headless --dump=png:out.png your-webgl-page.html
 ```
 
 A minimal smoke test is a hello-triangle: compile a vertex and a fragment

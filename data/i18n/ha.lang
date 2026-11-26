@@ -1,4 +1,4 @@
-# Northstar Web Browser UI translations — Hausa
+# Weststar SDL Browser UI translations — Hausa
 # Format: one English-source=translation pair per line; '#' starts a comment.
 # --- Toolbar, address bar, window ---
 Back=Baya
@@ -128,14 +128,14 @@ Changes apply to newly opened pages.=Canje-canje suna aiki a sabbin shafukan da 
 # --- History page (about:history) ---
 Recently visited pages.=Shafukan da aka ziyarta kwanan nan.
 No history yet.=Babu tarihi tukuna.
-# --- About page (about:northstar) and license pages ---
-About Northstar Web Browser=Game da Northstar Web Browser
+# --- About page (about:weststar) and license pages ---
+About Weststar SDL Browser=Game da Weststar SDL Browser
 Version=Siga
 Start=Farko
 A small, independent web browser written in C.=Ƙaramin mai binciken yanar gizo mai zaman kansa, wanda aka rubuta da C.
 Release notes=Bayanan fitarwa
 Technical details=Cikakkun bayanan fasaha
-Northstar Web Browser is free software, distributed under the GNU General Public License, version 3 or later.=Northstar Web Browser manhaja ce ta kyauta, wadda ake rarrabawa ƙarƙashin GNU General Public License, siga ta 3 ko wadda ta biyo baya.
+Weststar SDL Browser is free software, distributed under the GNU General Public License, version 3 or later.=Weststar SDL Browser manhaja ce ta kyauta, wadda ake rarrabawa ƙarƙashin GNU General Public License, siga ta 3 ko wadda ta biyo baya.
 GNU General Public License (GPL-3.0)=GNU General Public License (GPL-3.0)
 GNU General Public License=GNU General Public License
 Third-party software notices=Sanarwar manhajojin ɓangare na uku

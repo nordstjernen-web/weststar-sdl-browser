@@ -1,4 +1,4 @@
-/* Northstar Web Browser — registered custom property <syntax> grammar and matching API. */
+/* Weststar SDL Browser — registered custom property <syntax> grammar and matching API. */
 
 #ifndef NS_CSS_PROP_SYNTAX_H
 #define NS_CSS_PROP_SYNTAX_H

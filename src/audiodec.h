@@ -1,4 +1,4 @@
-/* Northstar Web Browser — codec-agnostic audio decoder interface for Media Source Extensions.
+/* Weststar SDL Browser — codec-agnostic audio decoder interface for Media Source Extensions.
  * Create from an RFC 6381 codec string plus init config, then decode samples to float PCM.
  * Copyright 2026 Gabriel Ferreira
  * SPDX-License-Identifier: GPL-3.0-or-later

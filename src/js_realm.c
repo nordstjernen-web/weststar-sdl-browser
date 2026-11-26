@@ -1,4 +1,4 @@
-/* Northstar Web Browser — native ShadowRealm over the QuickJS C API.
+/* Weststar SDL Browser — native ShadowRealm over the QuickJS C API.
  * Child context in the same runtime; callables cross as wrapped functions; importValue is a stub.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

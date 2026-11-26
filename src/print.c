@@ -1,4 +1,4 @@
-/* Northstar Web Browser — paginates a laid-out page onto sheets of paper.
+/* Weststar SDL Browser — paginates a laid-out page onto sheets of paper.
  * Honors @page size/margins and forced or avoided breaks, keeps line boxes whole.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

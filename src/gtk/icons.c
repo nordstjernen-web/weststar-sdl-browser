@@ -1,4 +1,4 @@
-/* Northstar Web Browser — the shell's own icons, drawn by the in-engine SVG renderer.
+/* Weststar SDL Browser — the shell's own icons, drawn by the in-engine SVG renderer.
  * Loads bundled SVGs from GResources into cached paintables, falling back to the icon theme.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

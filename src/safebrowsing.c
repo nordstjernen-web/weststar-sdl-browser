@@ -1,4 +1,4 @@
-/* Northstar Web Browser — phishing/malware checks: a local blocklist of SHA-256 host hashes
+/* Weststar SDL Browser — phishing/malware checks: a local blocklist of SHA-256 host hashes
  * (host and parent domains) and Google Safe Browsing, session allow-lists, and the warning page.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -71,9 +71,9 @@ static gboolean
 load_bundled(void)
 {
     static const char *const rel[] = {
-        "../Resources/share/northstar/safebrowsing.list",
-        "../share/northstar/safebrowsing.list",
-        "share/northstar/safebrowsing.list",
+        "../Resources/share/weststar/safebrowsing.list",
+        "../share/weststar/safebrowsing.list",
+        "share/weststar/safebrowsing.list",
         "data/safebrowsing.list",
         "../data/safebrowsing.list",
         "../../data/safebrowsing.list",
@@ -119,7 +119,7 @@ ensure_loaded(void)
         load_bundled();
         return;
     }
-    char *user = g_build_filename(g_get_user_config_dir(), "northstar",
+    char *user = g_build_filename(g_get_user_config_dir(), NS_APP_DIR_NAME,
                                   "safebrowsing.list", NULL);
     load_file(user);
     g_free(user);
@@ -206,7 +206,7 @@ ns_safebrowsing_check_url(const char *url)
     return ns_sbg_check_url(url);
 }
 
-/* Fills in the status, list sizes and session counters for about:northstar. */
+/* Fills in the status, list sizes and session counters for about:weststar. */
 void
 ns_safebrowsing_get_stats(ns_sb_stats *out)
 {
@@ -251,7 +251,7 @@ interstitial_summary(ns_sb_verdict verdict)
                "get you to install programs that change your browser or slow "
                "down your device.";
     default:
-        return "Northstar Web Browser blocked this page because the site "
+        return "Weststar SDL Browser blocked this page because the site "
                "below is on your local list of known phishing or malware hosts. "
                "Attackers there may try to trick you into revealing passwords or "
                "payment details, or to install harmful software.";
@@ -264,7 +264,7 @@ interstitial_details(ns_sb_verdict verdict)
     if (verdict == NS_SB_LOCAL_LIST)
         return "This check runs entirely on your device against a local list "
                "\xe2\x80\x94 nothing about the page you visited was sent anywhere.";
-    return "Google Safe Browsing lists this site as unsafe. Northstar checks "
+    return "Google Safe Browsing lists this site as unsafe. Weststar checks "
            "addresses against a list kept on your device and only asks Google "
            "about a short, anonymous fragment of a hash of the address, never "
            "the address itself. Advisory provided by Google: <a href=\""
@@ -286,7 +286,7 @@ ns_safebrowsing_interstitial(const char *url, const char *host,
 
     char *html = g_strdup_printf(
         "<!doctype html><html><head><meta charset=\"utf-8\">"
-        "<title>Security warning — Northstar Web Browser</title><style>"
+        "<title>Security warning — Weststar SDL Browser</title><style>"
         "body{font-family:system-ui,-apple-system,\"Segoe UI\",Helvetica,"
         "Arial,sans-serif;background:#7a1212;color:#1b1b22;margin:0;padding:0;"
         "min-height:100vh;display:flex;align-items:center;justify-content:center}"

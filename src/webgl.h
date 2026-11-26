@@ -1,4 +1,4 @@
-/* Northstar Web Browser — minimalist WebGL: canvas.getContext mapped onto GLES.
+/* Weststar SDL Browser — minimalist WebGL: canvas.getContext mapped onto GLES.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

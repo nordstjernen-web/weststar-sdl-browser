@@ -1,4 +1,4 @@
-/* Northstar Web Browser — DOM node tree: nodes, attributes, namespaces and id/class/tag indexes.
+/* Weststar SDL Browser — DOM node tree: nodes, attributes, namespaces and id/class/tag indexes.
  * Also form-control state and validity, textContent, and HTML/XML serialization.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

@@ -1,4 +1,4 @@
-/* Northstar Web Browser — Media Queries Level 4 parser, evaluator and serializer.
+/* Weststar SDL Browser — Media Queries Level 4 parser, evaluator and serializer.
  * Three-valued evaluation against device and viewport state, cached and recorded as dependencies.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

@@ -1,4 +1,4 @@
-/* Northstar Web Browser — WebGL shader validation ahead of the GPU driver.
+/* Weststar SDL Browser — WebGL shader validation ahead of the GPU driver.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

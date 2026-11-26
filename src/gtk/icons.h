@@ -1,4 +1,4 @@
-/* Northstar Web Browser — shell icon API: bundled SVG icons for images, entries and the window.
+/* Weststar SDL Browser — shell icon API: bundled SVG icons for images, entries and the window.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

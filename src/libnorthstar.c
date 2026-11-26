@@ -1,4 +1,4 @@
-/* Northstar Web Browser — internal page-engine host for the GTK shell and headless driver.
+/* Weststar SDL Browser — internal page-engine host for the GTK shell and headless driver.
  * Restyle/relayout scheduling, image loading, input and focus, scrolling, rendering, debug dumps.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -408,7 +408,7 @@ browser_relayout_from_mutation(ns_browser *b)
         gint64 now = g_get_monotonic_time();
         if (!b->damp_logged) {
             b->damp_logged = TRUE;
-            g_message("northstar: layout dampener engaged "
+            g_message("weststar: layout dampener engaged "
                       "(script reflow loop with no user input)");
         }
         if (now < b->damp_until_us) {

@@ -1,4 +1,4 @@
-# Northstar Web Browser UI translations — Swahili / Kiswahili
+# Weststar SDL Browser UI translations — Swahili / Kiswahili
 # Format: one English-source=translation pair per line; '#' starts a comment.
 # --- Toolbar, address bar, window ---
 Back=Rudi
@@ -128,14 +128,14 @@ Changes apply to newly opened pages.=Mabadiliko yatatumika kwenye kurasa mpya zi
 # --- History page (about:history) ---
 Recently visited pages.=Kurasa zilizotembelewa hivi karibuni.
 No history yet.=Bado hakuna historia.
-# --- About page (about:northstar) and license pages ---
-About Northstar Web Browser=Kuhusu Northstar Web Browser
+# --- About page (about:weststar) and license pages ---
+About Weststar SDL Browser=Kuhusu Weststar SDL Browser
 Version=Toleo
 Start=Mwanzo
 A small, independent web browser written in C.=Kivinjari kidogo na huru cha wavuti, kilichoandikwa kwa C.
 Release notes=Maelezo ya toleo
 Technical details=Maelezo ya kiufundi
-Northstar Web Browser is free software, distributed under the GNU General Public License, version 3 or later.=Northstar Web Browser ni programu huru, inayosambazwa chini ya GNU General Public License, toleo la 3 au la baadaye.
+Weststar SDL Browser is free software, distributed under the GNU General Public License, version 3 or later.=Weststar SDL Browser ni programu huru, inayosambazwa chini ya GNU General Public License, toleo la 3 au la baadaye.
 GNU General Public License (GPL-3.0)=GNU General Public License (GPL-3.0)
 GNU General Public License=GNU General Public License
 Third-party software notices=Ilani za programu za wahusika wengine

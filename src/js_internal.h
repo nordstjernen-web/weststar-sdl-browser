@@ -1,4 +1,4 @@
-/* Northstar Web Browser — internal declarations shared by the QuickJS binding sources.
+/* Weststar SDL Browser — internal declarations shared by the QuickJS binding sources.
  * struct ns_js plus canvas, media, MSE, perf, encoding and webcrypto glue; not a public API.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

@@ -1,4 +1,4 @@
-/* Northstar Web Browser — threaded video decode worker API.
+/* Weststar SDL Browser — threaded video decode worker API.
  * Copyright 2026 Gabriel Ferreira
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

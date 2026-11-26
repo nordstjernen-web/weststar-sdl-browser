@@ -271,16 +271,6 @@ elif host_system == 'netbsd'
   )
 endif
 
-if host_system == 'windows'
-  executable(
-    'northstar-launcher',
-    files('win_launcher.c') + northstar_win_resources,
-    pie: false,
-    win_subsystem: 'windows',
-    dependencies: [cc.find_library('user32'), cc.find_library('shell32')],
-  )
-endif
-
 # Optional in-process audio playback over SDL3, with minimp3 and pl_mpeg
 # decoding MP3 and MPEG-1 audio and, where present, vorbisfile and opusfile
 # decoding Ogg.

@@ -1,4 +1,4 @@
-/* Northstar Web Browser — text selection API: anchor/extend, word/block select, copy text.
+/* Weststar SDL Browser — text selection API: anchor/extend, word/block select, copy text.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
