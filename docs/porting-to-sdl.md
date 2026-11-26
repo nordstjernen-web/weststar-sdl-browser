@@ -49,6 +49,33 @@ So the shell goes first, and Cairo after it:
    SDL's renderer on the GPU each frame. That needs a layer tree from the
    engine (which boxes get their own layer, and their transforms and
    opacities), handed to the shell with each frame.
+6. **Portability: SDL as the platform.** Weststar should run wherever SDL
+   does — Linux and today's Windows, and in time Windows XP and the Amiga
+   family (AmigaOS 4, MorphOS, AROS) — so platform services come from SDL
+   rather than from libraries tied to modern desktops. In order:
+   1. *Threads, locks, condition variables, thread-local data and time*
+      move from GLib to a small layer over SDL3 (`src/plat/`): SDL's
+      mutexes, condition variables, read-write locks, threads, TLS and
+      clocks. (In progress.)
+   2. *The main loop and timers* move from GLib's `GMainContext` to an
+      SDL-based loop with SDL timers; the engine thread gets the same.
+   3. *A portable build profile*: fontconfig optional (fonts found in the
+      platform's font folders, with a small bundled fallback set), TLS and
+      Web Crypto through mbedTLS instead of OpenSSL, and a bundled CA
+      certificate set for systems whose root store is too old.
+   4. *GLib's data structures and GObject* (about 500 functions at 21,000
+      call sites, and the Pango fork's type system) come from a trimmed
+      GLib vendored in the tree and built statically, its few OS calls
+      redirected to the SDL layer — rather than rewriting the call sites.
+   5. *SDL2 as well as SDL3* in the shell, since the Amiga-family ports
+      and XP-capable builds are SDL2.
+   6. *Toolchains and targets*: the code kept to C11 (C23 `#embed`
+      already has a fallback), a 32-bit Windows build against the old
+      MSVCRT for XP, and an AROS build in an emulator, each in CI.
+   Windows XP is the realistic floor on Windows (2000 and 95 lack too much
+   of the API a browser needs today, and their hardware the memory); on
+   the Amiga, the PowerPC and x86 systems, not the 68k classics, whose few
+   megabytes and missing FPU cannot run a modern JavaScript engine.
 
 ## The rasterizer: gfx
 
