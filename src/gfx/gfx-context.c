@@ -1104,7 +1104,6 @@ draw_span(void *closure, int y, int x, int len, const uint8_t *cov)
         clipm = d->clip->mask + (size_t)(y - d->clip->y0) * (size_t)cw +
                 (size_t)(x - d->clip->x0);
     }
-    gfx_source_fetch(&d->src, y, x, len, d->srcbuf);
     int bpp = d->t->format == GFX_FORMAT_A8 ? 1 : 4;
     unsigned char *dst = d->t->data + (size_t)y * (size_t)d->t->stride +
                          (size_t)x * (size_t)bpp;
@@ -1115,9 +1114,17 @@ draw_span(void *closure, int y, int x, int len, const uint8_t *cov)
                 d->clipbuf[i] = gfx_mul8(shape ? shape[i] : 255, clipm[i]);
             total = d->clipbuf;
         }
+        if (d->src.pat->type == GFX_PATTERN_SOLID &&
+            d->src.pat->status == GFX_STATUS_SUCCESS) {
+            gfx_composite_solid(d->op, d->t->format, dst, d->src.solid, total,
+                                len);
+            return;
+        }
+        gfx_source_fetch(&d->src, y, x, len, d->srcbuf);
         gfx_composite_row(d->op, d->t->format, dst, d->srcbuf, total, len);
         return;
     }
+    gfx_source_fetch(&d->src, y, x, len, d->srcbuf);
     /* Unbounded: op(src x shape, dst), then the clip blends the result. */
     if (!clipm) {
         gfx_composite_row(d->op, d->t->format, dst, d->srcbuf, shape, len);
@@ -1135,14 +1142,51 @@ draw_span(void *closure, int y, int x, int len, const uint8_t *cov)
     }
 }
 
-/* Paints the whole clip box. */
+/* Paints the clip box, or for a bounded operator the part of it a
+ * non-extending image source (and mask) can reach. */
 static void
 draw_box(gfx_t *g, drawer *d)
 {
     int x0, y0, x1, y1;
     clip_box(g->gs, &x0, &y0, &x1, &y1);
-    for (int y = y0; y < y1; y++)
+    if (d->bounded) {
+        int e[4];
+        if (gfx_source_extent(&d->src, &e[0], &e[1], &e[2], &e[3])) {
+            x0 = x0 > e[0] ? x0 : e[0];
+            y0 = y0 > e[1] ? y0 : e[1];
+            x1 = x1 < e[2] ? x1 : e[2];
+            y1 = y1 < e[3] ? y1 : e[3];
+        }
+        if (d->have_mask &&
+            gfx_source_extent(&d->mask, &e[0], &e[1], &e[2], &e[3])) {
+            x0 = x0 > e[0] ? x0 : e[0];
+            y0 = y0 > e[1] ? y0 : e[1];
+            x1 = x1 < e[2] ? x1 : e[2];
+            y1 = y1 < e[3] ? y1 : e[3];
+        }
+    }
+    for (int y = y0; y < y1 && x1 > x0; y++)
         draw_span(d, y, x0, x1 - x0, NULL);
+}
+
+/* Fills a box of whole pixels: no rasterizing, full coverage. */
+static void
+draw_pixel_rect(gfx_t *g, int rx0, int ry0, int rx1, int ry1)
+{
+    int x0, y0, x1, y1;
+    clip_box(g->gs, &x0, &y0, &x1, &y1);
+    x0 = x0 > rx0 ? x0 : rx0;
+    y0 = y0 > ry0 ? y0 : ry0;
+    x1 = x1 < rx1 ? x1 : rx1;
+    y1 = y1 < ry1 ? y1 : ry1;
+    if (x1 <= x0 || y1 <= y0)
+        return;
+    drawer d;
+    if (drawer_init(&d, g, x1 - x0)) {
+        for (int y = y0; y < y1; y++)
+            draw_span(&d, y, x0, x1 - x0, NULL);
+    }
+    drawer_free(&d);
 }
 
 typedef struct {
@@ -1272,11 +1316,27 @@ stroke_polygon(gfx_t *g, gfx_polygon *poly)
     gfx_flat_free(&f);
 }
 
+static int path_pixel_rect(const gfx_flat *f, int *x0, int *y0, int *x1,
+                           int *y1);
+
 void
 gfx_fill_preserve(gfx_t *g)
 {
     if (!usable(g))
         return;
+    /* Most boxes on a page are rectangles on whole pixels. */
+    if (gfx_operator_bounded(g->gs->op)) {
+        gfx_flat f;
+        gfx_flat_init(&f);
+        gfx_flatten(&g->path, g->gs->tolerance, &f);
+        int rx0, ry0, rx1, ry1;
+        int rect = path_pixel_rect(&f, &rx0, &ry0, &rx1, &ry1);
+        gfx_flat_free(&f);
+        if (rect) {
+            draw_pixel_rect(g, rx0, ry0, rx1, ry1);
+            return;
+        }
+    }
     gfx_polygon poly;
     gfx_polygon_init(&poly);
     fill_polygon(g, &poly);

@@ -354,6 +354,41 @@ gfx_source_init(gfx_source *src, const gfx_pattern_t *pat,
     }
 }
 
+int
+gfx_source_extent(const gfx_source *src, int *x0, int *y0, int *x1, int *y1)
+{
+    const gfx_pattern_t *pat = src->pat;
+    if (pat->status != GFX_STATUS_SUCCESS) {
+        *x0 = *y0 = *x1 = *y1 = 0;
+        return 1;
+    }
+    if (pat->type != GFX_PATTERN_SURFACE || pat->extend != GFX_EXTEND_NONE ||
+        !pat->surface)
+        return 0;
+    gfx_matrix_t inv = src->to_texel;
+    if (gfx_matrix_invert(&inv) != GFX_STATUS_SUCCESS)
+        return 0;
+    double xs[4] = { 0, pat->surface->width, pat->surface->width, 0 };
+    double ys[4] = { 0, 0, pat->surface->height, pat->surface->height };
+    double minx = INFINITY, miny = INFINITY, maxx = -INFINITY, maxy = -INFINITY;
+    for (int i = 0; i < 4; i++) {
+        gfx_matrix_transform_point(&inv, &xs[i], &ys[i]);
+        minx = fmin(minx, xs[i]);
+        miny = fmin(miny, ys[i]);
+        maxx = fmax(maxx, xs[i]);
+        maxy = fmax(maxy, ys[i]);
+    }
+    /* A pixel of margin for filtering. */
+    if (!(fabs(minx) < 1e8 && fabs(maxx) < 1e8 && fabs(miny) < 1e8 &&
+          fabs(maxy) < 1e8))
+        return 0;
+    *x0 = (int)floor(minx) - 1;
+    *y0 = (int)floor(miny) - 1;
+    *x1 = (int)ceil(maxx) + 1;
+    *y1 = (int)ceil(maxy) + 1;
+    return 1;
+}
+
 static inline uint32_t
 texel(const gfx_surface_t *s, int x, int y)
 {
@@ -455,6 +490,13 @@ fetch_surface(const gfx_source *src, int y, int x, int len, uint32_t *out)
     }
     if (src->texel_int) {
         int ty = y + src->ty;
+        int tx = x + src->tx;
+        if (s->format == GFX_FORMAT_ARGB32 && ty >= 0 && ty < s->height &&
+            tx >= 0 && tx + len <= s->width) {
+            memcpy(out, s->data + (size_t)ty * (size_t)s->stride + (size_t)tx * 4,
+                   (size_t)len * 4);
+            return;
+        }
         int wy = wrap(ty, s->height, ext);
         for (int i = 0; i < len; i++) {
             int wx = wrap(x + i + src->tx, s->width, ext);
@@ -474,27 +516,53 @@ fetch_surface(const gfx_source *src, int y, int x, int len, uint32_t *out)
         if (sx > 1.5) nx = (int)fmin(8, ceil(sx));
         if (sy > 1.5) ny = (int)fmin(8, ceil(sy));
     }
-    for (int i = 0; i < len; i++) {
-        double px = x + i + 0.5, py = y + 0.5;
-        if (nx == 1 && ny == 1) {
-            double u = px, v = py;
-            gfx_matrix_transform_point(m, &u, &v);
+    /* Texture coordinates are affine along the row: step them. */
+    double u0 = x + 0.5, v0 = y + 0.5;
+    gfx_matrix_transform_point(m, &u0, &v0);
+    double du = m->xx, dv = m->yx;
+    if (nx == 1 && ny == 1) {
+        int argb = s->format == GFX_FORMAT_ARGB32;
+        for (int i = 0; i < len; i++) {
+            double u = u0 + du * i, v = v0 + dv * i;
             if (nearest) {
                 double fu = floor(u), fv = floor(v);
                 out[i] = (fabs(fu) > 1e9 || fabs(fv) > 1e9) ? 0 :
                          texel_at(s, (int)fu, (int)fv, ext);
+                continue;
+            }
+            double bu = u - 0.5, bv = v - 0.5;
+            double fu = floor(bu), fv = floor(bv);
+            if (argb && fu >= 0 && fv >= 0 && fu < s->width - 1 &&
+                fv < s->height - 1) {
+                /* All four texels inside: read them directly. */
+                int tx = (int)fu, ty = (int)fv;
+                unsigned fx = (unsigned)((bu - fu) * 256 + 0.5);
+                unsigned fy = (unsigned)((bv - fv) * 256 + 0.5);
+                if (fx > 256) fx = 256;
+                if (fy > 256) fy = 256;
+                const uint32_t *r0 = (const uint32_t *)(const void *)
+                    (s->data + (size_t)ty * (size_t)s->stride) + tx;
+                const uint32_t *r1 = (const uint32_t *)(const void *)
+                    ((const unsigned char *)r0 + s->stride);
+                out[i] = blend4(r0[0], r0[1], r1[0], r1[1], fx, fy);
             } else {
                 out[i] = sample_bilinear(s, u, v, ext);
             }
-            continue;
         }
+        return;
+    }
+    /* Shrinking: the average of nx x ny point samples spread over the
+     * pixel's footprint. */
+    for (int i = 0; i < len; i++) {
         unsigned acc[4] = { 0, 0, 0, 0 };
         for (int j = 0; j < ny; j++) {
             for (int k = 0; k < nx; k++) {
-                double u = px + ((k + 0.5) / nx - 0.5);
-                double v = py + ((j + 0.5) / ny - 0.5);
-                gfx_matrix_transform_point(m, &u, &v);
-                uint32_t t = sample_bilinear(s, u, v, ext);
+                double ox = (k + 0.5) / nx - 0.5, oy = (j + 0.5) / ny - 0.5;
+                double u = u0 + du * i + m->xx * ox + m->xy * oy;
+                double v = v0 + dv * i + m->yx * ox + m->yy * oy;
+                double fu = floor(u), fv = floor(v);
+                uint32_t t = (fabs(fu) > 1e9 || fabs(fv) > 1e9) ? 0 :
+                             texel_at(s, (int)fu, (int)fv, ext);
                 acc[0] += t & 0xff;
                 acc[1] += (t >> 8) & 0xff;
                 acc[2] += (t >> 16) & 0xff;

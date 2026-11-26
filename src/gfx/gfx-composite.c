@@ -231,27 +231,39 @@ store(gfx_format_t fmt, unsigned char *p, uint32_t v)
     memcpy(p, &v, 4);
 }
 
-/* lerp(d, s, c) per channel, c in 0..255. */
+/* Two channels per multiply: x's four 8-bit channels times a / 255. */
+static inline uint32_t
+mul4(uint32_t x, unsigned a)
+{
+    uint32_t rb = (x & 0x00ff00ffu) * a + 0x00800080u;
+    rb = ((rb + ((rb >> 8) & 0x00ff00ffu)) >> 8) & 0x00ff00ffu;
+    uint32_t ag = ((x >> 8) & 0x00ff00ffu) * a + 0x00800080u;
+    ag = (ag + ((ag >> 8) & 0x00ff00ffu)) & 0xff00ff00u;
+    return rb | ag;
+}
+
+/* x + y per channel, saturating at 255. */
+static inline uint32_t
+add4(uint32_t x, uint32_t y)
+{
+    uint32_t rb = (x & 0x00ff00ffu) + (y & 0x00ff00ffu);
+    rb = (rb | (0x01000100u - ((rb >> 8) & 0x00ff00ffu))) & 0x00ff00ffu;
+    uint32_t ag = ((x >> 8) & 0x00ff00ffu) + ((y >> 8) & 0x00ff00ffu);
+    ag = (ag | (0x01000100u - ((ag >> 8) & 0x00ff00ffu))) & 0x00ff00ffu;
+    return rb | (ag << 8);
+}
+
+/* lerp(d, s, c), c in 0..255. */
 static inline uint32_t
 lerp8(uint32_t d, uint32_t s, unsigned c)
 {
-    uint32_t out = 0;
-    for (int sh = 0; sh < 32; sh += 8) {
-        unsigned dv = (d >> sh) & 0xff, sv = (s >> sh) & 0xff;
-        int v = (int)dv + (((int)sv - (int)dv) * (int)c + (sv >= dv ? 127 : -127)) / 255;
-        out |= (uint32_t)(v & 0xff) << sh;
-    }
-    return out;
+    return add4(mul4(s, c), mul4(d, 255 - c));
 }
 
-/* s scaled by c in 0..255. */
 static inline uint32_t
 scale8(uint32_t s, unsigned c)
 {
-    return (uint32_t)gfx_mul8(s >> 24, c) << 24 |
-           (uint32_t)gfx_mul8((s >> 16) & 0xff, c) << 16 |
-           (uint32_t)gfx_mul8((s >> 8) & 0xff, c) << 8 |
-           gfx_mul8(s & 0xff, c);
+    return mul4(s, c);
 }
 
 /* s OVER d. */
@@ -259,25 +271,62 @@ static inline uint32_t
 over8(uint32_t s, uint32_t d)
 {
     unsigned ia = 255 - (s >> 24);
-    if (ia == 0)
-        return s;
-    uint32_t out = 0;
-    for (int sh = 0; sh < 32; sh += 8) {
-        unsigned v = ((s >> sh) & 0xff) + gfx_mul8((d >> sh) & 0xff, ia);
-        out |= (uint32_t)(v > 255 ? 255 : v) << sh;
-    }
-    return out;
+    return ia == 0 ? s : add4(s, mul4(d, ia));
 }
 
 static inline uint32_t
 add8(uint32_t s, uint32_t d)
 {
-    uint32_t out = 0;
-    for (int sh = 0; sh < 32; sh += 8) {
-        unsigned v = ((s >> sh) & 0xff) + ((d >> sh) & 0xff);
-        out |= (uint32_t)(v > 255 ? 255 : v) << sh;
+    return add4(s, d);
+}
+
+void
+gfx_composite_solid(gfx_operator_t op, gfx_format_t fmt, unsigned char *dst,
+                    uint32_t s, const uint8_t *coverage, int len)
+{
+    if (fmt == GFX_FORMAT_ARGB32 &&
+        (op == GFX_OPERATOR_OVER || op == GFX_OPERATOR_SOURCE)) {
+        uint32_t *p = (uint32_t *)(void *)dst;
+        int opaque = (s >> 24) == 255;
+        if (!coverage && (op == GFX_OPERATOR_SOURCE || opaque)) {
+            for (int i = 0; i < len; i++)
+                p[i] = s;
+            return;
+        }
+        if (op == GFX_OPERATOR_OVER) {
+            if (s == 0)
+                return;
+            if (!coverage) {
+                unsigned ia = 255 - (s >> 24);
+                for (int i = 0; i < len; i++)
+                    p[i] = add4(s, mul4(p[i], ia));
+                return;
+            }
+            for (int i = 0; i < len; i++) {
+                unsigned c = coverage[i];
+                if (c == 0)
+                    continue;
+                p[i] = (c == 255 && opaque) ? s : over8(c == 255 ? s : mul4(s, c), p[i]);
+            }
+            return;
+        }
+        for (int i = 0; i < len; i++) {
+            unsigned c = coverage[i];
+            if (c)
+                p[i] = c == 255 ? s : lerp8(p[i], s, c);
+        }
+        return;
     }
-    return out;
+    /* Everything else goes through the general path, in chunks. */
+    uint32_t buf[256];
+    int bpp = fmt == GFX_FORMAT_A8 ? 1 : 4;
+    for (int i = 0; i < 256; i++)
+        buf[i] = s;
+    for (int o = 0; o < len; o += 256) {
+        int n = len - o < 256 ? len - o : 256;
+        gfx_composite_row(op, fmt, dst + (size_t)o * (size_t)bpp, buf,
+                          coverage ? coverage + o : NULL, n);
+    }
 }
 
 void
@@ -285,6 +334,19 @@ gfx_composite_row(gfx_operator_t op, gfx_format_t fmt, unsigned char *dst,
                   const uint32_t *src, const uint8_t *coverage, int len)
 {
     int bpp = fmt == GFX_FORMAT_A8 ? 1 : 4;
+    if (fmt == GFX_FORMAT_ARGB32 && op == GFX_OPERATOR_OVER) {
+        uint32_t *p = (uint32_t *)(void *)dst;
+        for (int i = 0; i < len; i++) {
+            uint32_t s = src[i];
+            unsigned c = coverage ? coverage[i] : 255;
+            if (c == 0 || s == 0)
+                continue;
+            if (c != 255)
+                s = mul4(s, c);
+            p[i] = (s >> 24) == 255 ? s : over8(s, p[i]);
+        }
+        return;
+    }
     int bounded = gfx_operator_bounded(op);
     for (int i = 0; i < len; i++, dst += bpp) {
         unsigned c = coverage ? coverage[i] : 255;

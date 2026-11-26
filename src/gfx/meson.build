@@ -41,3 +41,19 @@ test(
   ),
   suite: 'gfx',
 )
+
+# Times page-like workloads with gfx and with Cairo:
+# meson test -C builddir --benchmark --verbose
+benchmark(
+  'gfx',
+  executable(
+    'gfx-bench',
+    files('tests/gfx-bench.c'),
+    dependencies: [weststar_gfx_dep],
+    include_directories: include_directories('tests'),
+    pie: host_machine.system() != 'windows',
+    build_by_default: true,
+  ),
+  suite: 'gfx',
+  timeout: 600,
+)

@@ -192,6 +192,10 @@ typedef struct {
     double               alpha;       /* multiplies every colour */
 } gfx_source;
 
+/* The pixels a source can be non-transparent in, for an image that does
+ * not extend; FALSE when unbounded. */
+int  gfx_source_extent(const gfx_source *src, int *x0, int *y0, int *x1,
+                       int *y1);
 void gfx_source_init(gfx_source *src, const gfx_pattern_t *pat,
                      const gfx_matrix_t *to_pattern, double alpha);
 /* Fills out[0 .. len) with premultiplied ARGB for row y, pixels x .. */
@@ -206,6 +210,10 @@ int gfx_operator_bounded(gfx_operator_t op);
 
 /* Composites len pixels of src into dst row with coverage (NULL: all 255).
  * dst points at the first pixel of the run in a surface of format fmt. */
+/* The same for a solid premultiplied colour s. */
+void gfx_composite_solid(gfx_operator_t op, gfx_format_t fmt,
+                         unsigned char *dst, uint32_t s,
+                         const uint8_t *coverage, int len);
 void gfx_composite_row(gfx_operator_t op, gfx_format_t fmt,
                        unsigned char *dst, const uint32_t *src,
                        const uint8_t *coverage, int len);

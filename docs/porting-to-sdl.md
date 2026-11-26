@@ -94,6 +94,15 @@ pixel, and the butt caps at the ends of an open curve, which gfx squares
 to the first and last flattened segment where Cairo uses the exact
 tangent.
 
+**Speed.** `meson test -C builddir --benchmark --verbose` (or
+`builddir/src/gfx/gfx-bench`) times twelve page-like workloads with gfx
+and with Cairo. On Windows (Ryzen 5 9600X, `-O3`, Cairo 1.18.6 with
+pixman's SIMD) gfx is at Cairo's speed for solid and pixel-aligned fills,
+thin lines and circles, about 2x slower for rounded boxes, gradients and
+rounded clips, 5 to 6x for translucent overlays and opacity groups, and
+9 to 13x for images drawn 1:1 or scaled; 2.1x over all. gfx has no SIMD
+yet: images and blending are where it would pay.
+
 Not in gfx: regions (`cairo_region_t`, used by the page session's damage
 tracking), text (`cairo_show_text`, `cairo_text_extents`), vector output
 (PDF), and curved mesh patch sides.
