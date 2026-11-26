@@ -8,7 +8,6 @@
 
 #include <math.h>
 #include "ns_pango.h"
-#include "gfx-cairo.h"
 #include <string.h>
 
 #include "paint.h"
@@ -22,8 +21,7 @@ math_pango_ctx(void)
 {
     static NsPangoContext *ctx;
     if (!ctx) {
-        NsPangoFontMap *fm = ns_pango_cairo_font_map_get_default();
-        ctx = ns_pango_font_map_create_context(fm);
+        ctx = ns_pango_gfx_create_context(NULL);
     }
     return ctx;
 }
@@ -107,11 +105,10 @@ render_token(gfx_t *cr, const char *text, double fpx, gboolean italic,
     if (asc) *asc = a;
     if (desc) *desc = dsc;
     if (cr && text && *text) {
-        /* Glyphs still go through pangocairo, into gfx's pixels. */
-        cairo_t *tcr = gfx_cairo_begin(cr);
-        cairo_move_to(tcr, x, by - a);
-        ns_pango_cairo_show_layout(tcr, l);
-        gfx_cairo_end(cr, tcr);
+        gfx_new_path(cr);
+        gfx_move_to(cr, x, by - a);
+        ns_pango_gfx_show_layout(cr, l);
+        gfx_new_path(cr);
     }
     g_object_unref(l);
     return w;

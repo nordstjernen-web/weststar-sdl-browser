@@ -1,4 +1,4 @@
-/* Weststar SDL Browser — Cairo paint API plus shared inline text and font helpers.
+/* Weststar SDL Browser — the gfx paint API plus shared inline text and font helpers.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

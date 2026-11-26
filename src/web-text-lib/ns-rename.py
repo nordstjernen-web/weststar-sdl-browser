@@ -32,8 +32,6 @@ RULES = (
      '__NS_%s\\1' % P.upper()),
     (re.compile(r'#include\s*<%s/' % P), '#include <web-text-lib/'),
     (re.compile(r'#include\s*"%s/' % P), '#include "web-text-lib/'),
-    (re.compile(r'(?<![A-Za-z0-9_])%sCAIRO_BACKEND' % P.upper()),
-     'NS_PANGOCAIRO_BACKEND'),
     (re.compile(r'(?<![A-Za-z0-9_])%s_TYPE_' % P.upper()), 'NS_TYPE_PANGO_'),
     (re.compile(r'(?<![A-Za-z0-9_])%s_' % P), 'ns_pango_'),
     (re.compile(r'(?<![A-Za-z0-9_])_%s_' % P), '_ns_pango_'),

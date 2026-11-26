@@ -161,7 +161,7 @@ ns_win32_set_app_id(void)
     (void)SetCurrentProcessExplicitAppUserModelID(L"Weststar.Browser");
 }
 
-/* Points fontconfig at the bundled fonts.conf and forces the fc Pango backend (Windows). */
+/* Points fontconfig at the bundled fonts.conf and initialises it (Windows). */
 static void
 ns_win32_use_fontconfig_backend(const char *dir)
 {
@@ -178,10 +178,6 @@ ns_win32_use_fontconfig_backend(const char *dir)
             g_setenv("FONTCONFIG_PATH", fonts, TRUE);
         g_free(fonts);
     }
-    if (!g_getenv("PANGOCAIRO_BACKEND"))
-        g_setenv("PANGOCAIRO_BACKEND", "fc", TRUE);
-    if (!g_getenv("NS_PANGOCAIRO_BACKEND"))
-        g_setenv("NS_PANGOCAIRO_BACKEND", "fc", TRUE);
     FcInit();
 #endif
 }

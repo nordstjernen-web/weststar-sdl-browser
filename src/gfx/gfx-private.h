@@ -245,13 +245,4 @@ gfx_pack(double r, double g, double b, double a)
            ((uint32_t)(g * 255 + 0.5) << 8) | (uint32_t)(b * 255 + 0.5);
 }
 
-/* ---- for the Cairo bridge --------------------------------------------- */
-
-/* The clip's mask, w x h bytes from target pixel (x0, y0); FALSE when the
- * clip is a plain box (see gfx_clip_pixel_box). */
-int  gfx_clip_mask(gfx_t *g, int *x0, int *y0, int *w, int *h,
-                   const uint8_t **mask);
-/* User space -> the current target's pixels. */
-void gfx_user_to_pixels_matrix(const gfx_t *g, gfx_matrix_t *m);
-
 #endif

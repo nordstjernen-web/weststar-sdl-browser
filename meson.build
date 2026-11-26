@@ -138,7 +138,6 @@ ns_floors = {
   'glib-2.0': '>=2.80',
   'gobject-2.0': '>=2.80',
   'gio-2.0': '>=2.80',
-  'cairo': '>=1.18',
   'harfbuzz': '>=8.3',
   'fribidi': '>=1.0.6',
   'fontconfig': '>=2.15',
@@ -163,7 +162,9 @@ endif
 glib    = dependency('glib-2.0', version: ns_floors['glib-2.0'])
 gobject = dependency('gobject-2.0', version: ns_floors['gobject-2.0'])
 gio     = dependency('gio-2.0', version: ns_floors['gio-2.0'])
-cairo   = dependency('cairo', version: ns_floors['cairo'])
+# Cairo is not part of the browser: only gfx's test and benchmark, which
+# compare gfx with it, use it, and are built when it is installed.
+cairo   = dependency('cairo', version: '>=1.18', required: false)
 
 # SDL3 opens the window, takes input and plays audio. The chrome is drawn
 # with Nuklear, vendored in subprojects/nuklear.
@@ -180,9 +181,8 @@ libpsl = dependency('libpsl')
 
 sqlite3 = dependency('sqlite3')
 
-libfontconfig = dependency('fontconfig', version: ns_floors['fontconfig'],
-                           required: false)
-libfreetype = dependency('freetype2', required: false)
+libfontconfig = dependency('fontconfig', version: ns_floors['fontconfig'])
+libfreetype = dependency('freetype2')
 
 libavif = dependency('libavif', required: get_option('avif'))
 have_avif = libavif.found()
@@ -441,10 +441,12 @@ summary({
 # Text is shaped through web-text-lib (src/web-text-lib/), the in-tree Pango
 # fork that caches finished glyph strings across layouts; every symbol in it
 # is renamed, because GTK loads the system Pango into the same process. It
-# declares targets, so it comes after the last project argument.
+# declares targets, so it comes after the last project argument. It draws
+# with gfx (src/gfx/), the browser's rasterizer, which comes first.
+subdir('src/gfx')
 subdir('src/web-text-lib')
 pango       = web_text_dep
-pangocairo  = web_text_cairo_dep
+pangogfx    = web_text_gfx_dep
 libpangoft2 = web_text_fc_dep
 
 subdir('src')

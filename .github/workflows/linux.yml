@@ -69,10 +69,10 @@ jobs:
           path: gfx-test-out
           retention-days: 7
 
-      - name: No GTK in the binary
+      - name: No GTK or Cairo in the binary
         run: |
           test -x builddir/src/sdl/weststar
-          ! ldd builddir/src/sdl/weststar | grep -i -E 'libgtk|libgdk'
+          ! ldd builddir/src/sdl/weststar | grep -i -E 'libgtk|libgdk|libcairo|libpixman'
           ldd builddir/src/sdl/weststar | grep -i libSDL3
 
       - name: Headless smoke (about:start)

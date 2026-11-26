@@ -12,7 +12,7 @@ Debian 13 / Ubuntu 25.04 or newer:
 ```sh
 sudo apt install build-essential git pkg-config meson ninja-build \
     libsdl3-dev libcurl4-openssl-dev libssl-dev \
-    libharfbuzz-dev libfribidi-dev libcairo2-dev libfontconfig-dev \
+    libharfbuzz-dev libfribidi-dev libfontconfig-dev \
     libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev \
     libglib2.0-dev zlib1g-dev
 ```
@@ -22,14 +22,14 @@ Fedora:
 ```sh
 sudo dnf install gcc git pkgconf meson ninja-build SDL3-devel \
     libcurl-devel openssl-devel harfbuzz-devel fribidi-devel \
-    cairo-devel fontconfig-devel freetype-devel libpsl-devel \
+    fontconfig-devel freetype-devel libpsl-devel \
     sqlite-devel libseccomp-devel glib2-devel zlib-devel
 ```
 
 `libseccomp` is required on Linux — `meson setup` fails without it.
 
 The text stack has version floors set by web-text-lib: GLib ≥ 2.80,
-HarfBuzz ≥ 8.3, fontconfig ≥ 2.15, Cairo ≥ 1.18 and FriBidi ≥ 1.0.6;
+HarfBuzz ≥ 8.3, fontconfig ≥ 2.15 and FriBidi ≥ 1.0.6, with FreeType;
 SDL3 must be ≥ 3.2 and libcurl ≥ 8.5. `meson setup` checks every floor
 and lists each library that is missing or too old in a single error.
 With a libcurl older than 8.11 the build warns that WebSocket is
@@ -68,7 +68,7 @@ Weststar builds natively on Windows in an [MSYS2](https://www.msys2.org)
 **UCRT64** shell, with GCC or Clang. Install the toolchain and libraries:
 
 ```sh
-pacman -S --needed git mingw-w64-ucrt-x86_64-{gcc,clang,lld,pkgconf,meson,ninja}     mingw-w64-ucrt-x86_64-{sdl3,glib2,harfbuzz,fribidi,cairo,fontconfig,freetype}     mingw-w64-ucrt-x86_64-{curl,openssl,ca-certificates,libpsl,sqlite3,zlib,brotli,zstd}     mingw-w64-ucrt-x86_64-{libavif,opusfile,libvorbis}
+pacman -S --needed git mingw-w64-ucrt-x86_64-{gcc,clang,lld,pkgconf,meson,ninja}     mingw-w64-ucrt-x86_64-{sdl3,glib2,harfbuzz,fribidi,fontconfig,freetype}     mingw-w64-ucrt-x86_64-{curl,openssl,ca-certificates,libpsl,sqlite3,zlib,brotli,zstd}     mingw-w64-ucrt-x86_64-{libavif,opusfile,libvorbis}
 ```
 
 then build as below; the binary is `builddir/src/sdl/weststar.exe`. To run
@@ -126,6 +126,10 @@ options.
 
 `./scripts/dev.sh build` runs `meson setup` (only when needed) and
 `meson compile -C builddir` in one step.
+
+Cairo is optional: when it is installed (`libcairo2-dev`, `cairo-devel`,
+`mingw-w64-ucrt-x86_64-cairo`), the build adds the gfx test and benchmark,
+which use it as the reference.
 
 `meson test -C builddir --suite gfx` checks the in-tree rasterizer
 (`src/gfx/`) against Cairo: it draws a set of scenes (fills, strokes,

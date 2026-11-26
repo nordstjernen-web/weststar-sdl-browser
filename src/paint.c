@@ -1,4 +1,4 @@
-/* Weststar SDL Browser — Cairo painter for the layout box tree.
+/* Weststar SDL Browser — the painter for the layout box tree, drawing with gfx.
  * Backgrounds, borders, text via ns-pango, stacking, transforms, list markers and media controls.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -18,7 +18,6 @@ static int g_dbg_paint_x = -2, g_dbg_paint_y = -2;
 #include "dom.h"
 #include "spellcheck.h"
 #include "font.h"
-#include "gfx-cairo.h"
 #include "image.h"
 #include "mathml.h"
 #include "selection.h"
@@ -64,43 +63,34 @@ ns_paint_set_caret_visible(gboolean visible)
 static gfx_surface_t *texture_surface_cached(ns_texture *tex,
                                                const char *filter_kw);
 
-/* Creates a layout on a shared cached context with grayscale antialiasing font options. */
-/* Glyphs are still drawn by pangocairo, into gfx's pixels, in gfx's
- * current solid source colour. */
+/* Draws a layout with its top-left corner, or a line with its baseline's
+ * left end, at (x, y) in gfx's current source. */
 static void
 paint_show_layout(gfx_t *g, double x, double y, NsPangoLayout *layout)
 {
-    cairo_t *tcr = gfx_cairo_begin(g);
-    cairo_move_to(tcr, x, y);
-    ns_pango_cairo_show_layout(tcr, layout);
-    gfx_cairo_end(g, tcr);
+    gfx_new_path(g);
+    gfx_move_to(g, x, y);
+    ns_pango_gfx_show_layout(g, layout);
+    gfx_new_path(g);
 }
 
 static void
 paint_show_layout_line(gfx_t *g, double x, double y, NsPangoLayoutLine *line)
 {
-    cairo_t *tcr = gfx_cairo_begin(g);
-    cairo_move_to(tcr, x, y);
-    ns_pango_cairo_show_layout_line(tcr, line);
-    gfx_cairo_end(g, tcr);
+    gfx_new_path(g);
+    gfx_move_to(g, x, y);
+    ns_pango_gfx_show_layout_line(g, line);
+    gfx_new_path(g);
 }
 
+/* Creates a layout on a shared cached context (grayscale antialiasing is
+ * the text backend's only mode). */
 static NsPangoLayout *
 paint_create_layout(void)
 {
     static NsPangoContext *cached_ctx;
-    if (!cached_ctx) {
-        NsPangoFontMap *fm = ns_pango_cairo_font_map_get_default();
-        cached_ctx = ns_pango_font_map_create_context(fm);
-        cairo_font_options_t *fo = cairo_font_options_create();
-        const cairo_font_options_t *base =
-            ns_pango_cairo_context_get_font_options(cached_ctx);
-        if (base) cairo_font_options_merge(fo, base);
-        cairo_font_options_set_antialias(fo, CAIRO_ANTIALIAS_GRAY);
-        cairo_font_options_set_subpixel_order(fo, CAIRO_SUBPIXEL_ORDER_DEFAULT);
-        ns_pango_cairo_context_set_font_options(cached_ctx, fo);
-        cairo_font_options_destroy(fo);
-    }
+    if (!cached_ctx)
+        cached_ctx = ns_pango_gfx_create_context(NULL);
     return ns_pango_layout_new(cached_ctx);
 }
 
@@ -851,8 +841,8 @@ paint_gradient_repeat_window(const ns_css_gradient *gr, double *frac,
     for (int i = 0; i < gr->n_stops; i++) frac[i] -= first;
 }
 
-/* Adds gr's color stops to a cairo pattern so that the result matches
- * premultiplied-alpha interpolation (CSS Images 4). Cairo interpolates
+/* Adds gr's color stops to a gfx pattern so that the result matches
+ * premultiplied-alpha interpolation (CSS Images 4). gfx, as Cairo, interpolates
  * stops unpremultiplied, which turns "transparent -> white" grey halfway.
  * Each segment is emitted on its own: a fully transparent end takes the
  * other end's color, which makes both interpolations identical, and a
@@ -2401,7 +2391,7 @@ ns_paint_font_available(const char *family)
     static GHashTable *avail;
     static guint cached_serial;
     if (!family || !*family) return TRUE;
-    NsPangoFontMap *fm = ns_pango_cairo_font_map_get_default();
+    NsPangoFontMap *fm = ns_pango_gfx_font_map_get_default();
     guint serial = fm ? ns_pango_font_map_get_serial(fm) : 0;
     if (!avail || serial != cached_serial) {
         if (avail) g_hash_table_remove_all(avail);
@@ -2508,7 +2498,7 @@ ns_paint_font_metrics(const char *family, double size_px, int weight,
 
     if (size_px <= 0) return;
 
-    NsPangoFontMap *fm = ns_pango_cairo_font_map_get_default();
+    NsPangoFontMap *fm = ns_pango_gfx_font_map_get_default();
     guint serial = fm ? ns_pango_font_map_get_serial(fm) : 0;
     if (!cache) {
         cache = g_hash_table_new_full(font_metrics_key_hash,
@@ -2552,7 +2542,7 @@ ns_paint_font_metrics(const char *family, double size_px, int weight,
 guint64
 ns_paint_font_generation(void)
 {
-    NsPangoFontMap *fm = ns_pango_cairo_font_map_get_default();
+    NsPangoFontMap *fm = ns_pango_gfx_font_map_get_default();
     guint serial = fm ? ns_pango_font_map_get_serial(fm) : 0;
     return ((guint64)serial << 32) | ns_font_generation();
 }
@@ -5587,21 +5577,29 @@ marker_custom_text(const ns_node *li, const ns_style *li_style,
     return marker_resolve_content_text(raw, li, style_kw);
 }
 
-/* Draws a marker label right-aligned before the edge (left-aligned after it in RTL). */
+/* Draws a marker label right-aligned before the edge (left-aligned after it
+ * in RTL), its baseline at baseline_y, in the default sans-serif face. */
 static void
 paint_marker_label(gfx_t *cr, const char *label, double edge_x,
                    gboolean rtl, double baseline_y, double font_size)
 {
-    if (!label || !*label) return;
-    cairo_t *tcr = gfx_cairo_begin(cr);
-    cairo_set_font_size(tcr, font_size);
-    cairo_text_extents_t ext;
-    cairo_text_extents(tcr, label, &ext);
-    double x = rtl ? edge_x + font_size * 0.35 - ext.x_bearing
-                   : edge_x - font_size * 0.35 - ext.width - ext.x_bearing;
-    cairo_move_to(tcr, x, baseline_y);
-    cairo_show_text(tcr, label);
-    gfx_cairo_end(cr, tcr);
+    if (!label || !*label || font_size <= 0) return;
+    NsPangoLayout *layout = paint_create_layout();
+    NsPangoFontDescription *fd = ns_pango_font_description_new();
+    ns_pango_font_description_set_family_static(fd, "sans-serif");
+    ns_pango_font_description_set_absolute_size(fd, font_size * NS_PANGO_SCALE);
+    ns_pango_layout_set_font_description(layout, fd);
+    ns_pango_font_description_free(fd);
+    ns_pango_layout_set_text(layout, label, -1);
+    NsPangoRectangle ink;
+    ns_pango_layout_get_extents(layout, &ink, NULL);
+    double ink_x = (double)ink.x / NS_PANGO_SCALE;
+    double ink_w = (double)ink.width / NS_PANGO_SCALE;
+    double baseline = (double)ns_pango_layout_get_baseline(layout) / NS_PANGO_SCALE;
+    double x = rtl ? edge_x + font_size * 0.35 - ink_x
+                   : edge_x - font_size * 0.35 - ink_w - ink_x;
+    paint_show_layout(cr, x, baseline_y - baseline, layout);
+    g_object_unref(layout);
 }
 
 /* Formats n with lower-greek letters in bijective base 24. */
@@ -6173,7 +6171,7 @@ paint_flush_deferred(gfx_t *cr, GPtrArray *list, const char *highlight)
 
 static double g_paint_anchor_dx, g_paint_anchor_dy;
 
-/* Restores cairo state and the saved anchor-positioning offsets. */
+/* Restores gfx state and the saved anchor-positioning offsets. */
 static void
 paint_anchor_leave(gfx_t *cr, double saved_dx, double saved_dy)
 {
@@ -6204,7 +6202,7 @@ compute_sticky_offset(const ns_box *b, gfx_t *cr,
                          out_dx, out_dy);
 }
 
-/* Maps mix-blend-mode to the corresponding cairo operator; OVER by default. */
+/* Maps mix-blend-mode to the corresponding gfx operator; OVER by default. */
 static gfx_operator_t
 blend_mode_operator(const ns_style *s)
 {
@@ -6235,7 +6233,7 @@ static gboolean g_paint_have_clip;
 static double g_paint_clip_y0, g_paint_clip_y1;
 static double g_paint_cull_margin = 400.0;
 
-/* Builds a linear or radial cairo pattern for a mask gradient; NULL for conic. */
+/* Builds a linear or radial gfx pattern for a mask gradient; NULL for conic. */
 static gfx_pattern_t *
 mask_gradient_pattern(const ns_css_gradient *gr,
                       double bx, double by, double bw, double bh)
@@ -7286,7 +7284,7 @@ box_resting_ink_y(const ns_box *b, const ns_box *group, int *budget, int depth,
 }
 
 /* Clips cr to the rows an opacity, blend or mask group can paint into, so
- * the group cairo pushes is that tall and not as tall as the whole clip.
+ * the group gfx pushes is that tall and not as tall as the whole clip.
  * TRUE if a clip was set (the caller restores). */
 static gboolean
 paint_group_clip(gfx_t *cr, const ns_box *b)

@@ -1,5 +1,5 @@
 /* Weststar SDL Browser — HTML canvas 2D, Path2D, ImageBitmap, DOMMatrix (QuickJS).
- * Cairo-backed: gradients, shadows, compositing, ImageData, OffscreenCanvas, PNG toBlob.
+ * Drawn with gfx: gradients, shadows, compositing, ImageData, OffscreenCanvas, PNG toBlob.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -10,7 +10,7 @@
 #include <string.h>
 
 #include <gio/gio.h>
-#include "gfx-cairo.h"
+#include "gfx.h"
 #include "ns_pango.h"
 
 #include "css.h"
@@ -106,7 +106,7 @@ ns_canvas_state_free(gpointer data)
     g_free(st);
 }
 
-/* Destroys a cairo context now, or defers it while canvas calls are in flight. */
+/* Destroys a gfx context now, or defers it while canvas calls are in flight. */
 static void
 ns_canvas_retire(ns_js *js, gfx_t *cr)
 {
@@ -876,7 +876,7 @@ ns_conic_color_at(const ns_conic_stop *stops, guint n, double t,
     }
 }
 
-/* Approximates a conic gradient as a 256-sector cairo mesh pattern around (cx, cy). */
+/* Approximates a conic gradient as a 256-sector gfx mesh pattern around (cx, cy). */
 static gfx_pattern_t *
 ns_ctx_build_conic_pattern(JSContext *ctx, JSValueConst obj)
 {
@@ -937,7 +937,7 @@ ns_ctx_build_conic_pattern(JSContext *ctx, JSValueConst obj)
     return pat;
 }
 
-/* Builds a cairo pattern from a JS gradient/pattern object; clears origin_clean if tainted. */
+/* Builds a gfx pattern from a JS gradient/pattern object; clears origin_clean if tainted. */
 static gfx_pattern_t *
 ns_ctx_build_pattern(JSContext *ctx, JSValueConst obj, gboolean *origin_clean)
 {
@@ -1051,7 +1051,7 @@ ns_ctx_global_alpha(JSContext *ctx, JSValueConst this_val)
     return ga;
 }
 
-/* Maps a globalCompositeOperation keyword to a cairo operator; unknown values give OVER. */
+/* Maps a globalCompositeOperation keyword to a gfx operator; unknown values give OVER. */
 static gfx_operator_t
 ns_ctx_parse_composite(const char *s)
 {
@@ -1085,7 +1085,7 @@ ns_ctx_parse_composite(const char *s)
     return GFX_OPERATOR_OVER;
 }
 
-/* Sets the cairo operator from the context's current globalCompositeOperation. */
+/* Sets the gfx operator from the context's current globalCompositeOperation. */
 static void
 ns_ctx_apply_composite(JSContext *ctx, JSValueConst this_val, gfx_t *cr)
 {
@@ -1355,7 +1355,7 @@ ns_ctx_with_shadow(ns_canvas_state *st, ns_ctx_drawfn draw, void *ud)
     draw(st->cr, ud);
 }
 
-/* Sets the cairo source to the fill pattern or fill color scaled by globalAlpha. */
+/* Sets the gfx source to the fill pattern or fill color scaled by globalAlpha. */
 static void
 ns_ctx_set_fill_source(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st)
 {
@@ -1365,7 +1365,7 @@ ns_ctx_set_fill_source(JSContext *ctx, JSValueConst this_val, ns_canvas_state *s
                                st->fill_a * ga);
 }
 
-/* Sets the cairo source to the stroke pattern or stroke color scaled by globalAlpha. */
+/* Sets the gfx source to the stroke pattern or stroke color scaled by globalAlpha. */
 static void
 ns_ctx_set_stroke_source(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st)
 {
@@ -1718,7 +1718,7 @@ static const char *ns_ctx_savable_props[] = {
     "_dashes",
 };
 
-/* save(): pushes cairo state and a snapshot of JS-side context attributes. */
+/* save(): pushes gfx state and a snapshot of JS-side context attributes. */
 static JSValue
 ns_ctx_save(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
@@ -1747,7 +1747,7 @@ ns_ctx_save(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     return JS_UNDEFINED;
 }
 
-/* restore(): pops the attribute snapshot and cairo state; no-op on an empty stack. */
+/* restore(): pops the attribute snapshot and gfx state; no-op on an empty stack. */
 static JSValue
 ns_ctx_restore(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
@@ -1777,10 +1777,10 @@ ns_ctx_restore(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
 }
 
 /* Scale that stands in for a zero one: small enough that nothing drawn
- * through it reaches a pixel, but invertible, as cairo requires. */
+ * through it reaches a pixel, but invertible, as gfx requires. */
 #define NS_CANVAS_DEGENERATE_SCALE 1e-9
 
-/* Sets cr's matrix to m.  Cairo puts a context into a permanent error state
+/* Sets cr's matrix to m.  gfx puts a context into a permanent error state
  * (every later draw a no-op) when given a non-invertible matrix, whereas a
  * canvas transform such as scale(0, 0) is legal and only makes draws
  * invisible until the transform is reset, so a singular matrix is nudged
@@ -1916,34 +1916,14 @@ ns_ctx_direction_is_rtl(JSContext *ctx, JSValueConst this_val)
     return rtl;
 }
 
-/* pangocairo lays text out against a cairo_t: a scratch one carrying the
- * canvas's current matrix stands in for the gfx context. */
-static cairo_t *
-ns_canvas_text_cairo(gfx_t *g)
-{
-    cairo_surface_t *scratch = cairo_image_surface_create(CAIRO_FORMAT_A8, 1, 1);
-    cairo_t *tcr = cairo_create(scratch);
-    cairo_surface_destroy(scratch);
-    gfx_matrix_t gm;
-    gfx_get_matrix(g, &gm);
-    cairo_matrix_t cm;
-    cairo_matrix_init(&cm, gm.xx, gm.yx, gm.xy, gm.yy, gm.x0, gm.y0);
-    cairo_set_matrix(tcr, &cm);
-    return tcr;
-}
-
-/* Appends the layout's glyph outlines at the current user-space origin. */
+/* Replaces the path with the layout's glyph outlines at the user-space
+ * origin. */
 static void
 ns_canvas_text_outline(gfx_t *g, NsPangoLayout *layout)
 {
-    cairo_t *tcr = ns_canvas_text_cairo(g);
-    cairo_move_to(tcr, 0, 0);
-    ns_pango_cairo_layout_path(tcr, layout);
-    cairo_path_t *outline = cairo_copy_path(tcr);
     gfx_new_path(g);
-    gfx_append_cairo_path(g, outline);
-    cairo_path_destroy(outline);
-    cairo_destroy(tcr);
+    gfx_move_to(g, 0, 0);
+    ns_pango_gfx_layout_path(g, layout);
 }
 
 /* Lays out text and fills or strokes it per textAlign/textBaseline/direction and maxWidth. */
@@ -1953,9 +1933,7 @@ ns_ctx_paint_text(JSContext *ctx, JSValueConst this_val,
                   double x, double y, double max_width,
                   gboolean stroke)
 {
-    cairo_t *lcr = ns_canvas_text_cairo(st->cr);
-    NsPangoLayout *layout = ns_pango_cairo_create_layout(lcr);
-    cairo_destroy(lcr);
+    NsPangoLayout *layout = ns_pango_gfx_create_layout(st->cr);
     NsPangoFontDescription *desc = ns_canvas_font_desc(st->font);
     ns_pango_layout_set_font_description(layout, desc);
     ns_pango_layout_set_text(layout, text, -1);
@@ -2018,17 +1996,13 @@ ns_ctx_paint_text(JSContext *ctx, JSValueConst this_val,
     if (stroke) {
         ns_canvas_text_outline(st->cr, layout);
         gfx_stroke(st->cr);
-    } else if (gfx_pattern_get_rgba(gfx_get_source(st->cr), NULL, NULL, NULL,
-                                    NULL)) {
-        /* A solid fill: glyphs drawn by pangocairo, into gfx's pixels. */
-        cairo_t *tcr = gfx_cairo_begin(st->cr);
-        cairo_move_to(tcr, 0, 0);
-        ns_pango_cairo_show_layout(tcr, layout);
-        gfx_cairo_end(st->cr, tcr);
     } else {
-        /* A gradient or pattern: the glyph outlines, filled by gfx. */
-        ns_canvas_text_outline(st->cr, layout);
-        gfx_fill(st->cr);
+        /* Glyphs in the fill style, solid or not, and the composite
+         * operator. */
+        gfx_new_path(st->cr);
+        gfx_move_to(st->cr, 0, 0);
+        ns_pango_gfx_show_layout(st->cr, layout);
+        gfx_new_path(st->cr);
     }
     gfx_restore(st->cr);
     ns_ctx_path_restore(st->cr, keep);
@@ -2073,9 +2047,7 @@ ns_ctx_measureText(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
     const char *text = argc >= 1 ? JS_ToCString(ctx, argv[0]) : NULL;
     if (text && st) {
         ns_ctx_sync_styles(ctx, this_val, st);
-        cairo_t *lcr = ns_canvas_text_cairo(st->cr);
-        NsPangoLayout *layout = ns_pango_cairo_create_layout(lcr);
-        cairo_destroy(lcr);
+        NsPangoLayout *layout = ns_pango_gfx_create_layout(st->cr);
         NsPangoFontDescription *desc = ns_canvas_font_desc(st->font);
         ns_pango_layout_set_font_description(layout, desc);
         ns_pango_layout_set_text(layout, text, -1);
@@ -2214,7 +2186,7 @@ ns_ctx_ellipse(JSContext *ctx, JSValueConst this_val,
     gfx_save(st->cr);
     gfx_translate(st->cr, x, y);
     gfx_rotate(st->cr, rot);
-    /* A zero radius is legal; cairo rejects a zero scale. */
+    /* A zero radius is legal; gfx rejects a zero scale. */
     gfx_scale(st->cr, rx > 0 ? rx : NS_CANVAS_DEGENERATE_SCALE,
                 ry > 0 ? ry : NS_CANVAS_DEGENERATE_SCALE);
     if (ccw) gfx_arc_negative(st->cr, 0, 0, 1.0, a0, a1);
@@ -2236,7 +2208,7 @@ ns_ctx_clip(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
-/* Reads a..f from a DOMMatrix-like object into a cairo matrix; FALSE if not an object. */
+/* Reads a..f from a DOMMatrix-like object into a gfx matrix; FALSE if not an object. */
 static gboolean
 ns_matrix_from_obj(JSContext *ctx, JSValueConst v, gfx_matrix_t *m)
 {
@@ -3101,7 +3073,7 @@ ns_ctx_reset(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
-/* getTransform(): returns the current cairo matrix as a new DOMMatrix. */
+/* getTransform(): returns the current gfx matrix as a new DOMMatrix. */
 static JSValue
 ns_ctx_getTransform(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv)
@@ -3489,7 +3461,7 @@ ns_path2d_arc_svg(gfx_t *cr, double x1, double y1,
     gfx_restore(cr);
 }
 
-/* Parses SVG path data (MLHVZCSQTA, abs/rel) into cairo path ops; stops at bad input. */
+/* Parses SVG path data (MLHVZCSQTA, abs/rel) into gfx path ops; stops at bad input. */
 static void
 ns_path2d_parse_svg(gfx_t *cr, const char *d)
 {
@@ -3924,7 +3896,7 @@ ns_element_getContext(JSContext *ctx, JSValueConst this_val,
     return obj;
 }
 
-/* cairo PNG stream callback appending bytes to a GByteArray closure. */
+/* gfx PNG stream callback appending bytes to a GByteArray closure. */
 gfx_status_t
 ns_canvas_png_write(void *closure, const unsigned char *data, unsigned int length)
 {

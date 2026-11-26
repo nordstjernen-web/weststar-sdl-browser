@@ -5,7 +5,6 @@
 
 #include "ui.h"
 
-#include "gfx-cairo.h"
 #include "ns_pango.h"
 
 #include <string.h>
@@ -69,25 +68,13 @@ ns_ui_set_source(gfx_t *g, NsColor c)
     gfx_set_source_rgba(g, c.r, c.g, c.b, c.a);
 }
 
-/* A context for measuring text outside of drawing. */
-static cairo_t *
-measure_cr(void)
-{
-    static cairo_t *cr;
-    if (!cr) {
-        cairo_surface_t *s = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
-                                                        1, 1);
-        cr = cairo_create(s);
-        cairo_surface_destroy(s);
-    }
-    return cr;
-}
-
+/* A layout of chrome text, laid out for g's scale (or 1:1 when g is NULL,
+ * for measuring outside of drawing). */
 static NsPangoLayout *
-ui_layout(cairo_t *cr, const char *text, int len, double size_px,
+ui_layout(gfx_t *g, const char *text, int len, double size_px,
           gboolean bold)
 {
-    NsPangoLayout *layout = ns_pango_cairo_create_layout(cr);
+    NsPangoLayout *layout = ns_pango_gfx_create_layout(g);
     NsPangoFontDescription *fd = ns_pango_font_description_new();
     ns_pango_font_description_set_family(fd, NS_UI_FONT_FAMILY);
     ns_pango_font_description_set_absolute_size(fd, size_px * NS_PANGO_SCALE);
@@ -109,7 +96,7 @@ ns_ui_text_width(const char *text, int len, double size_px, gboolean bold)
 {
     if (!text || len <= 0)
         return 0;
-    NsPangoLayout *layout = ui_layout(measure_cr(), text, len, size_px, bold);
+    NsPangoLayout *layout = ui_layout(NULL, text, len, size_px, bold);
     int w = 0, h = 0;
     ns_pango_layout_get_size(layout, &w, &h);
     g_object_unref(layout);
@@ -123,9 +110,7 @@ ns_ui_text_draw(gfx_t *gc, double x, double y, double w, double h,
 {
     if (!text || len <= 0)
         return;
-    /* Text still goes through pangocairo, drawing into gfx's pixels. */
-    cairo_t *cr = gfx_cairo_begin(gc);
-    NsPangoLayout *layout = ui_layout(cr, text, len, size_px, bold);
+    NsPangoLayout *layout = ui_layout(gc, text, len, size_px, bold);
     if (w > 0) {
         ns_pango_layout_set_width(layout, (int)((w + 1) * NS_PANGO_SCALE));
         ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
@@ -133,11 +118,14 @@ ns_ui_text_draw(gfx_t *gc, double x, double y, double w, double h,
     int lw = 0, lh = 0;
     ns_pango_layout_get_size(layout, &lw, &lh);
     double th = (double)lh / NS_PANGO_SCALE;
-    cairo_set_source_rgba(cr, r, g, b, a);
-    cairo_move_to(cr, x, y + (h - th) / 2);
-    ns_pango_cairo_show_layout(cr, layout);
+    gfx_save(gc);
+    gfx_set_source_rgba(gc, r, g, b, a);
+    gfx_new_path(gc);
+    gfx_move_to(gc, x, y + (h - th) / 2);
+    ns_pango_gfx_show_layout(gc, layout);
+    gfx_new_path(gc);
+    gfx_restore(gc);
     g_object_unref(layout);
-    gfx_cairo_end(gc, cr);
 }
 
 /* ---- layers ------------------------------------------------------------ */

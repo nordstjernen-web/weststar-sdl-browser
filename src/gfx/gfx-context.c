@@ -1616,27 +1616,3 @@ gfx_clip_extents(gfx_t *g, double *x1, double *y1, double *x2, double *y2)
     box_to_user(g, bx0, by0, bx1, by1, &a, &b, &c, &d);
     put_extents(x1, y1, x2, y2, a, b, c, d);
 }
-
-int
-gfx_clip_mask(gfx_t *g, int *x0, int *y0, int *w, int *h,
-              const uint8_t **mask)
-{
-    if (!g || g->ref <= 0 || !g->gs || !g->gs->clip || !g->gs->clip->mask)
-        return 0;
-    const gfx_clipst *c = g->gs->clip;
-    *x0 = c->x0;
-    *y0 = c->y0;
-    *w = c->x1 - c->x0;
-    *h = c->y1 - c->y0;
-    *mask = c->mask;
-    return 1;
-}
-
-void
-gfx_user_to_pixels_matrix(const gfx_t *g, gfx_matrix_t *m)
-{
-    if (g && g->gs)
-        u2p(g->gs, m);
-    else
-        gfx_matrix_init_identity(m);
-}

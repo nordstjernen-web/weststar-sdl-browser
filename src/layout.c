@@ -5509,8 +5509,7 @@ make_pango_layout(const ns_style *parent_style)
 {
     static NsPangoContext *cached_ctx;
     if (!cached_ctx) {
-        NsPangoFontMap *fm = ns_pango_cairo_font_map_get_default();
-        cached_ctx = ns_pango_font_map_create_context(fm);
+        cached_ctx = ns_pango_gfx_create_context(NULL);
     }
     NsPangoLayout *layout = ns_pango_layout_new(cached_ctx);
     ns_paint_apply_inline_font(layout, parent_style);

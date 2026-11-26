@@ -1,4 +1,4 @@
-/* Weststar SDL Browser — SVG rendering onto Cairo, sharing the CSS cascade with HTML.
+/* Weststar SDL Browser — SVG rendering with gfx, sharing the CSS cascade with HTML.
  * Paths, shapes, text, gradients, markers, clip-path and masks; also rasterizes SVG image bytes.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -9,7 +9,6 @@
 #include <math.h>
 #include <string.h>
 
-#include "gfx-cairo.h"
 #include "ns_pango.h"
 
 #include "css.h"
@@ -1644,18 +1643,9 @@ svg_render_text(svg_ctx *ctx, const ns_node *n, const svg_state *st)
     x += svg_attr_length(n, "dx", ctx->vw, st->font_size, 0);
     y += svg_attr_length(n, "dy", ctx->vh, st->font_size, 0);
 
-    /* Text is laid out and outlined by pangocairo, against a scratch Cairo
-     * context with gfx's matrix; the outline joins gfx's path. */
+    /* Text is laid out for gfx's matrix and its outline joins gfx's path. */
     gfx_t *cr = ctx->cr;
-    cairo_surface_t *scratch = cairo_image_surface_create(CAIRO_FORMAT_A8, 1, 1);
-    cairo_t *tcr = cairo_create(scratch);
-    cairo_surface_destroy(scratch);
-    gfx_matrix_t gm;
-    gfx_get_matrix(cr, &gm);
-    cairo_matrix_t cm;
-    cairo_matrix_init(&cm, gm.xx, gm.yx, gm.xy, gm.yy, gm.x0, gm.y0);
-    cairo_set_matrix(tcr, &cm);
-    NsPangoLayout *layout = ns_pango_cairo_create_layout(tcr);
+    NsPangoLayout *layout = ns_pango_gfx_create_layout(cr);
     NsPangoFontDescription *desc = ns_pango_font_description_new();
     char *fam = st->font_family
         ? ns_css_font_family_for_pango(st->font_family) : NULL;
@@ -1677,13 +1667,9 @@ svg_render_text(svg_ctx *ctx, const ns_node *n, const svg_state *st)
     else if (st->text_anchor == 2) x -= wpx;
     int baseline = ns_pango_layout_get_baseline(layout) / NS_PANGO_SCALE;
 
-    cairo_move_to(tcr, x, y - baseline);
-    ns_pango_cairo_layout_path(tcr, layout);
+    gfx_move_to(cr, x, y - baseline);
+    ns_pango_gfx_layout_path(cr, layout);
     g_object_unref(layout);
-    cairo_path_t *outline = cairo_copy_path(tcr);
-    gfx_append_cairo_path(cr, outline);
-    cairo_path_destroy(outline);
-    cairo_destroy(tcr);
     if (svg_hit_current_path(ctx, n, st)) return;
     svg_paint_current_path(ctx, st);
 }

@@ -1,5 +1,5 @@
 # web-text-lib — the browser's text layout library, a Pango fork built in-tree.
-# Public surface: `web_text_dep`, `web_text_cairo_dep`, `web_text_fc_dep`.
+# Public surface: `web_text_dep`, `web_text_gfx_dep`, `web_text_fc_dep`.
 
 wtl_version = '1.58.2'.split('.')
 wtl_major_version = wtl_version[0].to_int()
@@ -69,26 +69,10 @@ wtl_conf.set('HAVE_FC_CONFIG_SET_DEFAULT_SUBSTITUTE',
                              dependencies: wtl_fontconfig_dep,
                              prefix: '#include <fontconfig/fontconfig.h>'))
 
-wtl_deps += dependency(['freetype2', 'freetype'])
+wtl_freetype_dep = dependency(['freetype2', 'freetype'])
+wtl_deps += wtl_freetype_dep
 wtl_conf.set('HAVE_FREETYPE', 1)
-
-wtl_cairo_dep = cairo
-wtl_cairo_ft_dep = dependency('cairo-ft', version: ns_floors['cairo'])
-if not cc.links('''
-#include <cairo-ft.h>
-int main() {
-  FcPattern *p = NULL;
-  cairo_ft_font_face_create_for_pattern (p);
-  return 0;
-}''',
-                dependencies: wtl_cairo_ft_dep,
-                name: 'Cairo is built with FreeType and FontConfig support')
-  error('web-text-lib needs cairo built with FreeType and FontConfig support')
-endif
-wtl_conf.set('HAVE_CAIRO_FREETYPE', 1)
-wtl_conf.set('HAVE_CAIRO', 1)
 wtl_conf.set('HAVE_SYSPROF', false)
-wtl_deps += wtl_cairo_dep
 
 configure_file(output: 'config.h', configuration: wtl_conf)
 
@@ -170,22 +154,25 @@ web_text_fc_dep = declare_dependency(
   dependencies: wtl_deps + web_text_dep,
 )
 
-wtl_cairo_lib = static_library('web-text-lib-cairo',
+# The backend drawing text with gfx, the browser's rasterizer: glyphs are
+# rasterized with FreeType. It is the browser's own code, so it is built
+# with the project's warning flags rather than the fork's.
+wtl_gfx_lib = static_library('web-text-lib-gfx',
   files(
-    'pangocairo-context.c',
-    'pangocairo-font.c',
-    'pangocairo-fontmap.c',
-    'pangocairo-render.c',
-    'pangocairo-fcfont.c',
-    'pangocairo-fcfontmap.c',
+    'pangogfx-fontmap.c',
+    'pangogfx-font.c',
+    'pangogfx-render.c',
   ),
-  dependencies: wtl_deps + [web_text_dep, web_text_fc_dep],
+  dependencies: wtl_deps + [web_text_dep, web_text_fc_dep, weststar_gfx_dep],
   include_directories: wtl_inc,
-  c_args: wtl_lib_cflags + '-DNS_PANGO_DISABLE_DEPRECATION_WARNINGS',
-  override_options: wtl_override_options,
+  c_args: [
+    '-DG_LOG_DOMAIN="WebTextLib"',
+    '-DNS_PANGO_COMPILATION',
+    '-DNS_PANGO_DISABLE_DEPRECATION_WARNINGS',
+  ] + cc.get_supported_arguments(host_system == 'windows' ? ['-mms-bitfields'] : []),
 )
-web_text_cairo_dep = declare_dependency(
-  link_with: wtl_cairo_lib,
+web_text_gfx_dep = declare_dependency(
+  link_with: wtl_gfx_lib,
   include_directories: wtl_root_inc,
-  dependencies: wtl_deps + web_text_dep,
+  dependencies: wtl_deps + [web_text_dep, web_text_fc_dep, weststar_gfx_dep],
 )

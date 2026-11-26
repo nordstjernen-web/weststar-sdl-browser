@@ -311,9 +311,10 @@ Licensed under the zlib License. See the zlib section above for the
 full text (same license). Always linked; the meson `audio` feature only
 decides whether audio playback is built.
 
-### Cairo — LGPL-2.1 or MPL-1.1
+### Cairo — LGPL-2.1 or MPL-1.1 (tests only, not in the browser)
 
-> 2D drawing.
+> 2D drawing; used only as the reference the gfx test and benchmark
+> compare against. The browser does not link it.
 > <https://www.cairographics.org>
 >
 > Copyright Carl Worth, Behdad Esfahbod, and the Cairo contributors.

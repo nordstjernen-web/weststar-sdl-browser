@@ -7,7 +7,7 @@
 #ifndef NS_PANGO_H
 #define NS_PANGO_H
 
-#include <web-text-lib/pangocairo.h>
+#include <web-text-lib/pangogfx.h>
 #include <web-text-lib/pangofc-fontmap.h>
 
 #endif

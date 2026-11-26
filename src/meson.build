@@ -186,9 +186,8 @@ northstar_deps = [
   glib,
   gobject,
   gio,
-  cairo,
   pango,
-  pangocairo,
+  pangogfx,
   libpangoft2,
   libcurl,
   libcrypto,
@@ -257,5 +256,4 @@ else
   message('in-process audio playback disabled (-Daudio=disabled)')
 endif
 
-subdir('gfx')
 subdir('sdl')

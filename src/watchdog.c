@@ -190,9 +190,7 @@ ns_watchdog_report_failure(const char *detail)
     const char *log = ns_debug_log_file_path();
     char *body = g_strdup_printf(
         "Weststar SDL Browser could not start.\n\n%s\n\n"
-        "A diagnostic log was written to:\n%s\n\n"
-        "If this persists, try launching with the cairo renderer by setting "
-        "the environment variable NS_GSK_RENDERER=cairo before starting.",
+        "A diagnostic log was written to:\n%s",
         detail ? detail : "The browser process exited before opening a window.",
         log ? log : "(log file unavailable)");
     wchar_t *wbody = (wchar_t *)g_utf8_to_utf16(body, -1, NULL, NULL, NULL);

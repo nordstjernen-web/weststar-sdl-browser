@@ -266,7 +266,7 @@ rdrv_follow_nav(ns_page_session *s, char *href, int vw, int vh, int settle_ms,
     return NULL;
 }
 
-/* Cairo PNG write callback appending bytes to a GByteArray. */
+/* gfx PNG write callback appending bytes to a GByteArray. */
 static gfx_status_t
 rdrv_png_sink(void *closure, const unsigned char *data, unsigned int length)
 {

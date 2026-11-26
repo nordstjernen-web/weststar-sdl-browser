@@ -28,30 +28,37 @@ So the shell goes first, and Cairo after it:
    `REQ_CLICK`, `REQ_KEY`, `REQ_SCROLL`, …) and uploads each frame, or its
    damaged rectangles, into an `SDL_Texture`. The window chrome is built
    with Nuklear (see below). The build no longer depends on GTK.
-4. **Replace Cairo.** An in-tree 2D rasterizer (`src/gfx/`) implements
-   the subset of the Cairo API the engine uses — paths, fills with both
-   fill rules, strokes with joins, caps and dashes, clipping, transforms,
-   linear, radial and mesh gradients, surface patterns with filters and
-   extend modes, the Porter-Duff and blend operators, groups and masks —
-   drawing into premultiplied ARGB32 pixel buffers that are wrapped as
-   `SDL_Surface`s. Glyphs are rasterized with FreeType. Once every call
-   site compiles against `src/gfx/`, the Cairo dependency is dropped.
-   PDF export (`--export=pdf:`) and the dormant print path drew through
-   Cairo's PDF and recording surfaces; they are removed for now, to come
-   back in a form that does not need Cairo.
-   **In progress:** the rasterizer is written and tested against Cairo;
-   the chrome, the SVG renderer (`svg.c`), the MathML renderer
-   (`mathml.c`) and canvas 2D (`js_canvas.c`) draw with it (see below).
+4. **Replace Cairo.** Done. An in-tree 2D rasterizer (`src/gfx/`)
+   implements the subset of the Cairo API the engine uses — paths, fills
+   with both fill rules, strokes with joins, caps and dashes, clipping,
+   transforms, linear, radial and mesh gradients, surface patterns with
+   filters and extend modes, the Porter-Duff and blend operators, groups,
+   masks and damage regions — drawing into premultiplied ARGB32 pixel
+   buffers that upload to SDL textures as they are. Text is laid out by
+   web-text-lib (the engine's Pango fork) and its glyphs are rasterized
+   with FreeType into gfx. The browser no longer links Cairo; it is an
+   optional build dependency, used only by the gfx test and benchmark as
+   the reference. PDF export (`--export=pdf:`) and the dormant print path
+   drew through Cairo's PDF and recording surfaces; they are removed for
+   now, to come back in a form that does not need Cairo.
+5. **Composite with SDL textures.** Next. Today the engine paints each
+   frame (or its damaged rectangles) on the CPU and the shell uploads it
+   to one texture. Content that moves without changing — the page while
+   it scrolls, `position: fixed` and `sticky` boxes, elements animating
+   only `transform` or `opacity`, canvases and animated images — can
+   instead be painted once into its own texture and moved or faded by
+   SDL's renderer on the GPU each frame. That needs a layer tree from the
+   engine (which boxes get their own layer, and their transforms and
+   opacities), handed to the shell with each frame.
 
 ## The rasterizer: gfx
 
 `src/gfx/` is Cairo's API under a `gfx_` prefix (`gfx_t`,
 `gfx_surface_t`, `gfx_pattern_t`, `GFX_OPERATOR_OVER`, …) with Cairo's
-semantics, so moving a call site is a rename. It has its own prefix,
-rather than reusing Cairo's names, because Cairo stays linked while the
-call sites move over: web-text-lib renders glyphs through pangocairo
-until it gets a FreeType glyph path. With distinct names the two can
-live in one binary, and the test can draw every scene with both.
+semantics, so each call site moved by renaming its calls. It kept its own
+prefix, rather than reusing Cairo's names, so that both could live in one
+binary while the engine moved over file by file (through a bridge between
+the two, now gone), and so that the test can draw every scene with both.
 
 - **Pixels** are Cairo's: native-endian premultiplied ARGB32, RGB24 and
   A8, so a gfx surface and a Cairo surface can share one buffer, and an
@@ -80,6 +87,8 @@ live in one binary, and the test can draw every scene with both.
   and blend modes, with Cairo's coverage rules for bounded and unbounded
   operators. Clips are a pixel box, or a box and an 8-bit mask.
 - **Groups** draw into an ARGB32 surface the size of the current clip.
+- **Regions** (`gfx-region.c`): sets of pixels as non-overlapping
+  rectangles, for the page session's damage tracking.
 
 `meson test -C builddir --suite gfx` draws sixteen scenes with gfx and
 with Cairo and compares the pixels, and compares `in_fill`, `in_stroke`,
@@ -97,44 +106,43 @@ tangent.
 **Speed.** `meson test -C builddir --benchmark --verbose` (or
 `builddir/src/gfx/gfx-bench`) times twelve page-like workloads with gfx
 and with Cairo. On Windows (Ryzen 5 9600X, `-O3`, Cairo 1.18.6 with
-pixman's SIMD) gfx is at Cairo's speed for solid and pixel-aligned fills,
-thin lines and circles, about 2x slower for rounded boxes, gradients and
-rounded clips, 5 to 6x for translucent overlays and opacity groups, and
-9 to 13x for images drawn 1:1 or scaled; 2.1x over all. gfx has no SIMD
-yet: images and blending are where it would pay.
+pixman's SIMD), after the first optimisation pass and SSE2 for blending
+and bilinear sampling, gfx is 1.6x Cairo's time over all:
 
-Not in gfx: regions (`cairo_region_t`, used by the page session's damage
-tracking), text (`cairo_show_text`, `cairo_text_extents`), vector output
-(PDF), and curved mesh patch sides.
+| Workload | gfx / Cairo |
+|----------|-------------|
+| Solid page fills, aligned rectangles, thin lines, circles | 0.8–1.2x |
+| Translucent overlays, shrunk images | 1.4x |
+| Gradients, rounded boxes, opacity groups | 1.8–2.1x |
+| Rounded clips | 2.8x |
+| Scaled images | 3.9x |
+| Images drawn 1:1 | 6.1x |
 
-**The Cairo bridge** (`gfx-cairo.h`) lets the engine move one file at a
-time, both ways:
+What is left is per-pixel work that pixman does with wider SIMD:
+blending images whose alpha varies, mask clips, and gradient colour
+lookup.
 
-- `gfx_cairo_begin()` hands out a `cairo_t` drawing into a gfx context's
-  current target with its matrix, clip (a mask clip is applied exactly,
-  through a group) and solid source, for code on gfx that calls what is
-  still Cairo: glyphs, through pangocairo, in the chrome and in MathML.
-  SVG text, canvas `strokeText` and canvas `fillText` with a gradient or
-  pattern are outlined by pangocairo on a scratch context and the outline
-  appended to the gfx path (`gfx_append_cairo_path()`); canvas `fillText`
-  with a colour draws glyphs through `gfx_cairo_begin()`.
-- `gfx_from_cairo_begin()` hands out a `gfx_t` drawing into a `cairo_t`'s
-  target, for Cairo code that calls what is now gfx: `paint.c` calls the
-  SVG and MathML renderers this way. An image target is drawn into
-  directly, with the clip as rectangles where Cairo can list it so and
-  through a Cairo group where not; a vector target gets an image at twice
-  its resolution.
+Not in gfx: vector output (PDF) and curved mesh patch sides.
 
-The bridge goes away with the Cairo dependency.
+## Text: pangogfx
 
-**Order of the remaining work.** The engine paints into one context per
-frame (`page_session.c`), so it moves as a whole, but through the bridge
-it can move file by file: `svg.c`, `mathml.c` and `js_canvas.c` (done;
-canvas surfaces are gfx surfaces, which `paint.c` reads through
-`gfx_cairo_surface_wrap()` without a copy), then `paint.c`, then the page
-session and its damage regions (a small region type in gfx). Glyphs come
-last: web-text-lib's `pangocairo-*` files are replaced by a renderer that
-rasterizes FreeType outlines into gfx, and then Cairo is dropped.
+web-text-lib drew glyphs through its Cairo backend (`pangocairo-*`).
+`pangogfx-*` replaces it: a fontconfig font map and font (subclasses of
+web-text-lib's `NsPangoFcFontMap` and `NsPangoFcFont`) and a renderer.
+
+- **Metrics** are hinted as cairo's image targets had them, from
+  HarfBuzz and FreeType's grid-fitted values, so layout did not change:
+  the 51 render tests keep their sizes and line breaks.
+- **Glyphs** are rasterized with FreeType at the device pixel size when
+  the matrix is a translation and a uniform scale, at quarter-pixel
+  positions, and cached per font (bounded); otherwise, for rotated or
+  skewed text, the outlines are filled. Colour glyphs (emoji) are drawn
+  as images. Glyphs are composited as masks, so any source and operator
+  apply: canvas text with a gradient fill draws like any other.
+- **Outlines** (`ns_pango_gfx_layout_path()`) feed SVG text and canvas
+  `strokeText`.
+- Grayscale antialiasing is the only mode; fontconfig's hinting settings
+  are honoured as cairo-ft honoured them.
 
 ## The chrome: Nuklear
 
@@ -161,8 +169,7 @@ through an `nk_user_font` that measures and draws with web-text-lib (the
 engine's Pango fork), so the chrome gets HarfBuzz shaping and fontconfig
 fallback; kerning is off in the chrome because Nuklear places the caret
 by adding up the widths of single characters. The chrome was the first
-code moved to gfx; its text and icons reach Cairo through the bridge
-until web-text-lib and the SVG renderer move too.
+code moved to gfx.
 
 Nuklear only reports a click when the button is still down at the end of
 a frame, so the window ends the frame early when a release follows a

@@ -35,7 +35,6 @@
 
 #include <libpsl.h>
 #include <sqlite3.h>
-#include <cairo.h>
 #include "ns_pango.h"
 #include <openssl/crypto.h>
 #include <openssl/opensslv.h>
@@ -3290,7 +3289,6 @@ about_diagnostics_html(void)
     diag_kv(s, "GLib", glibv);
     g_free(glibv);
     diag_kv(s, "Pango", ns_pango_version_string());
-    diag_kv(s, "Cairo", cairo_version_string());
     diag_kv(s, "SQLite", sqlite3_libversion());
     diag_kv(s, "TLS / crypto", OpenSSL_version(OPENSSL_VERSION));
     diag_kv(s, "Networking", curl_version());

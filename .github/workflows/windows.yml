@@ -178,6 +178,8 @@ jobs:
             while read -r dll; do cp "$dll" bundle/; done
           cp -r /ucrt64/etc/fonts bundle/etc/
           ls bundle
+          # Cairo is installed for the gfx test only; the browser must not link it.
+          ! ls bundle | grep -i -E 'cairo|pixman'
 
       # Run as an installed copy runs, with only the Windows system folders
       # on PATH, to catch a DLL the bundle left out.

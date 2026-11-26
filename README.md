@@ -5,8 +5,9 @@
 
 Weststar SDL Browser is a fork of the
 [Northstar Web Browser](https://github.com/nordstjernen-web/northstar-web-browser)
-in which the GTK 4 user interface and the Cairo 2D renderer are being
-replaced by [SDL3](https://libsdl.org). The page engine is Northstar's
+in which the GTK 4 user interface and the Cairo 2D renderer have been
+replaced: the window is [SDL3](https://libsdl.org), and pages, chrome and
+text are drawn by Weststar's own rasterizer. The page engine is Northstar's
 hand-written C engine: lexbor for HTML parsing, its own CSS cascade and
 layout, QuickJS-ng for JavaScript, libcurl for the network. It runs on
 Linux and Windows.
@@ -26,19 +27,19 @@ runs on Linux and Windows:
 | 1 | Import Northstar without history, rebrand | done |
 | 2 | Remove WebGL, WebGPU and `<video>` | done |
 | 3 | Replace the GTK shell with an SDL3 shell, chrome drawn with Nuklear | done |
-| 4 | Replace Cairo with an in-tree rasterizer drawing into SDL surfaces | in progress: `src/gfx/` draws the chrome, SVG, MathML and canvas 2D; the page painter and glyphs are next |
+| 4 | Replace Cairo with an in-tree rasterizer drawing into SDL surfaces | done: the browser no longer links Cairo |
 
 See [docs/porting-to-sdl.md](docs/porting-to-sdl.md) for the plan, what
 has been removed and why, and what is left.
 
 `src/gfx/` is Weststar's own 2D rasterizer: Cairo's API under a `gfx_`
-prefix, with Cairo's pixel formats, so each part of the engine moves over
-by renaming its calls. Until the move is complete, Cairo stays linked and a
-small bridge lets code on either side call the other. Two checks guard the
-move, both run by CI on Linux and Windows: `meson test -C builddir --suite
-gfx` draws a set of scenes with gfx and with Cairo and compares the
-pixels, and `data/fixtures/canvas-2d.html` is a page of canvas 2D checks
-that each print PASS or FAIL.
+prefix, with Cairo's pixel formats, which an SDL texture takes as they
+are. Text is laid out by web-text-lib (a Pango fork) and its glyphs are
+rasterized with FreeType into gfx (`src/web-text-lib/pangogfx-*`). Cairo
+is needed only to build the gfx test, which draws a set of scenes with gfx
+and with Cairo and compares the pixels (`meson test -C builddir --suite
+gfx`); `data/fixtures/canvas-2d.html` is a page of canvas 2D checks that
+each print PASS or FAIL. CI runs both on Linux and Windows.
 
 What is deliberately **not** in Weststar for now:
 
@@ -46,8 +47,8 @@ What is deliberately **not** in Weststar for now:
 - **`<video>`**, Media Source Extensions and camera capture. A `<video>`
   shows a dark box with its controls; `<audio>` still plays through SDL3's
   audio device.
-- **Printing and PDF export** (`--export=pdf:`), removed for now while
-  Cairo is replaced; they will come back without it.
+- **Printing and PDF export** (`--export=pdf:`), removed with Cairo; they
+  will come back without it.
 - Parts of Northstar's GTK chrome not ported yet: the developer-tools
   window, address-bar suggestions and the downloads list (downloads
   report in the status bubble).
@@ -59,7 +60,7 @@ Weststar builds with meson and ninja. On Debian/Ubuntu:
 ```sh
 sudo apt install build-essential pkg-config meson ninja-build \
     libsdl3-dev libcurl4-openssl-dev libssl-dev libharfbuzz-dev \
-    libfribidi-dev libcairo2-dev libfontconfig-dev libfreetype-dev \
+    libfribidi-dev libfontconfig-dev libfreetype-dev \
     libpsl-dev libsqlite3-dev libseccomp-dev libglib2.0-dev zlib1g-dev
 meson setup builddir
 meson compile -C builddir

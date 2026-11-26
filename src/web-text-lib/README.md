@@ -13,10 +13,10 @@ engine calls and Sol does not restored from upstream:
 The top-level `meson.build` loads this directory with
 `subdir('src/web-text-lib')`. It builds static libraries and exposes three
 dependencies: `web_text_dep` (the core layout library),
-`web_text_cairo_dep` (cairo rendering) and `web_text_fc_dep`
-(fontconfig/FreeType fonts). No clone or network access is needed, so
+`web_text_gfx_dep` (rendering into Weststar's rasterizer, `src/gfx/`)
+and `web_text_fc_dep` (fontconfig/FreeType fonts). No clone or network access is needed, so
 offline and distro builds get it straight from the source tarball. It
-needs GLib >= 2.80, cairo >= 1.18 with FreeType and fontconfig,
+needs GLib >= 2.80, FreeType, fontconfig,
 HarfBuzz >= 8.3, FriBiDi >= 1.0.6 and fontconfig >= 2.15. The sources sit
 directly in `src/web-text-lib/` and are included as `<web-text-lib/...>`;
 the engine reaches them only through `src/ns_pango.h`. The modifications
@@ -121,7 +121,10 @@ throughput with the cache serving scales 3.2x where it scaled 2.4x.
 Win32/DirectWrite, CoreText, the deprecated `pango_ot_*` API, layout
 serialization, FT2 rendering and its fontmap, the test suite, examples,
 utilities, documentation and GObject-introspection. What remains is the
-core text layer with the cairo and fontconfig/FreeType backends.
+core text layer with the fontconfig/FreeType backend. Weststar replaced
+the cairo backend (`pangocairo-*`) with `pangogfx-*`, which rasterizes
+glyphs with FreeType into gfx and keeps pangocairo's hinted metrics, so
+layout is unchanged.
 
 `BROWSER-COMPARISON.md` sets all of this against the equivalent code in Firefox
 and Chrome — what each caches and how it bounds it, where the performance comes
