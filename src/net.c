@@ -4623,7 +4623,7 @@ static const char k_about_start_template[] =
     "<style>\n" NS_ABOUT_BASE_CSS
     ".wrap { max-width: 720px; padding-top:34px; text-align:center; }\n"
     ".mark-img { display:block; width:96px; height:96px;"
-    " margin:0 auto 12px; border-radius:20px; object-fit:cover; }\n"
+    " margin:0 auto 12px; image-rendering:pixelated; }\n"
     ".title { font-size:1.5em; font-weight:600; line-height:1.2;"
     " margin:0 0 18px; }\n"
     ".search { display:flex; gap:10px; margin:0 0 18px; }\n"
@@ -4678,8 +4678,8 @@ static const char k_about_northstar_template[] =
     "<style>\n" NS_ABOUT_BASE_CSS
     ".wrap { max-width: 600px; }\n"
     ".head { text-align:center; }\n"
-    ".mark-img { display:block; width:104px; height:104px;"
-    " margin:0 auto 16px; border-radius:22px; object-fit:cover; }\n"
+    ".mark-img { display:block; width:96px; height:96px;"
+    " margin:0 auto 16px; image-rendering:pixelated; }\n"
     "h1 { font-size:1.7em; font-weight:600; line-height:1.15; margin:0; }\n"
     ".ver { color:var(--faint); font-size:0.92em; margin:6px 0 18px; }\n"
     ".head p { color:var(--muted); line-height:1.55; margin:0 0 10px; }\n"
@@ -4706,7 +4706,7 @@ static const char k_about_northstar_template[] =
     ".dv.on { color:var(--ok); font-family:inherit; }\n"
     ".dv.off { color:var(--off); font-family:inherit; }\n"
     "@media (max-width:560px) {"
-    " .mark-img { width:84px; height:84px; }"
+    " .mark-img { width:72px; height:72px; }"
     " h1 { font-size:1.42em; }"
     " .drow { font-size:0.8em; } }\n"
     "</style></head>"
