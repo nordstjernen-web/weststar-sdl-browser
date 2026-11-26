@@ -13,6 +13,11 @@
 #include <math.h>
 #include <string.h>
 
+#if defined(__SSE2__)
+#include <emmintrin.h>
+#define GFX_SSE2 1
+#endif
+
 int
 gfx_operator_bounded(gfx_operator_t op)
 {
@@ -280,6 +285,104 @@ add8(uint32_t s, uint32_t d)
     return add4(s, d);
 }
 
+#ifdef GFX_SSE2
+/* Four pixels at a time: 8-bit channels widened to 16-bit lanes. */
+
+/* x / 255 rounded, for x <= 255 * 255, per 16-bit lane. */
+static inline __m128i
+div255_16(__m128i x)
+{
+    x = _mm_add_epi16(x, _mm_set1_epi16(128));
+    return _mm_mulhi_epu16(x, _mm_set1_epi16(257));
+}
+
+/* Each widened pixel's alpha in all four of its lanes. */
+static inline __m128i
+alpha16(__m128i p)
+{
+    p = _mm_shufflelo_epi16(p, _MM_SHUFFLE(3, 3, 3, 3));
+    return _mm_shufflehi_epi16(p, _MM_SHUFFLE(3, 3, 3, 3));
+}
+
+static inline __m128i
+over_4(__m128i s, __m128i d)
+{
+    const __m128i z = _mm_setzero_si128(), ff = _mm_set1_epi16(255);
+    __m128i slo = _mm_unpacklo_epi8(s, z), shi = _mm_unpackhi_epi8(s, z);
+    __m128i dlo = _mm_unpacklo_epi8(d, z), dhi = _mm_unpackhi_epi8(d, z);
+    dlo = div255_16(_mm_mullo_epi16(dlo, _mm_sub_epi16(ff, alpha16(slo))));
+    dhi = div255_16(_mm_mullo_epi16(dhi, _mm_sub_epi16(ff, alpha16(shi))));
+    return _mm_packus_epi16(_mm_add_epi16(slo, dlo), _mm_add_epi16(shi, dhi));
+}
+
+/* Four pixels scaled by their four coverage bytes. */
+static inline __m128i
+scale_4(__m128i s, const uint8_t *cov)
+{
+    const __m128i z = _mm_setzero_si128();
+    int32_t c4;
+    memcpy(&c4, cov, 4);
+    __m128i c16 = _mm_unpacklo_epi8(_mm_cvtsi32_si128(c4), z);
+    __m128i c32 = _mm_unpacklo_epi16(c16, c16);
+    __m128i clo = _mm_unpacklo_epi32(c32, c32), chi = _mm_unpackhi_epi32(c32, c32);
+    __m128i slo = div255_16(_mm_mullo_epi16(_mm_unpacklo_epi8(s, z), clo));
+    __m128i shi = div255_16(_mm_mullo_epi16(_mm_unpackhi_epi8(s, z), chi));
+    return _mm_packus_epi16(slo, shi);
+}
+
+/* src OVER dst for len pixels, scaled by coverage when given; returns the
+ * number of pixels done (a multiple of four). */
+static int
+over_row_sse2(uint32_t *dst, const uint32_t *src, const uint8_t *coverage,
+              int len)
+{
+    const __m128i amask = _mm_set1_epi32((int)0xff000000u);
+    const __m128i z = _mm_setzero_si128();
+    int i = 0;
+    for (; i + 4 <= len; i += 4) {
+        __m128i s = _mm_loadu_si128((const __m128i *)(const void *)(src + i));
+        if (coverage) {
+            int32_t c4;
+            memcpy(&c4, coverage + i, 4);
+            if (c4 == 0)
+                continue;
+            if (c4 != -1)
+                s = scale_4(s, coverage + i);
+        }
+        __m128i a = _mm_and_si128(s, amask);
+        if (_mm_movemask_epi8(_mm_cmpeq_epi32(a, amask)) == 0xffff) {
+            _mm_storeu_si128((__m128i *)(void *)(dst + i), s);
+            continue;
+        }
+        if (_mm_movemask_epi8(_mm_cmpeq_epi32(s, z)) == 0xffff)
+            continue;
+        __m128i d = _mm_loadu_si128((const __m128i *)(const void *)(dst + i));
+        _mm_storeu_si128((__m128i *)(void *)(dst + i), over_4(s, d));
+    }
+    return i;
+}
+
+/* A solid colour OVER dst, no coverage. */
+static int
+over_solid_sse2(uint32_t *dst, uint32_t s, int len)
+{
+    const __m128i z = _mm_setzero_si128();
+    __m128i sv = _mm_set1_epi32((int)s);
+    __m128i s16 = _mm_unpacklo_epi8(sv, z);
+    __m128i ia = _mm_sub_epi16(_mm_set1_epi16(255), alpha16(s16));
+    int i = 0;
+    for (; i + 4 <= len; i += 4) {
+        __m128i d = _mm_loadu_si128((const __m128i *)(const void *)(dst + i));
+        __m128i dlo = div255_16(_mm_mullo_epi16(_mm_unpacklo_epi8(d, z), ia));
+        __m128i dhi = div255_16(_mm_mullo_epi16(_mm_unpackhi_epi8(d, z), ia));
+        _mm_storeu_si128((__m128i *)(void *)(dst + i),
+                         _mm_packus_epi16(_mm_add_epi16(s16, dlo),
+                                          _mm_add_epi16(s16, dhi)));
+    }
+    return i;
+}
+#endif
+
 void
 gfx_composite_solid(gfx_operator_t op, gfx_format_t fmt, unsigned char *dst,
                     uint32_t s, const uint8_t *coverage, int len)
@@ -298,7 +401,11 @@ gfx_composite_solid(gfx_operator_t op, gfx_format_t fmt, unsigned char *dst,
                 return;
             if (!coverage) {
                 unsigned ia = 255 - (s >> 24);
-                for (int i = 0; i < len; i++)
+                int i = 0;
+#ifdef GFX_SSE2
+                i = over_solid_sse2(p, s, len);
+#endif
+                for (; i < len; i++)
                     p[i] = add4(s, mul4(p[i], ia));
                 return;
             }
@@ -336,7 +443,11 @@ gfx_composite_row(gfx_operator_t op, gfx_format_t fmt, unsigned char *dst,
     int bpp = fmt == GFX_FORMAT_A8 ? 1 : 4;
     if (fmt == GFX_FORMAT_ARGB32 && op == GFX_OPERATOR_OVER) {
         uint32_t *p = (uint32_t *)(void *)dst;
-        for (int i = 0; i < len; i++) {
+        int i = 0;
+#ifdef GFX_SSE2
+        i = over_row_sse2(p, src, coverage, len);
+#endif
+        for (; i < len; i++) {
             uint32_t s = src[i];
             unsigned c = coverage ? coverage[i] : 255;
             if (c == 0 || s == 0)

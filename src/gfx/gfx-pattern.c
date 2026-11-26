@@ -11,6 +11,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(__SSE2__)
+#include <emmintrin.h>
+#define GFX_SSE2 1
+#endif
+
 static gfx_pattern_t *
 pattern_new(gfx_pattern_type type)
 {
@@ -520,6 +525,57 @@ fetch_surface(const gfx_source *src, int y, int x, int len, uint32_t *out)
     double u0 = x + 0.5, v0 = y + 0.5;
     gfx_matrix_transform_point(m, &u0, &v0);
     double du = m->xx, dv = m->yx;
+    if (nx == 1 && ny == 1 && !nearest && s->format == GFX_FORMAT_ARGB32 &&
+        fabs(u0) < 1e6 && fabs(v0) < 1e6 && fabs(du) < 1e4 && fabs(dv) < 1e4) {
+        /* Bilinear in 16.16 fixed point; texels inside the image are read
+         * directly, the rest (edges, extend modes) per pixel. */
+        int64_t U = (int64_t)llround((u0 - 0.5) * 65536.0);
+        int64_t V = (int64_t)llround((v0 - 0.5) * 65536.0);
+        int64_t DU = (int64_t)llround(du * 65536.0);
+        int64_t DV = (int64_t)llround(dv * 65536.0);
+        int w1 = s->width - 1, h1 = s->height - 1;
+        for (int i = 0; i < len; i++, U += DU, V += DV) {
+            int64_t tx = U >> 16, ty = V >> 16;
+            if (tx >= 0 && ty >= 0 && tx < w1 && ty < h1) {
+                unsigned fx = (unsigned)((U >> 8) & 0xff);
+                unsigned fy = (unsigned)((V >> 8) & 0xff);
+                const uint32_t *r0 = (const uint32_t *)(const void *)
+                    (s->data + (size_t)ty * (size_t)s->stride) + tx;
+                const uint32_t *r1 = (const uint32_t *)(const void *)
+                    ((const unsigned char *)r0 + s->stride);
+#ifdef GFX_SSE2
+                const __m128i z = _mm_setzero_si128();
+                __m128i top = _mm_unpacklo_epi8(
+                    _mm_unpacklo_epi32(_mm_cvtsi32_si128((int)r0[0]),
+                                       _mm_cvtsi32_si128((int)r0[1])), z);
+                __m128i bot = _mm_unpacklo_epi8(
+                    _mm_unpacklo_epi32(_mm_cvtsi32_si128((int)r1[0]),
+                                       _mm_cvtsi32_si128((int)r1[1])), z);
+                __m128i wx = _mm_set_epi16((short)fx, (short)fx, (short)fx,
+                                           (short)fx, (short)(256 - fx),
+                                           (short)(256 - fx), (short)(256 - fx),
+                                           (short)(256 - fx));
+                top = _mm_mullo_epi16(top, wx);
+                bot = _mm_mullo_epi16(bot, wx);
+                top = _mm_srli_epi16(_mm_add_epi16(_mm_add_epi16(top, _mm_srli_si128(top, 8)),
+                                                   _mm_set1_epi16(128)), 8);
+                bot = _mm_srli_epi16(_mm_add_epi16(_mm_add_epi16(bot, _mm_srli_si128(bot, 8)),
+                                                   _mm_set1_epi16(128)), 8);
+                __m128i v = _mm_add_epi16(
+                    _mm_add_epi16(_mm_mullo_epi16(top, _mm_set1_epi16((short)(256 - fy))),
+                                  _mm_mullo_epi16(bot, _mm_set1_epi16((short)fy))),
+                    _mm_set1_epi16(128));
+                v = _mm_srli_epi16(v, 8);
+                out[i] = (uint32_t)_mm_cvtsi128_si32(_mm_packus_epi16(v, z));
+#else
+                out[i] = blend4(r0[0], r0[1], r1[0], r1[1], fx, fy);
+#endif
+            } else {
+                out[i] = sample_bilinear(s, u0 + du * i, v0 + dv * i, ext);
+            }
+        }
+        return;
+    }
     if (nx == 1 && ny == 1) {
         int argb = s->format == GFX_FORMAT_ARGB32;
         for (int i = 0; i < len; i++) {
