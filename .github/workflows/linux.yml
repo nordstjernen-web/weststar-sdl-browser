@@ -110,9 +110,11 @@ jobs:
 
       - name: GUI smoke (SDL window under Xvfb)
         run: |
-          # The browser must still be running after five seconds.
-          xvfb-run -a -s '-screen 0 1280x900x24' \
-            timeout 5 ./builddir/src/sdl/weststar --no-watchdog about:start \
-            > gui.log 2>&1 || status=$?
+          # The browser must still be running after five seconds. Its own
+          # exit status is recorded inside the Xvfb session: xvfb-run can
+          # fail on its own when cleaning up its temporary directory.
+          xvfb-run -a -s '-screen 0 1280x900x24' sh -c \
+            'timeout 5 ./builddir/src/sdl/weststar --no-watchdog about:start; echo $? > gui.status' \
+            > gui.log 2>&1 || true
           cat gui.log
-          test "${status:-0}" = 124
+          test "$(cat gui.status)" = 124
