@@ -23,9 +23,13 @@ struct gfx_surface {
     int            owns_data;
     double         dev_x, dev_y;          /* device offset */
     double         dev_sx, dev_sy;        /* device scale */
+    int            opacity;   /* 0 unknown, 1 every pixel opaque, 2 not;
+                                 reset by mark_dirty and by drawing */
 };
 
 gfx_surface_t *gfx_surface_nil(gfx_status_t status);
+/* Whether every pixel is opaque, found once and cached, as Cairo does. */
+int gfx_surface_is_opaque(gfx_surface_t *s);
 
 /* ---- a growable array -------------------------------------------------- */
 

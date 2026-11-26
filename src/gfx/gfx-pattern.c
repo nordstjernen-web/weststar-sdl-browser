@@ -390,6 +390,14 @@ gfx_source_extent(const gfx_source *src, int *x0, int *y0, int *x1, int *y1)
     if (pat->type != GFX_PATTERN_SURFACE || pat->extend != GFX_EXTEND_NONE ||
         !pat->surface)
         return 0;
+    if (src->texel_int) {
+        /* Whole-pixel offset, no filtering: the image's exact pixels. */
+        *x0 = -src->tx;
+        *y0 = -src->ty;
+        *x1 = pat->surface->width - src->tx;
+        *y1 = pat->surface->height - src->ty;
+        return 1;
+    }
     gfx_matrix_t inv = src->to_texel;
     if (gfx_matrix_invert(&inv) != GFX_STATUS_SUCCESS)
         return 0;

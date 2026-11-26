@@ -1054,6 +1054,7 @@ drawer_init(drawer *d, gfx_t *g, int width)
     d->op = g->gs->op;
     d->bounded = gfx_operator_bounded(d->op);
     d->alpha = 255;
+    d->t->opacity = 0;   /* it is about to be drawn into */
     d->clip = g->gs->clip;
     source_for(g->gs, g->gs->source, &g->gs->source_ctm, 1, &d->src);
     size_t w = (size_t)(width > 0 ? width : 1);
@@ -1132,6 +1133,22 @@ draw_span(void *closure, int y, int x, int len, const uint8_t *cov)
             for (int i = 0; i < len; i++)
                 d->clipbuf[i] = gfx_mul8(shape ? shape[i] : 255, clipm[i]);
             total = d->clipbuf;
+        }
+        /* An opaque image at whole pixels, fully covering: copy rows, as
+         * Cairo turns OVER with an opaque image into a copy. */
+        if (!total && d->t->format == GFX_FORMAT_ARGB32 &&
+            (d->op == GFX_OPERATOR_OVER || d->op == GFX_OPERATOR_SOURCE) &&
+            d->src.pat->type == GFX_PATTERN_SURFACE && d->src.texel_int &&
+            d->src.alpha >= 1 && d->src.pat->surface) {
+            gfx_surface_t *img = d->src.pat->surface;
+            int tx = x + d->src.tx, ty = y + d->src.ty;
+            if (tx >= 0 && ty >= 0 && tx + len <= img->width &&
+                ty < img->height && img != d->t &&
+                (d->op == GFX_OPERATOR_SOURCE || gfx_surface_is_opaque(img)) &&
+                (img->format == GFX_FORMAT_ARGB32 || img->format == GFX_FORMAT_RGB24)) {
+                gfx_source_fetch(&d->src, y, x, len, (uint32_t *)(void *)dst);
+                return;
+            }
         }
         if (d->src.pat->type == GFX_PATTERN_SOLID &&
             d->src.pat->status == GFX_STATUS_SUCCESS) {

@@ -170,7 +170,35 @@ gfx_surface_flush(gfx_surface_t *s)
 void
 gfx_surface_mark_dirty(gfx_surface_t *s)
 {
-    (void)s;
+    if (s && s->ref > 0)
+        s->opacity = 0;
+}
+
+int
+gfx_surface_is_opaque(gfx_surface_t *s)
+{
+    if (!s || !s->data)
+        return 0;
+    if (s->format == GFX_FORMAT_RGB24)
+        return 1;
+    if (s->format != GFX_FORMAT_ARGB32)
+        return 0;
+    if (s->opacity == 0) {
+        int opaque = 1;
+        for (int y = 0; y < s->height && opaque; y++) {
+            const uint32_t *row = (const uint32_t *)(const void *)
+                (s->data + (size_t)y * (size_t)s->stride);
+            for (int x = 0; x < s->width; x++)
+                if ((row[x] >> 24) != 0xff) {
+                    opaque = 0;
+                    break;
+                }
+        }
+        if (s->ref > 0)
+            s->opacity = opaque ? 1 : 2;
+        return opaque;
+    }
+    return s->opacity == 1;
 }
 
 void
