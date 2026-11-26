@@ -205,6 +205,19 @@ gfx_pattern_get_filter(const gfx_pattern_t *p)
     return p ? p->filter : GFX_FILTER_GOOD;
 }
 
+gfx_bool_t
+gfx_pattern_get_rgba(const gfx_pattern_t *p, double *r, double *g, double *b,
+                     double *a)
+{
+    if (!p || p->type != GFX_PATTERN_SOLID)
+        return 0;
+    if (r) *r = p->r;
+    if (g) *g = p->g;
+    if (b) *b = p->b;
+    if (a) *a = p->a;
+    return 1;
+}
+
 gfx_surface_t *
 gfx_pattern_get_surface(const gfx_pattern_t *p)
 {

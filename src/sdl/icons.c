@@ -7,7 +7,6 @@
 #include "icons.h"
 
 #include "dom.h"
-#include "gfx-cairo.h"
 #include "html.h"
 #include "svg.h"
 
@@ -65,11 +64,10 @@ ns_sdl_icon_draw(gfx_t *g, const char *name, double x, double y,
     const Icon *icon = icon_lookup(name);
     if (!icon)
         return FALSE;
-    /* The SVG renderer still draws with Cairo, into gfx's pixels. */
-    cairo_t *cr = gfx_cairo_begin(g);
-    cairo_translate(cr, x, y);
-    ns_svg_render_node(cr, icon->root, size, size, NULL, NULL);
-    gfx_cairo_end(g, cr);
+    gfx_save(g);
+    gfx_translate(g, x, y);
+    ns_svg_render_node(g, icon->root, size, size, NULL, NULL);
+    gfx_restore(g);
     return TRUE;
 }
 

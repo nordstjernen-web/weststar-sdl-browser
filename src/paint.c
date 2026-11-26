@@ -18,6 +18,7 @@ static int g_dbg_paint_x = -2, g_dbg_paint_y = -2;
 #include "dom.h"
 #include "spellcheck.h"
 #include "font.h"
+#include "gfx-cairo.h"
 #include "image.h"
 #include "mathml.h"
 #include "selection.h"
@@ -5073,7 +5074,11 @@ paint_svg(cairo_t *cr, const ns_box *b)
     double y = b->y + b->margin.top  + b->border.top  + b->padding.top;
     cairo_save(cr);
     cairo_translate(cr, x, y);
-    ns_svg_render_node(cr, b->dom, w, h, b->svg_styles, b->style);
+    /* The SVG renderer draws with gfx, into this context's target. */
+    gfx_from_cairo *bridge;
+    gfx_t *g = gfx_from_cairo_begin(cr, &bridge);
+    ns_svg_render_node(g, b->dom, w, h, b->svg_styles, b->style);
+    gfx_from_cairo_end(cr, g, bridge);
     cairo_restore(cr);
 }
 
@@ -5094,7 +5099,10 @@ paint_math(cairo_t *cr, const ns_box *b)
     }
     double ox = b->x + b->margin.left + b->border.left + b->padding.left;
     double oy = b->y + b->margin.top + b->border.top + b->padding.top;
-    ns_math_paint(cr, b->dom, ox, oy, fpx, r, g, bl, a);
+    gfx_from_cairo *bridge;
+    gfx_t *gx = gfx_from_cairo_begin(cr, &bridge);
+    ns_math_paint(gx, b->dom, ox, oy, fpx, r, g, bl, a);
+    gfx_from_cairo_end(cr, gx, bridge);
 }
 
 /* Paints an img: loaded texture, broken placeholder, or grey placeholder with alt text. */

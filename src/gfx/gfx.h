@@ -247,6 +247,9 @@ void gfx_pattern_set_extend(gfx_pattern_t *p, gfx_extend_t extend);
 gfx_extend_t gfx_pattern_get_extend(const gfx_pattern_t *p);
 void gfx_pattern_set_filter(gfx_pattern_t *p, gfx_filter_t filter);
 gfx_filter_t gfx_pattern_get_filter(const gfx_pattern_t *p);
+/* A solid pattern's colour; FALSE for other patterns. */
+gfx_bool_t gfx_pattern_get_rgba(const gfx_pattern_t *p, double *r, double *g,
+                                double *b, double *a);
 /* The surface of a surface pattern (not referenced), else NULL. */
 gfx_surface_t *gfx_pattern_get_surface(const gfx_pattern_t *p);
 

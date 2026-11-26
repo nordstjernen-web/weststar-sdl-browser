@@ -1,4 +1,4 @@
-/* Weststar SDL Browser — small MathML presentation renderer drawing with Pango and cairo.
+/* Weststar SDL Browser — small MathML presentation renderer drawing with Pango and gfx.
  * Tokens, scripts, fractions, radicals, under/over, tables and fenced rows.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -8,6 +8,7 @@
 
 #include <math.h>
 #include "ns_pango.h"
+#include "gfx-cairo.h"
 #include <string.h>
 
 #include "paint.h"
@@ -92,7 +93,7 @@ token_layout(const char *text, double fpx, gboolean italic)
 
 /* Measures a token's width, ascent and descent, drawing it at baseline by when cr is set. */
 static double
-render_token(cairo_t *cr, const char *text, double fpx, gboolean italic,
+render_token(gfx_t *cr, const char *text, double fpx, gboolean italic,
              double x, double by, double *asc, double *desc)
 {
     NsPangoLayout *l = token_layout(text, fpx, italic);
@@ -106,19 +107,22 @@ render_token(cairo_t *cr, const char *text, double fpx, gboolean italic,
     if (asc) *asc = a;
     if (desc) *desc = dsc;
     if (cr && text && *text) {
-        cairo_move_to(cr, x, by - a);
-        ns_pango_cairo_show_layout(cr, l);
+        /* Glyphs still go through pangocairo, into gfx's pixels. */
+        cairo_t *tcr = gfx_cairo_begin(cr);
+        cairo_move_to(tcr, x, by - a);
+        ns_pango_cairo_show_layout(tcr, l);
+        gfx_cairo_end(cr, tcr);
     }
     g_object_unref(l);
     return w;
 }
 
-static double mrender(cairo_t *cr, const ns_node *n, double fpx, int depth,
+static double mrender(gfx_t *cr, const ns_node *n, double fpx, int depth,
                       double x, double by, double *asc, double *desc);
 
 /* Lays out children left to right (skipping annotations); returns width and max extents. */
 static double
-render_seq(cairo_t *cr, const ns_node *parent, double fpx, int depth,
+render_seq(gfx_t *cr, const ns_node *parent, double fpx, int depth,
            double x, double by, double *asc, double *desc)
 {
     double cx = x, maxa = 0, maxd = 0;
@@ -154,7 +158,7 @@ mo_spacing(const char *t, double fpx)
 
 /* Renders <msup>/<msub>: base plus a 72%-size script raised or lowered. */
 static double
-render_msup_msub(cairo_t *cr, const ns_node *n, double fpx, int depth,
+render_msup_msub(gfx_t *cr, const ns_node *n, double fpx, int depth,
                  double x, double by, double *asc, double *desc, gboolean sup)
 {
     const ns_node *args[2];
@@ -183,7 +187,7 @@ render_msup_msub(cairo_t *cr, const ns_node *n, double fpx, int depth,
 
 /* Renders <msubsup> with stacked subscript and superscript after the base. */
 static double
-render_msubsup(cairo_t *cr, const ns_node *n, double fpx, int depth,
+render_msubsup(gfx_t *cr, const ns_node *n, double fpx, int depth,
                double x, double by, double *asc, double *desc)
 {
     const ns_node *args[3];
@@ -208,7 +212,7 @@ render_msubsup(cairo_t *cr, const ns_node *n, double fpx, int depth,
 
 /* Renders <mfrac>: centered numerator and denominator around a rule on the math axis. */
 static double
-render_mfrac(cairo_t *cr, const ns_node *n, double fpx, int depth,
+render_mfrac(gfx_t *cr, const ns_node *n, double fpx, int depth,
              double x, double by, double *asc, double *desc)
 {
     const ns_node *args[2];
@@ -228,12 +232,12 @@ render_mfrac(cairo_t *cr, const ns_node *n, double fpx, int depth,
         double dx = x + (width - dw) / 2;
         mrender(cr, args[0], fpx, depth + 1, nx, bar_y - gap - nd, NULL, NULL);
         mrender(cr, args[1], fpx, depth + 1, dx, bar_y + gap + da, NULL, NULL);
-        cairo_save(cr);
-        cairo_set_line_width(cr, rule);
-        cairo_move_to(cr, x + pad * 0.5, bar_y);
-        cairo_line_to(cr, x + width - pad * 0.5, bar_y);
-        cairo_stroke(cr);
-        cairo_restore(cr);
+        gfx_save(cr);
+        gfx_set_line_width(cr, rule);
+        gfx_move_to(cr, x + pad * 0.5, bar_y);
+        gfx_line_to(cr, x + width - pad * 0.5, bar_y);
+        gfx_stroke(cr);
+        gfx_restore(cr);
     }
     if (asc) *asc = axis + gap + na + nd;
     double low = -axis + gap + da + dd;
@@ -243,7 +247,7 @@ render_mfrac(cairo_t *cr, const ns_node *n, double fpx, int depth,
 
 /* Draws a radical sign over a radicand of the given size; returns total width. */
 static double
-render_radical(cairo_t *cr, double fpx, double rw, double ra, double rd,
+render_radical(gfx_t *cr, double fpx, double rw, double ra, double rd,
                double x, double by, double *out_left)
 {
     double surd = fpx * 0.6;
@@ -252,14 +256,14 @@ render_radical(cairo_t *cr, double fpx, double rw, double ra, double rd,
     if (cr) {
         double top = by - ra - top_gap;
         double bot = by + rd;
-        cairo_save(cr);
-        cairo_set_line_width(cr, MAX(1.0, fpx * 0.05));
-        cairo_move_to(cr, x, by - ra * 0.35);
-        cairo_line_to(cr, x + surd * 0.45, bot);
-        cairo_line_to(cr, x + surd * 0.85, top);
-        cairo_line_to(cr, x + surd + rw + pad, top);
-        cairo_stroke(cr);
-        cairo_restore(cr);
+        gfx_save(cr);
+        gfx_set_line_width(cr, MAX(1.0, fpx * 0.05));
+        gfx_move_to(cr, x, by - ra * 0.35);
+        gfx_line_to(cr, x + surd * 0.45, bot);
+        gfx_line_to(cr, x + surd * 0.85, top);
+        gfx_line_to(cr, x + surd + rw + pad, top);
+        gfx_stroke(cr);
+        gfx_restore(cr);
     }
     if (out_left) *out_left = surd;
     return surd + rw + pad + top_gap;
@@ -267,7 +271,7 @@ render_radical(cairo_t *cr, double fpx, double rw, double ra, double rd,
 
 /* Renders <msqrt> as a radical over the children laid out in sequence. */
 static double
-render_msqrt(cairo_t *cr, const ns_node *n, double fpx, int depth,
+render_msqrt(gfx_t *cr, const ns_node *n, double fpx, int depth,
              double x, double by, double *asc, double *desc)
 {
     double ra = 0, rd = 0;
@@ -282,7 +286,7 @@ render_msqrt(cairo_t *cr, const ns_node *n, double fpx, int depth,
 
 /* Renders <mroot> with a small index tucked before the radical. */
 static double
-render_mroot(cairo_t *cr, const ns_node *n, double fpx, int depth,
+render_mroot(gfx_t *cr, const ns_node *n, double fpx, int depth,
              double x, double by, double *asc, double *desc)
 {
     const ns_node *args[2];
@@ -307,7 +311,7 @@ render_mroot(cairo_t *cr, const ns_node *n, double fpx, int depth,
 
 /* Renders <mover>/<munder>/<munderover> with centered scripts above and below. */
 static double
-render_under_over(cairo_t *cr, const ns_node *n, double fpx, int depth,
+render_under_over(gfx_t *cr, const ns_node *n, double fpx, int depth,
                   double x, double by, double *asc, double *desc,
                   gboolean over, gboolean under)
 {
@@ -351,7 +355,7 @@ render_under_over(cairo_t *cr, const ns_node *n, double fpx, int depth,
 
 /* Renders <mtable> as a grid of centered cells vertically centered on the math axis. */
 static double
-render_mtable(cairo_t *cr, const ns_node *n, double fpx, int depth,
+render_mtable(gfx_t *cr, const ns_node *n, double fpx, int depth,
               double x, double by, double *asc, double *desc)
 {
     GArray *colw = g_array_new(FALSE, TRUE, sizeof(double));
@@ -427,7 +431,7 @@ render_mtable(cairo_t *cr, const ns_node *n, double fpx, int depth,
 
 /* Renders <mfenced> with open/close delimiters and per-gap separators. */
 static double
-render_mfenced(cairo_t *cr, const ns_node *n, double fpx, int depth,
+render_mfenced(gfx_t *cr, const ns_node *n, double fpx, int depth,
                double x, double by, double *asc, double *desc)
 {
     const char *open = ns_element_get_attr(n, "open");
@@ -477,7 +481,7 @@ render_mfenced(cairo_t *cr, const ns_node *n, double fpx, int depth,
 
 /* Measures (cr NULL) or paints a MathML node at baseline by; returns its advance width. */
 static double
-mrender(cairo_t *cr, const ns_node *n, double fpx, int depth,
+mrender(gfx_t *cr, const ns_node *n, double fpx, int depth,
         double x, double by, double *asc, double *desc)
 {
     if (asc) *asc = fpx * 0.7;
@@ -572,14 +576,14 @@ ns_math_measure(const ns_node *math, double font_px,
 
 /* Paints a <math> subtree with its top-left at (x, y) in the given color. */
 void
-ns_math_paint(cairo_t *cr, const ns_node *math, double x, double y,
+ns_math_paint(gfx_t *cr, const ns_node *math, double x, double y,
               double font_px, double r, double g, double b, double a)
 {
     if (!cr || !math) return;
     double asc = 0, desc = 0;
     mrender(NULL, math, font_px, 0, 0, 0, &asc, &desc);
-    cairo_save(cr);
-    cairo_set_source_rgba(cr, r, g, b, a);
+    gfx_save(cr);
+    gfx_set_source_rgba(cr, r, g, b, a);
     mrender(cr, math, font_px, 0, x, y + asc, NULL, NULL);
-    cairo_restore(cr);
+    gfx_restore(cr);
 }
