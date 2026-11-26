@@ -1140,8 +1140,8 @@ seccomp_deny_exec_shared(scmp_filter_ctx ctx, const char *name)
 
 /* Seccomp filter refusing executable mappings, memfds and new UNIX sockets;
  * TSYNC when whole_process. With gpu_driver set the thread will host a GPU
- * driver for WebGL, which compiles shaders to machine code and shares
- * buffers through memfds, so only the socket rule is installed. */
+ * driver, which compiles shaders to machine code and shares buffers
+ * through memfds, so only the socket rule is installed. */
 void
 ns_security_deny_exec_memory(gboolean whole_process, gboolean gpu_driver)
 {

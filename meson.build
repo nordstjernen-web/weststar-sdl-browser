@@ -213,87 +213,6 @@ libopus = dependency('opus', required: false)
 libavif = dependency('libavif', required: get_option('avif'))
 have_avif = libavif.found()
 
-# WebGL 1 / 2 (src/webgl.c) maps canvas.getContext('webgl') onto an offscreen
-# GL context (src/glctx.c: EGL, CGL on macOS, WGL on Windows) through
-# libepoxy. Every shader is validated by the Khronos glslang front end before
-# it reaches the GPU driver (src/glsl_validate.c), so WebGL is built only when
-# glslang is present. glslang's pkg-config file names libraries that no longer
-# exist (MachineIndependent, GenericCodeGen), so it is consulted only for the
-# library and include directories, which Homebrew and the BSD package prefixes
-# keep off the default search paths; the two real libraries are looked up
-# directly.
-webgl_feature = get_option('webgl')
-have_webgl = false
-webgl_deps = []
-if webgl_feature.allowed()
-  epoxy = dependency('epoxy', required: webgl_feature)
-  have_egl = epoxy.found() and cc.has_header('epoxy/egl.h', dependencies: epoxy)
-  have_gl_backend = host_system in ['darwin', 'windows'] or have_egl
-  glslang_pc = dependency('glslang', method: 'pkg-config', required: false)
-  glslang_lib_dirs = []
-  glslang_cflags = []
-  if glslang_pc.found()
-    glslang_libdir = glslang_pc.get_variable(pkgconfig: 'libdir', default_value: '')
-    glslang_incdir = glslang_pc.get_variable(pkgconfig: 'includedir', default_value: '')
-    if glslang_libdir != ''
-      glslang_lib_dirs = [glslang_libdir]
-    endif
-    if glslang_incdir != ''
-      glslang_cflags = ['-I' + glslang_incdir]
-    endif
-  else
-    glslang_prefixes = {
-      'darwin': ['/opt/homebrew', '/usr/local'],
-      'freebsd': ['/usr/local'],
-      'dragonfly': ['/usr/local'],
-      'openbsd': ['/usr/local'],
-      'netbsd': ['/usr/pkg'],
-    }.get(host_system, [])
-    foreach glslang_prefix : glslang_prefixes
-      glslang_lib_dirs += glslang_prefix / 'lib'
-      glslang_cflags += '-I' + glslang_prefix / 'include'
-    endforeach
-  endif
-  glslang_lib = cc.find_library('glslang', dirs: glslang_lib_dirs,
-                                required: false)
-  glslang_limits = cc.find_library('glslang-default-resource-limits',
-                                   dirs: glslang_lib_dirs, required: false)
-  have_glslang = glslang_lib.found() and glslang_limits.found() and \
-                 cc.has_header('glslang/Include/glslang_c_interface.h',
-                               args: glslang_cflags) and \
-                 cc.has_header('glslang/Public/resource_limits_c.h',
-                               args: glslang_cflags)
-  have_webgl = epoxy.found() and have_gl_backend and have_glslang
-  if have_webgl
-    webgl_deps = [epoxy, declare_dependency(compile_args: glslang_cflags),
-                  glslang_lib, glslang_limits]
-    # glslang uses threads. Not on Windows: the threads dependency puts
-    # -pthread on the link line, which clang there does not use and, under
-    # --werror with LTO, rejects (-Wunused-command-line-argument).
-    if host_system != 'windows'
-      webgl_deps += dependency('threads')
-    endif
-    # glslang is C++ behind a C interface; a static glslang needs the C++
-    # runtime named on the link line of this C program.
-    cxx_runtime_name = host_system == 'darwin' ? 'c++' : 'stdc++'
-    cxx_runtime = cc.find_library(cxx_runtime_name, required: false)
-    if cxx_runtime.found()
-      webgl_deps += cxx_runtime
-    elif host_system != 'darwin' and cc.has_link_argument('-l:libstdc++.so.6')
-      # No C++ compiler installed, so no libstdc++.so development link:
-      # name the runtime library itself.
-      webgl_deps += declare_dependency(link_args: ['-l:libstdc++.so.6'])
-    endif
-    if host_system == 'darwin'
-      webgl_deps += dependency('appleframeworks', modules: ['OpenGL'])
-    endif
-  elif webgl_feature.enabled()
-    error('-Dwebgl=enabled needs libepoxy (with EGL on Linux and the BSDs) and the glslang shader validator: install libepoxy-dev and glslang-dev (Debian/Ubuntu), libepoxy-devel and glslang-devel (Fedora/openSUSE) or libepoxy and glslang (Arch, Alpine, FreeBSD, MSYS2, Homebrew)')
-  else
-    warning('libepoxy or the glslang shader validator was not found: building WITHOUT WebGL. Install libepoxy-dev and glslang-dev (or your distribution\'s equivalents), or pass -Dwebgl=disabled to silence this warning.')
-  endif
-endif
-
 # PDF.js, embedded into the PDF viewer page at build time; see src/pdf.c.
 # -Dpdfjs is optional (auto) or required (enabled). It comes from an
 # installed copy named by -Dpdfjs_dir, which must then be a supported
@@ -445,9 +364,6 @@ ns_feature_macros = {
   'NS_HAVE_MEDIA_FOUNDATION': have_media_foundation,
   'NS_HAVE_OPUS': libopus.found(),
   'NS_HAVE_AVIF=1': have_avif,
-  'NS_ENABLE_WEBGL=1': have_webgl,
-  'NS_HAVE_CGL=1': have_webgl and host_system == 'darwin',
-  'NS_HAVE_EGL=1': have_webgl and host_system not in ['darwin', 'windows'],
   'NS_HAVE_PDFJS=1': have_pdfjs,
   'NS_HAVE_VORBISFILE=1': libvorbisfile.found(),
   'NS_HAVE_OPUSFILE=1': libopusfile.found(),
@@ -555,7 +471,6 @@ summary({
   'Video via Media Foundation': have_media_foundation,
   'Opus in WebM (libopus)': libopus.found(),
   'AVIF images (libavif)': have_avif,
-  'WebGL 1 / 2 (libepoxy, glslang)': have_webgl,
   'Audio playback (SDL3)': sdl3_dep.found(),
   'JavaScript engine': js_engine + ' ' + libquickjs.version(),
 }, section: 'Features')

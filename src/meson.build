@@ -190,9 +190,6 @@ if have_avif
   northstar_engine_sources += files('image_avif.c')
 endif
 
-# Always compiled: without NS_ENABLE_WEBGL they reduce to stubs.
-northstar_engine_sources += files('webgl.c', 'glctx.c', 'glsl_validate.c')
-
 northstar_win_resources = []
 if host_system == 'windows'
   windows = import('windows')
@@ -234,7 +231,6 @@ northstar_deps = [
   libenchant,
   libfontconfig,
   libfreetype,
-  webgl_deps,
 ]
 if have_gstreamer
   northstar_deps += [libgstreamer, libgstapp, libgstvideo]

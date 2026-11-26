@@ -17,7 +17,7 @@ This is the start of the port. The work is done in stages, each merged to
 | Stage | What | State |
 |-------|------|-------|
 | 1 | Import Northstar without history, rebrand | done |
-| 2 | Remove WebGL, WebGPU and `<video>` | in progress |
+| 2 | Remove WebGL, WebGPU and `<video>` | WebGL removed; video in progress |
 | 3 | Replace the GTK shell with an SDL3 shell | in progress |
 | 4 | Replace Cairo with an in-tree rasterizer drawing into SDL surfaces | planned |
 

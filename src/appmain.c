@@ -37,7 +37,6 @@
 #include "config.h"
 #include "debuglog.h"
 #include "font.h"
-#include "glctx.h"
 #include "gstvideo.h"
 #include "mfvideo.h"
 #include "engine.h"
@@ -54,7 +53,6 @@
 #include "trace.h"
 #include "version.h"
 #include "watchdog.h"
-#include "webgl.h"
 
 static char *g_self_exe;
 
@@ -591,21 +589,15 @@ main(int argc, char **argv)
             !ns_trace_open(argv[i] + 8))
             g_printerr("weststar: cannot write a trace to %s\n", argv[i] + 8);
 
-    /* Decided once, before the sandbox: the content filter below either
-     * leaves room for a GPU driver or does not, for the whole run. */
-    gboolean webgl = ns_webgl_startup();
-    if (proc_mode)
+    /* The window's renderer may use the GPU, so a GUI run keeps the GPU
+     * device nodes and shared memory reachable. */
+    if (proc_mode) {
         ns_security_add_writable_dir("/dev/shm");
-    if (proc_mode || webgl)
         ns_security_allow_gpu_devices();
-    /* GStreamer's decoder plugins are shared objects; load them while the
-     * sandbox still lets dlopen map code. */
-    ns_gst_video_preinit();
+    }
     ns_security_sandbox_init(g_self_exe);
-    if (webgl)
-        ns_gl_prepare_for_sandbox();
     if (!proc_mode)
-        ns_security_deny_exec_memory(TRUE, webgl);
+        ns_security_deny_exec_memory(TRUE, FALSE);
     ns_security_seccomp_init();
     /* Landlock and seccomp only bind threads created after them, so the
      * SIGQUIT dump thread starts here. */
