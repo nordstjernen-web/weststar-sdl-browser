@@ -121,7 +121,7 @@
 <rect class="bar a-engine" x="46" y="764" width="5" height="42" rx="2"/>
 <text class="file" x="60" y="784" text-anchor="start">paint.c · svg.c · image.c</text>
 <text class="desc" x="60" y="801" text-anchor="start">box tree in stacking order → Cairo</text>
-<text class="lbl" x="46" y="828" text-anchor="start">print.c paginates the same box tree onto sheets</text>
+<text class="lbl" x="46" y="828" text-anchor="start">printing and PDF export: removed for now</text>
 <rect class="g-js" x="442" y="488" width="362" height="340" rx="12"/>
 <text class="gtitle" x="458" y="514" text-anchor="start">JavaScript runtime &amp; Web APIs</text>
 <rect class="mod" x="456" y="520" width="334" height="54" rx="8"/>

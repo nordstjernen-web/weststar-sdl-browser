@@ -9,7 +9,6 @@
 
 #include <glib.h>
 
-#include "print.h"
 
 typedef struct ns_page_session ns_page_session;
 
@@ -102,7 +101,5 @@ char *ns_page_session_eval(ns_page_session *s, const char *src);
 char *ns_page_session_dump(ns_page_session *s, const char *kind);
 char *ns_page_session_console(ns_page_session *s);
 int   ns_page_session_export(ns_page_session *s, const char *path);
-GPtrArray *ns_page_session_print(ns_page_session *s,
-                                 ns_print_setup *out_setup);
 
 #endif

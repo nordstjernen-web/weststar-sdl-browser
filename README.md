@@ -32,10 +32,11 @@ What is deliberately **not** in Weststar for now:
 - **`<video>`**, Media Source Extensions and camera capture. A `<video>`
   shows a dark box with its controls; `<audio>` still plays through SDL3's
   audio device.
+- **Printing and PDF export** (`--export=pdf:`), removed for now while
+  Cairo is replaced; they will come back without it.
 - Parts of Northstar's GTK chrome not ported yet: the developer-tools
-  window, printing (`--headless --export=pdf:` still works), address-bar
-  suggestions and the downloads list (downloads report in the status
-  bubble).
+  window, address-bar suggestions and the downloads list (downloads
+  report in the status bubble).
 
 ## Building
 

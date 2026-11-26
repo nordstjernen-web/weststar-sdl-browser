@@ -11,7 +11,6 @@
 
 #include <glib.h>
 
-#include "print.h"
 
 typedef struct ns_browser ns_browser;
 
@@ -33,8 +32,6 @@ char *ns_browser_dump_layout(ns_browser *browser);
 char *ns_browser_dump_performance(ns_browser *browser);
 int ns_browser_render_image(ns_browser *browser, const char *path);
 
-GPtrArray *ns_browser_print_pages(ns_browser *browser,
-                                  ns_print_setup *out_setup);
 int ns_browser_page_size(ns_browser *browser, int *out_width, int *out_height);
 
 int ns_browser_snap_document(ns_browser *browser, double viewport_w,

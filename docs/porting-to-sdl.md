@@ -36,8 +36,9 @@ So the shell goes first, and Cairo after it:
    drawing into premultiplied ARGB32 pixel buffers that are wrapped as
    `SDL_Surface`s. Glyphs are rasterized with FreeType. Once every call
    site compiles against `src/gfx/`, the Cairo dependency is dropped.
-   PDF output (`--export=pdf:`) and the recording surface need a separate
-   answer; until then they are built only when Cairo is present.
+   PDF export (`--export=pdf:`) and the dormant print path drew through
+   Cairo's PDF and recording surfaces; they are removed for now, to come
+   back in a form that does not need Cairo.
    **In progress:** the rasterizer is written and tested against Cairo;
    the chrome, the SVG renderer (`svg.c`), the MathML renderer
    (`mathml.c`) and canvas 2D (`js_canvas.c`) draw with it (see below).
@@ -94,8 +95,8 @@ to the first and last flattened segment where Cairo uses the exact
 tangent.
 
 Not in gfx: regions (`cairo_region_t`, used by the page session's damage
-tracking), text (`cairo_show_text`, `cairo_text_extents`), the PDF and
-recording surfaces, and curved mesh patch sides.
+tracking), text (`cairo_show_text`, `cairo_text_extents`), vector output
+(PDF), and curved mesh patch sides.
 
 **The Cairo bridge** (`gfx-cairo.h`) lets the engine move one file at a
 time, both ways:
@@ -112,8 +113,8 @@ time, both ways:
   target, for Cairo code that calls what is now gfx: `paint.c` calls the
   SVG and MathML renderers this way. An image target is drawn into
   directly, with the clip as rectangles where Cairo can list it so and
-  through a Cairo group where not; a vector target (PDF export) gets an
-  image at twice its resolution.
+  through a Cairo group where not; a vector target gets an image at twice
+  its resolution.
 
 The bridge goes away with the Cairo dependency.
 
@@ -178,7 +179,7 @@ pushes an SDL wake event, so the wait ends at once. GLib's own timers
 | `src/gtk/procview.c` (page widget) | `src/sdl/` page view |
 | `src/gtk/icons.c` (SVG icons for GTK) | icons drawn by the engine's SVG renderer |
 | `src/gtk/uiscale.c` | SDL display content scale |
-| GTK print dialog | not yet; `--export=pdf:` still works headless |
+| GTK print dialog, `print.c` pagination, `--export=pdf:` | removed for now: they drew through Cairo's PDF surface; printing and PDF export are to be redone without Cairo |
 | GTK file dialogs (Save Page, Save as PNG) | `SDL_ShowSaveFileDialog` |
 | Developer tools window | not yet |
 | WebGL (`webgl.c`, `glctx.c`, `glsl_validate.c`) | removed |

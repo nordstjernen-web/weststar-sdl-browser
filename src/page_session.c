@@ -1106,11 +1106,3 @@ ns_page_session_export(ns_page_session *s, const char *path)
     return ns_browser_render_image(s->cur, path);
 }
 
-GPtrArray *
-ns_page_session_print(ns_page_session *s, ns_print_setup *out_setup)
-{
-    if (!s || !s->cur || !out_setup)
-        return NULL;
-    s->frame_valid = 0;
-    return ns_browser_print_pages(s->cur, out_setup);
-}

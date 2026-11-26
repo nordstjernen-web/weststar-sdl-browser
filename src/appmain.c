@@ -227,7 +227,6 @@ ns_win32_args_need_console(int argc, char **argv)
             g_strcmp0(argv[i], "--version")      == 0 ||
             g_strcmp0(argv[i], "--wpt")          == 0 ||
             g_str_has_prefix(argv[i], "--dump=") ||
-            g_str_has_prefix(argv[i], "--export=") ||
             g_str_has_prefix(argv[i], "--url=")  ||
             g_str_has_prefix(argv[i], "--viewport=") ||
             g_str_has_prefix(argv[i], "--eval=") ||
@@ -353,7 +352,6 @@ ns_proc_mode_wanted(int argc, char **argv)
             g_strcmp0(a, "--print-config") == 0 ||
             g_strcmp0(a, "--wpt") == 0 ||
             g_str_has_prefix(a, "--dump=") ||
-            g_str_has_prefix(a, "--export=") ||
             g_str_has_prefix(a, "--eval=") ||
             g_str_has_prefix(a, "--inspect=") ||
             g_str_has_prefix(a, "--inspect-at=") ||
@@ -374,8 +372,6 @@ ns_preopen_screenshot_outputs(int argc, char **argv)
         const char *p = NULL;
         if (g_str_has_prefix(argv[i], "--dump=png:")) {
             p = argv[i] + 11;
-        } else if (g_str_has_prefix(argv[i], "--export=pdf:")) {
-            p = argv[i] + 13;
         } else if (g_str_has_prefix(argv[i], "--screenshot=")) {
             p = argv[i] + 13;
         }
@@ -635,22 +631,13 @@ main(int argc, char **argv)
             else {
                 fprintf(stderr,
                         "weststar: --dump wants text, dom, layout, none "
-                        "or png:FILE, got '%s'%s\n", v,
-                        g_str_has_prefix(v, "pdf:")
-                            ? "; write a PDF with --export=pdf:FILE" : "");
+                        "or png:FILE, got '%s'\n", v);
                 return 2;
             }
         } else if (g_str_has_prefix(argv[i], "--export=")) {
-            const char *v = argv[i] + 9;
-            dump_set = TRUE;
-            if (g_str_has_prefix(v, "pdf:") && v[4]) {
-                hopts.dump = NS_DUMP_PDF;
-                hopts.out_path = v + 4;
-            } else {
-                fprintf(stderr,
-                        "weststar: --export wants pdf:FILE, got '%s'\n", v);
-                return 2;
-            }
+            fprintf(stderr, "weststar: PDF export (--export=pdf:) has been "
+                            "removed for now\n");
+            return 2;
         } else if (g_str_has_prefix(argv[i], "--viewport=")) {
             const char *spec = argv[i] + 11;
             char *end = NULL;

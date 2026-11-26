@@ -141,7 +141,6 @@ northstar_engine_sources = files(
   'content_decode.c',
   'paint.c',
   'pdf.c',
-  'print.c',
   'render.c',
   'safebrowsing.c',
   'safebrowsing_google.c',

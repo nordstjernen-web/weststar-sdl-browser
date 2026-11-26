@@ -18,7 +18,6 @@
 
 G_BEGIN_DECLS
 
-struct ns_print_setup;
 
 ns_response *ns_engine_fetch_blocking(const char *url, const char *top_url,
                                       GError **error);
@@ -80,17 +79,12 @@ int  ns_engine_img_session_outstanding(const ns_engine_img_session *s);
 void ns_engine_img_session_close(ns_engine_img_session *s);
 
 /* Open an output file named on the command line (--dump=png:,
- * --export=pdf:, --screenshot=) before the sandbox is set up, so the
- * sandbox need not grant write access to its whole directory; the PNG and
- * PDF writers use the open file when given that path. */
+ * --screenshot=) before the sandbox is set up, so the sandbox need not
+ * grant write access to its whole directory; the PNG writer uses the open
+ * file when given that path. */
 gboolean ns_engine_preopen_output(const char *path);
 int ns_engine_write_png(const ns_box *root, const char *path);
 
-int ns_engine_write_pdf(const ns_box *root, const char *path,
-                        const struct ns_print_setup *setup,
-                        const char *base_url, const char *title);
-GPtrArray *ns_engine_print_recordings(const ns_box *root,
-                                      const struct ns_print_setup *setup);
 
 void ns_engine_dump_text(const ns_box *root, GString *out);
 void ns_engine_dump_layout(const ns_box *root, int indent, GString *out);
