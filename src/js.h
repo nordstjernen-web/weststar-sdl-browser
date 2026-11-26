@@ -9,7 +9,7 @@
 
 #include <glib.h>
 
-#include <cairo.h>
+#include "gfx.h"
 
 #include "csp.h"
 #include "fetch_policy.h"
@@ -235,7 +235,7 @@ void     ns_js_fire_media_load_events(ns_js *js, const struct ns_box *layout);
 void     ns_js_fire_page_transition(ns_js *js, const char *type,
                                     gboolean persisted);
 
-cairo_surface_t *ns_js_canvas_surface(ns_js *js, const ns_node *n);
+gfx_surface_t *ns_js_canvas_surface(ns_js *js, const ns_node *n);
 
 void ns_js_request_repaint(ns_js *js);
 void ns_js_request_repaint_node(ns_js *js, const ns_node *node);

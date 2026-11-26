@@ -39,8 +39,8 @@ So the shell goes first, and Cairo after it:
    PDF output (`--export=pdf:`) and the recording surface need a separate
    answer; until then they are built only when Cairo is present.
    **In progress:** the rasterizer is written and tested against Cairo;
-   the chrome, the SVG renderer (`svg.c`) and the MathML renderer
-   (`mathml.c`) draw with it (see below).
+   the chrome, the SVG renderer (`svg.c`), the MathML renderer
+   (`mathml.c`) and canvas 2D (`js_canvas.c`) draw with it (see below).
 
 ## The rasterizer: gfx
 
@@ -85,7 +85,8 @@ with Cairo and compares the pixels, and compares `in_fill`, `in_stroke`,
 extents, `copy_path` and the current point; both CI workflows run it.
 Cairo 1.18.4 (Ubuntu 26.04) draws only the outlines of mesh patches, so
 there the mesh scene is skipped; canvas conic gradients, which are mesh
-patterns, are broken in such a build until canvas moves to gfx. The
+patterns, were broken with such a Cairo and draw correctly since canvas
+moved to gfx. The
 known differences are a level or two of anti-aliasing at edges, ties on
 a repeating gradient's seams, coverage where two edges cross inside one
 pixel, and the butt caps at the ends of an open curve, which gfx squares
@@ -103,8 +104,10 @@ time, both ways:
   current target with its matrix, clip (a mask clip is applied exactly,
   through a group) and solid source, for code on gfx that calls what is
   still Cairo: glyphs, through pangocairo, in the chrome and in MathML.
-  SVG text is outlined by pangocairo on a scratch context and the outline
-  appended to the gfx path (`gfx_append_cairo_path()`).
+  SVG text, canvas `strokeText` and canvas `fillText` with a gradient or
+  pattern are outlined by pangocairo on a scratch context and the outline
+  appended to the gfx path (`gfx_append_cairo_path()`); canvas `fillText`
+  with a colour draws glyphs through `gfx_cairo_begin()`.
 - `gfx_from_cairo_begin()` hands out a `gfx_t` drawing into a `cairo_t`'s
   target, for Cairo code that calls what is now gfx: `paint.c` calls the
   SVG and MathML renderers this way. An image target is drawn into
@@ -116,9 +119,10 @@ The bridge goes away with the Cairo dependency.
 
 **Order of the remaining work.** The engine paints into one context per
 frame (`page_session.c`), so it moves as a whole, but through the bridge
-it can move file by file: `svg.c` and `mathml.c` (done), then
-`js_canvas.c` (whose surfaces become gfx surfaces), then `paint.c`, then
-the page session and its damage regions (a small region type in gfx). Glyphs come
+it can move file by file: `svg.c`, `mathml.c` and `js_canvas.c` (done;
+canvas surfaces are gfx surfaces, which `paint.c` reads through
+`gfx_cairo_surface_wrap()` without a copy), then `paint.c`, then the page
+session and its damage regions (a small region type in gfx). Glyphs come
 last: web-text-lib's `pangocairo-*` files are replaced by a renderer that
 rasterizes FreeType outlines into gfx, and then Cairo is dropped.
 

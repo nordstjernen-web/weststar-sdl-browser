@@ -14,7 +14,6 @@
 
 #include <zlib.h>
 
-#include <cairo.h>
 #include <curl/curl.h>
 #include <gio/gio.h>
 #include <glib/gstdio.h>
@@ -45210,11 +45209,11 @@ ns_element_toDataURL(JSContext *ctx, JSValueConst this_val,
     if (!st->origin_clean)
         return ns_throw_security_error(ctx,
             "Tainted canvases may not be exported.");
-    cairo_surface_t *surf = st->surf;
+    gfx_surface_t *surf = st->surf;
     GByteArray *buf = g_byte_array_new();
-    cairo_status_t s = cairo_surface_write_to_png_stream(surf,
+    gfx_status_t s = gfx_surface_write_to_png_stream(surf,
         ns_canvas_png_write, buf);
-    if (s != CAIRO_STATUS_SUCCESS) {
+    if (s != GFX_STATUS_SUCCESS) {
         g_byte_array_free(buf, TRUE);
         return JS_NewString(ctx, "data:,");
     }

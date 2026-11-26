@@ -8,7 +8,7 @@
 #define NS_JS_INTERNAL_H
 
 #include <glib.h>
-#include <cairo.h>
+#include "gfx.h"
 #include "ns_pango.h"
 #include "quickjs_compat.h"
 
@@ -22,14 +22,14 @@ typedef struct ns_worker_host ns_worker_host;
 
 typedef struct ns_canvas_state {
     int w, h;
-    cairo_surface_t *surf;
-    cairo_t         *cr;
+    gfx_surface_t *surf;
+    gfx_t         *cr;
     double fill_r, fill_g, fill_b, fill_a;
     double stroke_r, stroke_g, stroke_b, stroke_a;
     double line_width;
     char  *font;
-    cairo_pattern_t *fill_pattern;
-    cairo_pattern_t *stroke_pattern;
+    gfx_pattern_t *fill_pattern;
+    gfx_pattern_t *stroke_pattern;
     double shadow_r, shadow_g, shadow_b, shadow_a;
     double shadow_blur, shadow_ox, shadow_oy;
     gboolean origin_clean;
@@ -456,9 +456,9 @@ ns_path2d_ctor(JSContext *ctx, JSValueConst this_val,
 JSValue
 ns_element_getContext(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv);
-cairo_status_t
+gfx_status_t
 ns_canvas_png_write(void *closure, const unsigned char *data, unsigned int length);
-JSValue ns_canvas_blob_from_surface(JSContext *ctx, cairo_surface_t *surface);
+JSValue ns_canvas_blob_from_surface(JSContext *ctx, gfx_surface_t *surface);
 
 void ns_canvas_register_image_bitmap_class(JSRuntime *rt);
 void ns_canvas_install_image_bitmap(JSContext *ctx, JSValueConst global);

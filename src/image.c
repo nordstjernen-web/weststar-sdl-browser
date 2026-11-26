@@ -27,9 +27,9 @@ ns_image_builtin_supports_mime(const char *bare)
 }
 #include <math.h>
 #include <string.h>
-#include <cairo.h>
 
 #include "config.h"
+#include "gfx.h"
 #include "net.h"
 #include "svg.h"
 
@@ -115,7 +115,7 @@ ns_image_free(gpointer p)
     g_free(img->final_url);
     g_free(img->cors_allow_origin);
     g_free(img->error);
-    if (img->render_surface) cairo_surface_destroy(img->render_surface);
+    if (img->render_surface) gfx_surface_destroy(img->render_surface);
     if (img->anim_frames) g_array_free(img->anim_frames, TRUE);
     else ns_texture_unref(img->texture);
     ns_image_drop_svg_animation(img);
@@ -183,7 +183,7 @@ ns_image_cache_purge(ns_image_cache *cache, ns_image *img)
     }
     ns_image_drop_svg_animation(img);
     if (img->render_surface) {
-        cairo_surface_destroy(img->render_surface);
+        gfx_surface_destroy(img->render_surface);
         img->render_surface = NULL;
     }
     img->anim_current = 0;
@@ -861,7 +861,7 @@ ns_image_svg_advance(ns_image *img, gint64 now_us)
     ns_texture_unref(img->texture);
     img->texture = tex;
     if (img->render_surface) {
-        cairo_surface_destroy(img->render_surface);
+        gfx_surface_destroy(img->render_surface);
         img->render_surface = NULL;
     }
     return TRUE;

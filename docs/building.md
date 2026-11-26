@@ -430,7 +430,10 @@ or `NS_TEST_VIEWPORT`) for visual inspection.
 
 Neither is an automated test suite, and this project has none by design:
 the baselines catch drift, the PNGs are read by eye, and correctness is
-verified by running the browser.
+verified by running the browser. Two exceptions guard the move off Cairo:
+the gfx test (above), and `data/fixtures/canvas-2d.html`, a page of
+canvas checks that each print PASS or FAIL, which CI renders with
+`--dump=text` and fails on any FAIL.
 
 ## Other scripts
 

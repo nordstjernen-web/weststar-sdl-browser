@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include <gio/gio.h>
+#include "gfx-cairo.h"
 #include "ns_pango.h"
 
 #include "css.h"
@@ -19,17 +20,17 @@
 #include "image.h"
 
 typedef struct ns_path2d {
-    cairo_surface_t *rs;
-    cairo_t         *cr;
+    gfx_surface_t *rs;
+    gfx_t         *cr;
 } ns_path2d;
 
 typedef struct ns_image_bitmap {
-    cairo_surface_t *surf;
+    gfx_surface_t *surf;
     int w, h;
     gboolean origin_clean;
 } ns_image_bitmap;
 
-typedef void (*ns_ctx_drawfn)(cairo_t *cr, void *ud);
+typedef void (*ns_ctx_drawfn)(gfx_t *cr, void *ud);
 
 typedef struct ns_draw_rect_ud {
     double x, y, w, h, lw;
@@ -43,11 +44,11 @@ typedef struct ns_draw_path_ud {
     JSValueConst this_val;
     ns_canvas_state *st;
     double lw;
-    cairo_path_t *snapshot;
-    cairo_fill_rule_t fill_rule;
+    gfx_path_t *snapshot;
+    gfx_fill_rule_t fill_rule;
 } ns_draw_path_ud;
 
-static cairo_surface_t *ns_ctx_drawimage_source(JSContext *ctx,
+static gfx_surface_t *ns_ctx_drawimage_source(JSContext *ctx,
                                                 JSValueConst src, int *out_w,
                                                 int *out_h,
                                                 gboolean *origin_clean);
@@ -65,8 +66,8 @@ ns_path2d_finalizer(JSRuntime *rt, JSValue val)
     (void)rt;
     ns_path2d *p = JS_GetOpaque(val, ns_path2d_class_id);
     if (!p) return;
-    if (p->cr) cairo_destroy(p->cr);
-    if (p->rs) cairo_surface_destroy(p->rs);
+    if (p->cr) gfx_destroy(p->cr);
+    if (p->rs) gfx_surface_destroy(p->rs);
     g_free(p);
 }
 
@@ -83,7 +84,7 @@ ns_image_bitmap_finalizer(JSRuntime *rt, JSValue val)
     (void)rt;
     ns_image_bitmap *b = JS_GetOpaque(val, ns_image_bitmap_class_id);
     if (!b) return;
-    if (b->surf) cairo_surface_destroy(b->surf);
+    if (b->surf) gfx_surface_destroy(b->surf);
     g_free(b);
 }
 
@@ -97,25 +98,25 @@ ns_canvas_state_free(gpointer data)
 {
     ns_canvas_state *st = data;
     if (!st) return;
-    if (st->fill_pattern)   cairo_pattern_destroy(st->fill_pattern);
-    if (st->stroke_pattern) cairo_pattern_destroy(st->stroke_pattern);
-    if (st->cr)   cairo_destroy(st->cr);
-    if (st->surf) cairo_surface_destroy(st->surf);
+    if (st->fill_pattern)   gfx_pattern_destroy(st->fill_pattern);
+    if (st->stroke_pattern) gfx_pattern_destroy(st->stroke_pattern);
+    if (st->cr)   gfx_destroy(st->cr);
+    if (st->surf) gfx_surface_destroy(st->surf);
     g_free(st->font);
     g_free(st);
 }
 
 /* Destroys a cairo context now, or defers it while canvas calls are in flight. */
 static void
-ns_canvas_retire(ns_js *js, cairo_t *cr)
+ns_canvas_retire(ns_js *js, gfx_t *cr)
 {
     if (!js || js->canvas_calls == 0) {
-        cairo_destroy(cr);
+        gfx_destroy(cr);
         return;
     }
     if (!js->canvas_retired)
         js->canvas_retired =
-            g_ptr_array_new_with_free_func((GDestroyNotify)cairo_destroy);
+            g_ptr_array_new_with_free_func((GDestroyNotify)gfx_destroy);
     g_ptr_array_add(js->canvas_retired, cr);
 }
 
@@ -123,15 +124,15 @@ ns_canvas_retire(ns_js *js, cairo_t *cr)
 static void
 ns_canvas_state_reset(ns_js *js, ns_canvas_state *st, int w, int h)
 {
-    if (st->fill_pattern)   { cairo_pattern_destroy(st->fill_pattern);   st->fill_pattern = NULL; }
-    if (st->stroke_pattern) { cairo_pattern_destroy(st->stroke_pattern); st->stroke_pattern = NULL; }
+    if (st->fill_pattern)   { gfx_pattern_destroy(st->fill_pattern);   st->fill_pattern = NULL; }
+    if (st->stroke_pattern) { gfx_pattern_destroy(st->stroke_pattern); st->stroke_pattern = NULL; }
     if (st->cr)   ns_canvas_retire(js, st->cr);
-    if (st->surf) cairo_surface_destroy(st->surf);
+    if (st->surf) gfx_surface_destroy(st->surf);
     g_free(st->font);
     st->w = w;
     st->h = h;
-    st->surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
-    st->cr   = cairo_create(st->surf);
+    st->surf = gfx_image_surface_create(GFX_FORMAT_ARGB32, w, h);
+    st->cr   = gfx_create(st->surf);
     st->fill_r = st->fill_g = st->fill_b = 0; st->fill_a = 1;
     st->stroke_r = st->stroke_g = st->stroke_b = 0; st->stroke_a = 1;
     st->line_width = 1;
@@ -161,7 +162,7 @@ ns_image_bitmap_close(JSContext *ctx, JSValueConst this_val,
     (void)argc; (void)argv;
     ns_image_bitmap *b = JS_GetOpaque(this_val, ns_image_bitmap_class_id);
     if (b && b->surf) {
-        cairo_surface_destroy(b->surf);
+        gfx_surface_destroy(b->surf);
         b->surf = NULL;
         b->w = b->h = 0;
         /* A closed bitmap reports a size of 0 x 0. */
@@ -173,11 +174,11 @@ ns_image_bitmap_close(JSContext *ctx, JSValueConst this_val,
 
 /* Wraps a surface (takes ownership) in an ImageBitmap object; returns null if empty. */
 static JSValue
-ns_image_bitmap_make(JSContext *ctx, cairo_surface_t *surf, int w, int h,
+ns_image_bitmap_make(JSContext *ctx, gfx_surface_t *surf, int w, int h,
                      gboolean origin_clean)
 {
     if (!surf || w <= 0 || h <= 0) {
-        if (surf) cairo_surface_destroy(surf);
+        if (surf) gfx_surface_destroy(surf);
         return JS_NULL;
     }
     ns_image_bitmap *b = g_new0(ns_image_bitmap, 1);
@@ -194,7 +195,7 @@ ns_image_bitmap_make(JSContext *ctx, cairo_surface_t *surf, int w, int h,
 }
 
 /* Converts ImageData RGBA bytes to a new premultiplied ARGB32 surface; NULL on bad input. */
-static cairo_surface_t *
+static gfx_surface_t *
 ns_image_bitmap_from_imagedata(JSContext *ctx, JSValueConst src,
                                int *out_w, int *out_h)
 {
@@ -217,13 +218,13 @@ ns_image_bitmap_from_imagedata(JSContext *ctx, JSValueConst src,
         JS_FreeValue(ctx, ab); JS_FreeValue(ctx, dv); return NULL;
     }
     const uint8_t *rgba = base + byte_offset;
-    cairo_surface_t *surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, iw, ih);
-    if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
-        cairo_surface_destroy(surf);
+    gfx_surface_t *surf = gfx_image_surface_create(GFX_FORMAT_ARGB32, iw, ih);
+    if (gfx_surface_status(surf) != GFX_STATUS_SUCCESS) {
+        gfx_surface_destroy(surf);
         JS_FreeValue(ctx, ab); JS_FreeValue(ctx, dv); return NULL;
     }
-    uint8_t *dst = cairo_image_surface_get_data(surf);
-    int stride = cairo_image_surface_get_stride(surf);
+    uint8_t *dst = gfx_image_surface_get_data(surf);
+    int stride = gfx_image_surface_get_stride(surf);
     for (int y = 0; y < ih; y++) {
         const uint8_t *s = rgba + (size_t)y * (size_t)iw * 4u;
         uint8_t *d = dst + (size_t)y * (size_t)stride;
@@ -241,7 +242,7 @@ ns_image_bitmap_from_imagedata(JSContext *ctx, JSValueConst src,
             s += 4; d += 4;
         }
     }
-    cairo_surface_mark_dirty(surf);
+    gfx_surface_mark_dirty(surf);
     JS_FreeValue(ctx, ab); JS_FreeValue(ctx, dv);
     *out_w = iw;
     *out_h = ih;
@@ -249,18 +250,18 @@ ns_image_bitmap_from_imagedata(JSContext *ctx, JSValueConst src,
 }
 
 /* Copies the rw x rh region at (sx, sy) of src into a new surface; caller owns result. */
-static cairo_surface_t *
-ns_image_bitmap_crop(cairo_surface_t *src, int sx, int sy, int rw, int rh)
+static gfx_surface_t *
+ns_image_bitmap_crop(gfx_surface_t *src, int sx, int sy, int rw, int rh)
 {
-    cairo_surface_t *out = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, rw, rh);
-    if (cairo_surface_status(out) != CAIRO_STATUS_SUCCESS) {
-        cairo_surface_destroy(out);
+    gfx_surface_t *out = gfx_image_surface_create(GFX_FORMAT_ARGB32, rw, rh);
+    if (gfx_surface_status(out) != GFX_STATUS_SUCCESS) {
+        gfx_surface_destroy(out);
         return NULL;
     }
-    cairo_t *cr = cairo_create(out);
-    cairo_set_source_surface(cr, src, -sx, -sy);
-    cairo_paint(cr);
-    cairo_destroy(cr);
+    gfx_t *cr = gfx_create(out);
+    gfx_set_source_surface(cr, src, -sx, -sy);
+    gfx_paint(cr);
+    gfx_destroy(cr);
     return out;
 }
 
@@ -291,7 +292,7 @@ ns_blob_byte_array(JSContext *ctx, JSValueConst src, gsize *out_len)
 }
 
 /* Decodes a Blob's encoded image bytes into a new ARGB32 surface; NULL on failure. */
-static cairo_surface_t *
+static gfx_surface_t *
 ns_image_bitmap_from_blob(JSContext *ctx, JSValueConst src, int *out_w, int *out_h)
 {
     gsize len = 0;
@@ -311,18 +312,18 @@ ns_image_bitmap_from_blob(JSContext *ctx, JSValueConst src, int *out_w, int *out
         g_free(pix);
         return NULL;
     }
-    cairo_surface_t *surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
-    if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
-        cairo_surface_destroy(surf);
+    gfx_surface_t *surf = gfx_image_surface_create(GFX_FORMAT_ARGB32, w, h);
+    if (gfx_surface_status(surf) != GFX_STATUS_SUCCESS) {
+        gfx_surface_destroy(surf);
         g_free(pix);
         return NULL;
     }
-    uint8_t *dst = cairo_image_surface_get_data(surf);
-    int dst_stride = cairo_image_surface_get_stride(surf);
+    uint8_t *dst = gfx_image_surface_get_data(surf);
+    int dst_stride = gfx_image_surface_get_stride(surf);
     for (int y = 0; y < h; y++)
         memcpy(dst + (size_t)y * (size_t)dst_stride,
                pix + (size_t)y * stride, (size_t)w * 4u);
-    cairo_surface_mark_dirty(surf);
+    gfx_surface_mark_dirty(surf);
     g_free(pix);
     *out_w = w;
     *out_h = h;
@@ -394,7 +395,7 @@ ns_window_create_image_bitmap(JSContext *ctx, JSValueConst this_val,
     }
     int sw = 0, sh = 0;
     gboolean origin_clean = TRUE;
-    cairo_surface_t *surf = NULL;
+    gfx_surface_t *surf = NULL;
     JSValue dv = JS_GetPropertyStr(ctx, argv[0], "data");
     gboolean is_imagedata = JS_IsObject(dv);
     JS_FreeValue(ctx, dv);
@@ -424,13 +425,13 @@ ns_window_create_image_bitmap(JSContext *ctx, JSValueConst this_val,
         crop = 1;
     }
     if (crop && (rw <= 0 || rh <= 0 || rw > 32767 || rh > 32767)) {
-        cairo_surface_destroy(surf);
+        gfx_surface_destroy(surf);
         ns_js_promise_reject(ctx, resolvers, "createImageBitmap: invalid crop size");
         return promise;
     }
     if (crop) {
-        cairo_surface_t *out = ns_image_bitmap_crop(surf, sx, sy, rw, rh);
-        cairo_surface_destroy(surf);
+        gfx_surface_t *out = ns_image_bitmap_crop(surf, sx, sy, rw, rh);
+        gfx_surface_destroy(surf);
         if (!out) {
             ns_js_promise_reject(ctx, resolvers, "createImageBitmap: crop failed");
             return promise;
@@ -455,21 +456,21 @@ ns_offscreen_transferToImageBitmap(JSContext *ctx, JSValueConst this_val,
     ns_js *js = js_from_ctx(ctx);
     const ns_node *el = ns_unwrap_element(this_val);
     if (!js || !el) return JS_NULL;
-    cairo_surface_t *src = ns_js_canvas_surface(js, el);
+    gfx_surface_t *src = ns_js_canvas_surface(js, el);
     if (!src) return JS_NULL;
-    int w = cairo_image_surface_get_width(src);
-    int h = cairo_image_surface_get_height(src);
+    int w = gfx_image_surface_get_width(src);
+    int h = gfx_image_surface_get_height(src);
     if (w <= 0 || h <= 0) return JS_NULL;
-    cairo_surface_t *copy = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
-    if (cairo_surface_status(copy) != CAIRO_STATUS_SUCCESS) {
-        cairo_surface_destroy(copy);
+    gfx_surface_t *copy = gfx_image_surface_create(GFX_FORMAT_ARGB32, w, h);
+    if (gfx_surface_status(copy) != GFX_STATUS_SUCCESS) {
+        gfx_surface_destroy(copy);
         return JS_NULL;
     }
-    cairo_t *cr = cairo_create(copy);
-    cairo_set_source_surface(cr, src, 0, 0);
-    cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
-    cairo_paint(cr);
-    cairo_destroy(cr);
+    gfx_t *cr = gfx_create(copy);
+    gfx_set_source_surface(cr, src, 0, 0);
+    gfx_set_operator(cr, GFX_OPERATOR_SOURCE);
+    gfx_paint(cr);
+    gfx_destroy(cr);
     ns_canvas_state *st = g_hash_table_lookup(js->canvas_states, el);
     return ns_image_bitmap_make(ctx, copy, w, h, !st || st->origin_clean);
 }
@@ -807,7 +808,7 @@ ns_canvas_state_for(ns_js *js, const ns_node *el)
     return st;
 }
 
-cairo_surface_t *
+gfx_surface_t *
 ns_js_canvas_surface(ns_js *js, const ns_node *n)
 {
     if (!n) return NULL;
@@ -876,7 +877,7 @@ ns_conic_color_at(const ns_conic_stop *stops, guint n, double t,
 }
 
 /* Approximates a conic gradient as a 256-sector cairo mesh pattern around (cx, cy). */
-static cairo_pattern_t *
+static gfx_pattern_t *
 ns_ctx_build_conic_pattern(JSContext *ctx, JSValueConst obj)
 {
     double cx = 0, cy = 0, angle = 0;
@@ -910,7 +911,7 @@ ns_ctx_build_conic_pattern(JSContext *ctx, JSValueConst obj)
     g_array_sort(sa, ns_conic_stop_cmp);
     const ns_conic_stop *cs = &g_array_index(sa, ns_conic_stop, 0);
 
-    cairo_pattern_t *pat = cairo_pattern_create_mesh();
+    gfx_pattern_t *pat = gfx_pattern_create_mesh();
     const int sectors = 256;
     const double radius = 1e5;
     for (int i = 0; i < sectors; i++) {
@@ -921,23 +922,23 @@ ns_ctx_build_conic_pattern(JSContext *ctx, JSValueConst obj)
         double r0, g0, b0, al0, r1, g1, b1, al1;
         ns_conic_color_at(cs, sa->len, t0, &r0, &g0, &b0, &al0);
         ns_conic_color_at(cs, sa->len, t1, &r1, &g1, &b1, &al1);
-        cairo_mesh_pattern_begin_patch(pat);
-        cairo_mesh_pattern_move_to(pat, cx, cy);
-        cairo_mesh_pattern_line_to(pat, cx + radius * cos(a0), cy + radius * sin(a0));
-        cairo_mesh_pattern_line_to(pat, cx + radius * cos(a1), cy + radius * sin(a1));
-        cairo_mesh_pattern_line_to(pat, cx, cy);
-        cairo_mesh_pattern_set_corner_color_rgba(pat, 0, r0, g0, b0, al0);
-        cairo_mesh_pattern_set_corner_color_rgba(pat, 1, r0, g0, b0, al0);
-        cairo_mesh_pattern_set_corner_color_rgba(pat, 2, r1, g1, b1, al1);
-        cairo_mesh_pattern_set_corner_color_rgba(pat, 3, r1, g1, b1, al1);
-        cairo_mesh_pattern_end_patch(pat);
+        gfx_mesh_pattern_begin_patch(pat);
+        gfx_mesh_pattern_move_to(pat, cx, cy);
+        gfx_mesh_pattern_line_to(pat, cx + radius * cos(a0), cy + radius * sin(a0));
+        gfx_mesh_pattern_line_to(pat, cx + radius * cos(a1), cy + radius * sin(a1));
+        gfx_mesh_pattern_line_to(pat, cx, cy);
+        gfx_mesh_pattern_set_corner_color_rgba(pat, 0, r0, g0, b0, al0);
+        gfx_mesh_pattern_set_corner_color_rgba(pat, 1, r0, g0, b0, al0);
+        gfx_mesh_pattern_set_corner_color_rgba(pat, 2, r1, g1, b1, al1);
+        gfx_mesh_pattern_set_corner_color_rgba(pat, 3, r1, g1, b1, al1);
+        gfx_mesh_pattern_end_patch(pat);
     }
     g_array_free(sa, TRUE);
     return pat;
 }
 
 /* Builds a cairo pattern from a JS gradient/pattern object; clears origin_clean if tainted. */
-static cairo_pattern_t *
+static gfx_pattern_t *
 ns_ctx_build_pattern(JSContext *ctx, JSValueConst obj, gboolean *origin_clean)
 {
     *origin_clean = TRUE;
@@ -947,7 +948,7 @@ ns_ctx_build_pattern(JSContext *ctx, JSValueConst obj, gboolean *origin_clean)
     const char *type = JS_ToCString(ctx, t);
     JS_FreeValue(ctx, t);
     if (!type) return NULL;
-    cairo_pattern_t *pat = NULL;
+    gfx_pattern_t *pat = NULL;
     if (strcmp(type, "linear") == 0) {
         double x0 = 0, y0 = 0, x1 = 0, y1 = 0;
         JSValue v;
@@ -955,31 +956,31 @@ ns_ctx_build_pattern(JSContext *ctx, JSValueConst obj, gboolean *origin_clean)
         v = JS_GetPropertyStr(ctx, obj, "_y0"); JS_ToFloat64(ctx, &y0, v); JS_FreeValue(ctx, v);
         v = JS_GetPropertyStr(ctx, obj, "_x1"); JS_ToFloat64(ctx, &x1, v); JS_FreeValue(ctx, v);
         v = JS_GetPropertyStr(ctx, obj, "_y1"); JS_ToFloat64(ctx, &y1, v); JS_FreeValue(ctx, v);
-        pat = cairo_pattern_create_linear(x0, y0, x1, y1);
+        pat = gfx_pattern_create_linear(x0, y0, x1, y1);
     } else if (strcmp(type, "pattern") == 0) {
         JS_FreeCString(ctx, type);
         JSValue node_v = JS_GetPropertyStr(ctx, obj, "_node");
         int iw = 0, ih = 0;
-        cairo_surface_t *img =
+        gfx_surface_t *img =
             ns_ctx_drawimage_source(ctx, node_v, &iw, &ih, origin_clean);
         JS_FreeValue(ctx, node_v);
         if (!img) return NULL;
-        pat = cairo_pattern_create_for_surface(img);
-        cairo_surface_destroy(img);
-        cairo_extend_t ext = CAIRO_EXTEND_REPEAT;
+        pat = gfx_pattern_create_for_surface(img);
+        gfx_surface_destroy(img);
+        gfx_extend_t ext = GFX_EXTEND_REPEAT;
         JSValue rep_v = JS_GetPropertyStr(ctx, obj, "_rep");
         if (JS_IsString(rep_v)) {
             const char *r = JS_ToCString(ctx, rep_v);
             if (r) {
-                if      (!strcmp(r, "repeat-x"))  ext = CAIRO_EXTEND_REPEAT;
-                else if (!strcmp(r, "repeat-y"))  ext = CAIRO_EXTEND_REPEAT;
-                else if (!strcmp(r, "no-repeat")) ext = CAIRO_EXTEND_NONE;
-                else                              ext = CAIRO_EXTEND_REPEAT;
+                if      (!strcmp(r, "repeat-x"))  ext = GFX_EXTEND_REPEAT;
+                else if (!strcmp(r, "repeat-y"))  ext = GFX_EXTEND_REPEAT;
+                else if (!strcmp(r, "no-repeat")) ext = GFX_EXTEND_NONE;
+                else                              ext = GFX_EXTEND_REPEAT;
                 JS_FreeCString(ctx, r);
             }
         }
         JS_FreeValue(ctx, rep_v);
-        cairo_pattern_set_extend(pat, ext);
+        gfx_pattern_set_extend(pat, ext);
         JSValue m = JS_GetPropertyStr(ctx, obj, "_matrix");
         if (JS_IsArray(m)) {
             double a = 1, b = 0, c = 0, d = 1, e = 0, f = 0;
@@ -990,11 +991,11 @@ ns_ctx_build_pattern(JSContext *ctx, JSValueConst obj, gboolean *origin_clean)
             vv = JS_GetPropertyUint32(ctx, m, 3); JS_ToFloat64(ctx, &d, vv); JS_FreeValue(ctx, vv);
             vv = JS_GetPropertyUint32(ctx, m, 4); JS_ToFloat64(ctx, &e, vv); JS_FreeValue(ctx, vv);
             vv = JS_GetPropertyUint32(ctx, m, 5); JS_ToFloat64(ctx, &f, vv); JS_FreeValue(ctx, vv);
-            cairo_matrix_t cm;
-            cairo_matrix_init(&cm, a, b, c, d, e, f);
-            cairo_matrix_t inv = cm;
-            if (cairo_matrix_invert(&inv) == CAIRO_STATUS_SUCCESS)
-                cairo_pattern_set_matrix(pat, &inv);
+            gfx_matrix_t cm;
+            gfx_matrix_init(&cm, a, b, c, d, e, f);
+            gfx_matrix_t inv = cm;
+            if (gfx_matrix_invert(&inv) == GFX_STATUS_SUCCESS)
+                gfx_pattern_set_matrix(pat, &inv);
         }
         JS_FreeValue(ctx, m);
         return pat;
@@ -1007,7 +1008,7 @@ ns_ctx_build_pattern(JSContext *ctx, JSValueConst obj, gboolean *origin_clean)
         v = JS_GetPropertyStr(ctx, obj, "_x1"); JS_ToFloat64(ctx, &x1, v); JS_FreeValue(ctx, v);
         v = JS_GetPropertyStr(ctx, obj, "_y1"); JS_ToFloat64(ctx, &y1, v); JS_FreeValue(ctx, v);
         v = JS_GetPropertyStr(ctx, obj, "_r1"); JS_ToFloat64(ctx, &r1, v); JS_FreeValue(ctx, v);
-        pat = cairo_pattern_create_radial(x0, y0, r0, x1, y1, r1);
+        pat = gfx_pattern_create_radial(x0, y0, r0, x1, y1, r1);
     } else if (strcmp(type, "conic") == 0) {
         JS_FreeCString(ctx, type);
         return ns_ctx_build_conic_pattern(ctx, obj);
@@ -1028,7 +1029,7 @@ ns_ctx_build_pattern(JSContext *ctx, JSValueConst obj, gboolean *origin_clean)
                 f = JS_GetPropertyStr(ctx, s, "g");   JS_ToFloat64(ctx, &g,   f); JS_FreeValue(ctx, f);
                 f = JS_GetPropertyStr(ctx, s, "b");   JS_ToFloat64(ctx, &b,   f); JS_FreeValue(ctx, f);
                 f = JS_GetPropertyStr(ctx, s, "a");   JS_ToFloat64(ctx, &a,   f); JS_FreeValue(ctx, f);
-                cairo_pattern_add_color_stop_rgba(pat, pos, r, g, b, a);
+                gfx_pattern_add_color_stop_rgba(pat, pos, r, g, b, a);
             }
             JS_FreeValue(ctx, s);
         }
@@ -1051,51 +1052,51 @@ ns_ctx_global_alpha(JSContext *ctx, JSValueConst this_val)
 }
 
 /* Maps a globalCompositeOperation keyword to a cairo operator; unknown values give OVER. */
-static cairo_operator_t
+static gfx_operator_t
 ns_ctx_parse_composite(const char *s)
 {
-    if (!s)                                    return CAIRO_OPERATOR_OVER;
-    if (!strcmp(s, "source-over"))             return CAIRO_OPERATOR_OVER;
-    if (!strcmp(s, "source-in"))               return CAIRO_OPERATOR_IN;
-    if (!strcmp(s, "source-out"))              return CAIRO_OPERATOR_OUT;
-    if (!strcmp(s, "source-atop"))             return CAIRO_OPERATOR_ATOP;
-    if (!strcmp(s, "destination-over"))        return CAIRO_OPERATOR_DEST_OVER;
-    if (!strcmp(s, "destination-in"))          return CAIRO_OPERATOR_DEST_IN;
-    if (!strcmp(s, "destination-out"))         return CAIRO_OPERATOR_DEST_OUT;
-    if (!strcmp(s, "destination-atop"))        return CAIRO_OPERATOR_DEST_ATOP;
-    if (!strcmp(s, "lighter"))                 return CAIRO_OPERATOR_ADD;
-    if (!strcmp(s, "copy"))                    return CAIRO_OPERATOR_SOURCE;
-    if (!strcmp(s, "xor"))                     return CAIRO_OPERATOR_XOR;
-    if (!strcmp(s, "multiply"))                return CAIRO_OPERATOR_MULTIPLY;
-    if (!strcmp(s, "screen"))                  return CAIRO_OPERATOR_SCREEN;
-    if (!strcmp(s, "overlay"))                 return CAIRO_OPERATOR_OVERLAY;
-    if (!strcmp(s, "darken"))                  return CAIRO_OPERATOR_DARKEN;
-    if (!strcmp(s, "lighten"))                 return CAIRO_OPERATOR_LIGHTEN;
-    if (!strcmp(s, "color-dodge"))             return CAIRO_OPERATOR_COLOR_DODGE;
-    if (!strcmp(s, "color-burn"))              return CAIRO_OPERATOR_COLOR_BURN;
-    if (!strcmp(s, "hard-light"))              return CAIRO_OPERATOR_HARD_LIGHT;
-    if (!strcmp(s, "soft-light"))              return CAIRO_OPERATOR_SOFT_LIGHT;
-    if (!strcmp(s, "difference"))              return CAIRO_OPERATOR_DIFFERENCE;
-    if (!strcmp(s, "exclusion"))               return CAIRO_OPERATOR_EXCLUSION;
-    if (!strcmp(s, "hue"))                     return CAIRO_OPERATOR_HSL_HUE;
-    if (!strcmp(s, "saturation"))              return CAIRO_OPERATOR_HSL_SATURATION;
-    if (!strcmp(s, "color"))                   return CAIRO_OPERATOR_HSL_COLOR;
-    if (!strcmp(s, "luminosity"))              return CAIRO_OPERATOR_HSL_LUMINOSITY;
-    return CAIRO_OPERATOR_OVER;
+    if (!s)                                    return GFX_OPERATOR_OVER;
+    if (!strcmp(s, "source-over"))             return GFX_OPERATOR_OVER;
+    if (!strcmp(s, "source-in"))               return GFX_OPERATOR_IN;
+    if (!strcmp(s, "source-out"))              return GFX_OPERATOR_OUT;
+    if (!strcmp(s, "source-atop"))             return GFX_OPERATOR_ATOP;
+    if (!strcmp(s, "destination-over"))        return GFX_OPERATOR_DEST_OVER;
+    if (!strcmp(s, "destination-in"))          return GFX_OPERATOR_DEST_IN;
+    if (!strcmp(s, "destination-out"))         return GFX_OPERATOR_DEST_OUT;
+    if (!strcmp(s, "destination-atop"))        return GFX_OPERATOR_DEST_ATOP;
+    if (!strcmp(s, "lighter"))                 return GFX_OPERATOR_ADD;
+    if (!strcmp(s, "copy"))                    return GFX_OPERATOR_SOURCE;
+    if (!strcmp(s, "xor"))                     return GFX_OPERATOR_XOR;
+    if (!strcmp(s, "multiply"))                return GFX_OPERATOR_MULTIPLY;
+    if (!strcmp(s, "screen"))                  return GFX_OPERATOR_SCREEN;
+    if (!strcmp(s, "overlay"))                 return GFX_OPERATOR_OVERLAY;
+    if (!strcmp(s, "darken"))                  return GFX_OPERATOR_DARKEN;
+    if (!strcmp(s, "lighten"))                 return GFX_OPERATOR_LIGHTEN;
+    if (!strcmp(s, "color-dodge"))             return GFX_OPERATOR_COLOR_DODGE;
+    if (!strcmp(s, "color-burn"))              return GFX_OPERATOR_COLOR_BURN;
+    if (!strcmp(s, "hard-light"))              return GFX_OPERATOR_HARD_LIGHT;
+    if (!strcmp(s, "soft-light"))              return GFX_OPERATOR_SOFT_LIGHT;
+    if (!strcmp(s, "difference"))              return GFX_OPERATOR_DIFFERENCE;
+    if (!strcmp(s, "exclusion"))               return GFX_OPERATOR_EXCLUSION;
+    if (!strcmp(s, "hue"))                     return GFX_OPERATOR_HSL_HUE;
+    if (!strcmp(s, "saturation"))              return GFX_OPERATOR_HSL_SATURATION;
+    if (!strcmp(s, "color"))                   return GFX_OPERATOR_HSL_COLOR;
+    if (!strcmp(s, "luminosity"))              return GFX_OPERATOR_HSL_LUMINOSITY;
+    return GFX_OPERATOR_OVER;
 }
 
 /* Sets the cairo operator from the context's current globalCompositeOperation. */
 static void
-ns_ctx_apply_composite(JSContext *ctx, JSValueConst this_val, cairo_t *cr)
+ns_ctx_apply_composite(JSContext *ctx, JSValueConst this_val, gfx_t *cr)
 {
     JSValue v = JS_GetPropertyStr(ctx, this_val, "globalCompositeOperation");
-    cairo_operator_t op = CAIRO_OPERATOR_OVER;
+    gfx_operator_t op = GFX_OPERATOR_OVER;
     if (JS_IsString(v)) {
         const char *s = JS_ToCString(ctx, v);
         if (s) { op = ns_ctx_parse_composite(s); JS_FreeCString(ctx, s); }
     }
     JS_FreeValue(ctx, v);
-    cairo_set_operator(cr, op);
+    gfx_set_operator(cr, op);
 }
 
 /* Returns imageSmoothingEnabled, treating undefined or null as true. */
@@ -1115,8 +1116,8 @@ static void
 ns_ctx_sync_styles(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st)
 {
     JSValue v;
-    if (st->fill_pattern) { cairo_pattern_destroy(st->fill_pattern); st->fill_pattern = NULL; }
-    if (st->stroke_pattern) { cairo_pattern_destroy(st->stroke_pattern); st->stroke_pattern = NULL; }
+    if (st->fill_pattern) { gfx_pattern_destroy(st->fill_pattern); st->fill_pattern = NULL; }
+    if (st->stroke_pattern) { gfx_pattern_destroy(st->stroke_pattern); st->stroke_pattern = NULL; }
     v = JS_GetPropertyStr(ctx, this_val, "fillStyle");
     if (JS_IsString(v)) {
         const char *s = JS_ToCString(ctx, v);
@@ -1163,9 +1164,9 @@ ns_ctx_sync_styles(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st)
     if (JS_IsString(v)) {
         const char *s = JS_ToCString(ctx, v);
         if (s) {
-            if      (strcmp(s, "round")  == 0) cairo_set_line_cap(st->cr, CAIRO_LINE_CAP_ROUND);
-            else if (strcmp(s, "square") == 0) cairo_set_line_cap(st->cr, CAIRO_LINE_CAP_SQUARE);
-            else                                cairo_set_line_cap(st->cr, CAIRO_LINE_CAP_BUTT);
+            if      (strcmp(s, "round")  == 0) gfx_set_line_cap(st->cr, GFX_LINE_CAP_ROUND);
+            else if (strcmp(s, "square") == 0) gfx_set_line_cap(st->cr, GFX_LINE_CAP_SQUARE);
+            else                                gfx_set_line_cap(st->cr, GFX_LINE_CAP_BUTT);
             JS_FreeCString(ctx, s);
         }
     }
@@ -1174,16 +1175,16 @@ ns_ctx_sync_styles(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st)
     if (JS_IsString(v)) {
         const char *s = JS_ToCString(ctx, v);
         if (s) {
-            if      (strcmp(s, "round") == 0) cairo_set_line_join(st->cr, CAIRO_LINE_JOIN_ROUND);
-            else if (strcmp(s, "bevel") == 0) cairo_set_line_join(st->cr, CAIRO_LINE_JOIN_BEVEL);
-            else                              cairo_set_line_join(st->cr, CAIRO_LINE_JOIN_MITER);
+            if      (strcmp(s, "round") == 0) gfx_set_line_join(st->cr, GFX_LINE_JOIN_ROUND);
+            else if (strcmp(s, "bevel") == 0) gfx_set_line_join(st->cr, GFX_LINE_JOIN_BEVEL);
+            else                              gfx_set_line_join(st->cr, GFX_LINE_JOIN_MITER);
             JS_FreeCString(ctx, s);
         }
     }
     JS_FreeValue(ctx, v);
     v = JS_GetPropertyStr(ctx, this_val, "miterLimit");
     double ml;
-    if (JS_ToFloat64(ctx, &ml, v) == 0 && ml > 0) cairo_set_miter_limit(st->cr, ml);
+    if (JS_ToFloat64(ctx, &ml, v) == 0 && ml > 0) gfx_set_miter_limit(st->cr, ml);
     JS_FreeValue(ctx, v);
     st->shadow_r = st->shadow_g = st->shadow_b = 0;
     st->shadow_a = 0;
@@ -1221,7 +1222,7 @@ ns_ctx_sync_styles(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st)
     if (JS_IsArray(v)) {
         uint32_t n = ns_js_array_length(ctx, v);
         if (n == 0) {
-            cairo_set_dash(st->cr, NULL, 0, 0);
+            gfx_set_dash(st->cr, NULL, 0, 0);
         } else {
             if (n > 64) n = 64;
             double dashes[64];
@@ -1235,12 +1236,12 @@ ns_ctx_sync_styles(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st)
             }
             if (!isfinite(dash_offset)) dash_offset = 0;
             if (dash_sum > 0 && isfinite(dash_sum))
-                cairo_set_dash(st->cr, dashes, (int)n, dash_offset);
+                gfx_set_dash(st->cr, dashes, (int)n, dash_offset);
             else
-                cairo_set_dash(st->cr, NULL, 0, 0);
+                gfx_set_dash(st->cr, NULL, 0, 0);
         }
     } else {
-        cairo_set_dash(st->cr, NULL, 0, 0);
+        gfx_set_dash(st->cr, NULL, 0, 0);
     }
     JS_FreeValue(ctx, v);
 }
@@ -1310,23 +1311,23 @@ ns_ctx_with_shadow(ns_canvas_state *st, ns_ctx_drawfn draw, void *ud)
     }
     int w = st->w, h = st->h;
     if (w <= 0 || h <= 0) { draw(st->cr, ud); return; }
-    cairo_surface_t *off = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
-    if (cairo_surface_status(off) != CAIRO_STATUS_SUCCESS) {
-        cairo_surface_destroy(off);
+    gfx_surface_t *off = gfx_image_surface_create(GFX_FORMAT_ARGB32, w, h);
+    if (gfx_surface_status(off) != GFX_STATUS_SUCCESS) {
+        gfx_surface_destroy(off);
         draw(st->cr, ud);
         return;
     }
-    cairo_t *ocr = cairo_create(off);
-    cairo_matrix_t m;
-    cairo_get_matrix(st->cr, &m);
-    cairo_set_matrix(ocr, &m);
+    gfx_t *ocr = gfx_create(off);
+    gfx_matrix_t m;
+    gfx_get_matrix(st->cr, &m);
+    gfx_set_matrix(ocr, &m);
     draw(ocr, ud);
-    cairo_destroy(ocr);
-    cairo_surface_flush(off);
-    uint8_t *data = cairo_image_surface_get_data(off);
-    int stride = cairo_image_surface_get_stride(off);
-    int sw = cairo_image_surface_get_width(off);
-    int sh = cairo_image_surface_get_height(off);
+    gfx_destroy(ocr);
+    gfx_surface_flush(off);
+    uint8_t *data = gfx_image_surface_get_data(off);
+    int stride = gfx_image_surface_get_stride(off);
+    int sw = gfx_image_surface_get_width(off);
+    int sh = gfx_image_surface_get_height(off);
     if (data) {
         for (int y = 0; y < sh; y++) {
             uint8_t *row = data + y * stride;
@@ -1343,14 +1344,14 @@ ns_ctx_with_shadow(ns_canvas_state *st, ns_ctx_drawfn draw, void *ud)
         int radius = half_blur < 64 ? (int)half_blur : 64;
         if (radius > 0)
             ns_box_blur_argb(data, sw, sh, stride, radius);
-        cairo_surface_mark_dirty(off);
+        gfx_surface_mark_dirty(off);
     }
-    cairo_save(st->cr);
-    cairo_identity_matrix(st->cr);
-    cairo_set_source_surface(st->cr, off, st->shadow_ox, st->shadow_oy);
-    cairo_paint(st->cr);
-    cairo_restore(st->cr);
-    cairo_surface_destroy(off);
+    gfx_save(st->cr);
+    gfx_identity_matrix(st->cr);
+    gfx_set_source_surface(st->cr, off, st->shadow_ox, st->shadow_oy);
+    gfx_paint(st->cr);
+    gfx_restore(st->cr);
+    gfx_surface_destroy(off);
     draw(st->cr, ud);
 }
 
@@ -1359,8 +1360,8 @@ static void
 ns_ctx_set_fill_source(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st)
 {
     double ga = ns_ctx_global_alpha(ctx, this_val);
-    if (st->fill_pattern) cairo_set_source(st->cr, st->fill_pattern);
-    else cairo_set_source_rgba(st->cr, st->fill_r, st->fill_g, st->fill_b,
+    if (st->fill_pattern) gfx_set_source(st->cr, st->fill_pattern);
+    else gfx_set_source_rgba(st->cr, st->fill_r, st->fill_g, st->fill_b,
                                st->fill_a * ga);
 }
 
@@ -1369,44 +1370,67 @@ static void
 ns_ctx_set_stroke_source(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st)
 {
     double ga = ns_ctx_global_alpha(ctx, this_val);
-    if (st->stroke_pattern) cairo_set_source(st->cr, st->stroke_pattern);
-    else cairo_set_source_rgba(st->cr, st->stroke_r, st->stroke_g, st->stroke_b,
+    if (st->stroke_pattern) gfx_set_source(st->cr, st->stroke_pattern);
+    else gfx_set_source_rgba(st->cr, st->stroke_r, st->stroke_g, st->stroke_b,
                                st->stroke_a * ga);
 }
 
 /* Shadow-aware draw callback filling a rect; offscreen passes use the plain fill color. */
+/* The canvas keeps one current path across fill() and stroke(); the
+ * rectangle and text methods draw without using or changing it. The path
+ * is copied in user space, so it must be put back under the same matrix. */
+static gfx_path_t *
+ns_ctx_path_stash(gfx_t *g)
+{
+    gfx_path_t *p = gfx_copy_path(g);
+    gfx_new_path(g);
+    return p;
+}
+
 static void
-ns_draw_fillrect(cairo_t *cr, void *vud)
+ns_ctx_path_restore(gfx_t *g, gfx_path_t *p)
+{
+    gfx_new_path(g);
+    gfx_append_path(g, p);
+    gfx_path_destroy(p);
+}
+
+static void
+ns_draw_fillrect(gfx_t *cr, void *vud)
 {
     ns_draw_rect_ud *u = vud;
     if (cr == u->st->cr) ns_ctx_set_fill_source(u->ctx, u->this_val, u->st);
     else {
         double ga = ns_ctx_global_alpha(u->ctx, u->this_val);
-        cairo_set_source_rgba(cr, u->st->fill_r, u->st->fill_g,
+        gfx_set_source_rgba(cr, u->st->fill_r, u->st->fill_g,
                               u->st->fill_b, u->st->fill_a * ga);
     }
     ns_ctx_apply_composite(u->ctx, u->this_val, cr);
-    cairo_rectangle(cr, u->x, u->y, u->w, u->h);
-    cairo_fill(cr);
-    cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+    gfx_path_t *keep = ns_ctx_path_stash(cr);
+    gfx_rectangle(cr, u->x, u->y, u->w, u->h);
+    gfx_fill(cr);
+    ns_ctx_path_restore(cr, keep);
+    gfx_set_operator(cr, GFX_OPERATOR_OVER);
 }
 
 /* Shadow-aware draw callback stroking a rect; offscreen passes use the plain stroke color. */
 static void
-ns_draw_strokerect(cairo_t *cr, void *vud)
+ns_draw_strokerect(gfx_t *cr, void *vud)
 {
     ns_draw_rect_ud *u = vud;
     if (cr == u->st->cr) ns_ctx_set_stroke_source(u->ctx, u->this_val, u->st);
     else {
         double ga = ns_ctx_global_alpha(u->ctx, u->this_val);
-        cairo_set_source_rgba(cr, u->st->stroke_r, u->st->stroke_g,
+        gfx_set_source_rgba(cr, u->st->stroke_r, u->st->stroke_g,
                               u->st->stroke_b, u->st->stroke_a * ga);
     }
     ns_ctx_apply_composite(u->ctx, u->this_val, cr);
-    cairo_set_line_width(cr, u->lw);
-    cairo_rectangle(cr, u->x, u->y, u->w, u->h);
-    cairo_stroke(cr);
-    cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+    gfx_set_line_width(cr, u->lw);
+    gfx_path_t *keep = ns_ctx_path_stash(cr);
+    gfx_rectangle(cr, u->x, u->y, u->w, u->h);
+    gfx_stroke(cr);
+    ns_ctx_path_restore(cr, keep);
+    gfx_set_operator(cr, GFX_OPERATOR_OVER);
 }
 
 /* CanvasRenderingContext2D.fillRect() with shadow and composite operation applied. */
@@ -1452,13 +1476,15 @@ ns_ctx_clearRect(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     if (argc < 4) return JS_UNDEFINED;
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
-    cairo_save(st->cr);
-    cairo_set_operator(st->cr, CAIRO_OPERATOR_CLEAR);
-    cairo_rectangle(st->cr,
+    gfx_path_t *keep = ns_ctx_path_stash(st->cr);
+    gfx_save(st->cr);
+    gfx_set_operator(st->cr, GFX_OPERATOR_CLEAR);
+    gfx_rectangle(st->cr,
         ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]),
         ns_arg_d(ctx, argv[2]), ns_arg_d(ctx, argv[3]));
-    cairo_fill(st->cr);
-    cairo_restore(st->cr);
+    gfx_fill(st->cr);
+    gfx_restore(st->cr);
+    ns_ctx_path_restore(st->cr, keep);
     ns_ctx_request_repaint(ctx, this_val);
     return JS_UNDEFINED;
 }
@@ -1468,7 +1494,7 @@ ns_ctx_beginPath(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
 {
     (void)argc; (void)argv;
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
-    if (st) cairo_new_path(st->cr);
+    if (st) gfx_new_path(st->cr);
     return JS_UNDEFINED;
 }
 
@@ -1477,7 +1503,7 @@ ns_ctx_closePath(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
 {
     (void)argc; (void)argv;
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
-    if (st) cairo_close_path(st->cr);
+    if (st) gfx_close_path(st->cr);
     return JS_UNDEFINED;
 }
 
@@ -1486,7 +1512,7 @@ ns_ctx_moveTo(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
 {
     if (argc < 2) return JS_UNDEFINED;
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
-    if (st) cairo_move_to(st->cr, ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]));
+    if (st) gfx_move_to(st->cr, ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]));
     return JS_UNDEFINED;
 }
 
@@ -1495,7 +1521,7 @@ ns_ctx_lineTo(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
 {
     if (argc < 2) return JS_UNDEFINED;
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
-    if (st) cairo_line_to(st->cr, ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]));
+    if (st) gfx_line_to(st->cr, ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]));
     return JS_UNDEFINED;
 }
 
@@ -1515,8 +1541,8 @@ ns_ctx_arc(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         return ns_canvas_throw_dom(ctx, "IndexSizeError",
                                    "arc radius must not be negative");
     gboolean ccw = argc >= 6 && JS_ToBool(ctx, argv[5]);
-    if (ccw) cairo_arc_negative(st->cr, x, y, r, a0, a1);
-    else     cairo_arc(st->cr, x, y, r, a0, a1);
+    if (ccw) gfx_arc_negative(st->cr, x, y, r, a0, a1);
+    else     gfx_arc(st->cr, x, y, r, a0, a1);
     return JS_UNDEFINED;
 }
 
@@ -1526,7 +1552,7 @@ ns_ctx_rect(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     if (argc < 4) return JS_UNDEFINED;
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (st)
-        cairo_rectangle(st->cr,
+        gfx_rectangle(st->cr,
             ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]),
             ns_arg_d(ctx, argv[2]), ns_arg_d(ctx, argv[3]));
     return JS_UNDEFINED;
@@ -1541,26 +1567,26 @@ ns_value_is_path2d(JSValueConst v)
 
 /* Replaces target's current path with a copy of the Path2D's recorded path. */
 static void
-ns_replay_path2d(cairo_t *target, JSValueConst path_v)
+ns_replay_path2d(gfx_t *target, JSValueConst path_v)
 {
     ns_path2d *p = JS_GetOpaque(path_v, ns_path2d_class_id);
     if (!p) return;
-    cairo_path_t *cp = cairo_copy_path(p->cr);
-    cairo_new_path(target);
-    cairo_append_path(target, cp);
-    cairo_path_destroy(cp);
+    gfx_path_t *cp = gfx_copy_path(p->cr);
+    gfx_new_path(target);
+    gfx_append_path(target, cp);
+    gfx_path_destroy(cp);
 }
 
-static cairo_fill_rule_t
+static gfx_fill_rule_t
 ns_parse_fill_rule(const char *s)
 {
-    if (s && !strcmp(s, "evenodd")) return CAIRO_FILL_RULE_EVEN_ODD;
-    return CAIRO_FILL_RULE_WINDING;
+    if (s && !strcmp(s, "evenodd")) return GFX_FILL_RULE_EVEN_ODD;
+    return GFX_FILL_RULE_WINDING;
 }
 
 /* Parses the (path?, fillRule?) overload; swaps in a Path2D and returns the saved path. */
-static cairo_path_t *
-ns_ctx_prepare_path_and_rule(JSContext *ctx, cairo_t *cr,
+static gfx_path_t *
+ns_ctx_prepare_path_and_rule(JSContext *ctx, gfx_t *cr,
                              int argc, JSValueConst *argv)
 {
     JSValueConst path_v = JS_UNDEFINED;
@@ -1572,64 +1598,64 @@ ns_ctx_prepare_path_and_rule(JSContext *ctx, cairo_t *cr,
     } else if (argc >= 1 && JS_IsString(argv[0])) {
         rule_s = JS_ToCString(ctx, argv[0]);
     }
-    cairo_path_t *saved = NULL;
+    gfx_path_t *saved = NULL;
     if (!JS_IsUndefined(path_v)) {
-        saved = cairo_copy_path(cr);
+        saved = gfx_copy_path(cr);
         ns_replay_path2d(cr, path_v);
     }
-    cairo_set_fill_rule(cr, ns_parse_fill_rule(rule_s));
+    gfx_set_fill_rule(cr, ns_parse_fill_rule(rule_s));
     if (rule_s) JS_FreeCString(ctx, rule_s);
     return saved;
 }
 
 /* Restores a path saved by ns_ctx_prepare_path_and_rule and frees it. */
 static void
-ns_ctx_restore_path(cairo_t *cr, cairo_path_t *saved)
+ns_ctx_restore_path(gfx_t *cr, gfx_path_t *saved)
 {
     if (!saved) return;
-    cairo_new_path(cr);
-    cairo_append_path(cr, saved);
-    cairo_path_destroy(saved);
+    gfx_new_path(cr);
+    gfx_append_path(cr, saved);
+    gfx_path_destroy(saved);
 }
 
 /* Shadow-aware callback filling the current path, or the snapshot when offscreen. */
 static void
-ns_draw_fillpath(cairo_t *cr, void *vud)
+ns_draw_fillpath(gfx_t *cr, void *vud)
 {
     ns_draw_path_ud *u = vud;
     if (cr != u->st->cr) {
-        cairo_new_path(cr);
-        if (u->snapshot) cairo_append_path(cr, u->snapshot);
-        cairo_set_source_rgba(cr, u->st->fill_r, u->st->fill_g,
+        gfx_new_path(cr);
+        if (u->snapshot) gfx_append_path(cr, u->snapshot);
+        gfx_set_source_rgba(cr, u->st->fill_r, u->st->fill_g,
                               u->st->fill_b, u->st->fill_a *
                               ns_ctx_global_alpha(u->ctx, u->this_val));
     } else {
         ns_ctx_set_fill_source(u->ctx, u->this_val, u->st);
     }
-    cairo_set_fill_rule(cr, u->fill_rule);
+    gfx_set_fill_rule(cr, u->fill_rule);
     ns_ctx_apply_composite(u->ctx, u->this_val, cr);
-    cairo_fill_preserve(cr);
-    cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+    gfx_fill_preserve(cr);
+    gfx_set_operator(cr, GFX_OPERATOR_OVER);
 }
 
 /* Shadow-aware callback stroking the current path, or the snapshot when offscreen. */
 static void
-ns_draw_strokepath(cairo_t *cr, void *vud)
+ns_draw_strokepath(gfx_t *cr, void *vud)
 {
     ns_draw_path_ud *u = vud;
     if (cr != u->st->cr) {
-        cairo_new_path(cr);
-        if (u->snapshot) cairo_append_path(cr, u->snapshot);
-        cairo_set_source_rgba(cr, u->st->stroke_r, u->st->stroke_g,
+        gfx_new_path(cr);
+        if (u->snapshot) gfx_append_path(cr, u->snapshot);
+        gfx_set_source_rgba(cr, u->st->stroke_r, u->st->stroke_g,
                               u->st->stroke_b, u->st->stroke_a *
                               ns_ctx_global_alpha(u->ctx, u->this_val));
     } else {
         ns_ctx_set_stroke_source(u->ctx, u->this_val, u->st);
     }
     ns_ctx_apply_composite(u->ctx, u->this_val, cr);
-    cairo_set_line_width(cr, u->lw);
-    cairo_stroke_preserve(cr);
-    cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+    gfx_set_line_width(cr, u->lw);
+    gfx_stroke_preserve(cr);
+    gfx_set_operator(cr, GFX_OPERATOR_OVER);
 }
 
 /* fill([path], [fillRule]): fills with shadow, keeping the context's own current path. */
@@ -1639,15 +1665,15 @@ ns_ctx_fill(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
     ns_ctx_sync_styles(ctx, this_val, st);
-    cairo_path_t *saved = ns_ctx_prepare_path_and_rule(ctx, st->cr, argc, argv);
-    cairo_path_t *snap = ns_ctx_has_shadow(st) ? cairo_copy_path(st->cr) : NULL;
+    gfx_path_t *saved = ns_ctx_prepare_path_and_rule(ctx, st->cr, argc, argv);
+    gfx_path_t *snap = ns_ctx_has_shadow(st) ? gfx_copy_path(st->cr) : NULL;
     ns_draw_path_ud u = {
         .ctx = ctx, .this_val = this_val, .st = st,
         .lw = st->line_width, .snapshot = snap,
-        .fill_rule = cairo_get_fill_rule(st->cr),
+        .fill_rule = gfx_get_fill_rule(st->cr),
     };
     ns_ctx_with_shadow(st, ns_draw_fillpath, &u);
-    if (snap) cairo_path_destroy(snap);
+    if (snap) gfx_path_destroy(snap);
     ns_ctx_restore_path(st->cr, saved);
     ns_ctx_request_repaint(ctx, this_val);
     return JS_UNDEFINED;
@@ -1660,19 +1686,19 @@ ns_ctx_stroke(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
     ns_ctx_sync_styles(ctx, this_val, st);
-    cairo_path_t *saved = NULL;
+    gfx_path_t *saved = NULL;
     if (argc >= 1 && ns_value_is_path2d(argv[0])) {
-        saved = cairo_copy_path(st->cr);
+        saved = gfx_copy_path(st->cr);
         ns_replay_path2d(st->cr, argv[0]);
     }
-    cairo_path_t *snap = ns_ctx_has_shadow(st) ? cairo_copy_path(st->cr) : NULL;
+    gfx_path_t *snap = ns_ctx_has_shadow(st) ? gfx_copy_path(st->cr) : NULL;
     ns_draw_path_ud u = {
         .ctx = ctx, .this_val = this_val, .st = st,
         .lw = st->line_width, .snapshot = snap,
-        .fill_rule = cairo_get_fill_rule(st->cr),
+        .fill_rule = gfx_get_fill_rule(st->cr),
     };
     ns_ctx_with_shadow(st, ns_draw_strokepath, &u);
-    if (snap) cairo_path_destroy(snap);
+    if (snap) gfx_path_destroy(snap);
     ns_ctx_restore_path(st->cr, saved);
     ns_ctx_request_repaint(ctx, this_val);
     return JS_UNDEFINED;
@@ -1699,7 +1725,7 @@ ns_ctx_save(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     (void)argc; (void)argv;
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
-    cairo_save(st->cr);
+    gfx_save(st->cr);
     JSValue stack = JS_GetPropertyStr(ctx, this_val, "_stateStack");
     if (!JS_IsArray(stack)) {
         JS_FreeValue(ctx, stack);
@@ -1746,7 +1772,7 @@ ns_ctx_restore(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     JS_SetProperty(ctx, stack, len_atom, JS_NewUint32(ctx, n - 1));
     JS_FreeAtom(ctx, len_atom);
     JS_FreeValue(ctx, stack);
-    cairo_restore(st->cr);
+    gfx_restore(st->cr);
     return JS_UNDEFINED;
 }
 
@@ -1760,7 +1786,7 @@ ns_ctx_restore(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
  * invisible until the transform is reset, so a singular matrix is nudged
  * to a tiny invertible one. */
 static void
-ns_canvas_set_matrix(cairo_t *cr, cairo_matrix_t *m)
+ns_canvas_set_matrix(gfx_t *cr, gfx_matrix_t *m)
 {
     double det = m->xx * m->yy - m->xy * m->yx;
     if (!isfinite(det) || det == 0) {
@@ -1768,19 +1794,19 @@ ns_canvas_set_matrix(cairo_t *cr, cairo_matrix_t *m)
         m->yy += NS_CANVAS_DEGENERATE_SCALE;
         det = m->xx * m->yy - m->xy * m->yx;
         if (!isfinite(det) || det == 0)
-            cairo_matrix_init(m, NS_CANVAS_DEGENERATE_SCALE, 0, 0,
+            gfx_matrix_init(m, NS_CANVAS_DEGENERATE_SCALE, 0, 0,
                               NS_CANVAS_DEGENERATE_SCALE, m->x0, m->y0);
     }
-    cairo_set_matrix(cr, m);
+    gfx_set_matrix(cr, m);
 }
 
 /* Multiplies cr's matrix by m (m applied first), keeping it invertible. */
 static void
-ns_canvas_apply_matrix(cairo_t *cr, const cairo_matrix_t *m)
+ns_canvas_apply_matrix(gfx_t *cr, const gfx_matrix_t *m)
 {
-    cairo_matrix_t cur, out;
-    cairo_get_matrix(cr, &cur);
-    cairo_matrix_multiply(&out, m, &cur);
+    gfx_matrix_t cur, out;
+    gfx_get_matrix(cr, &cur);
+    gfx_matrix_multiply(&out, m, &cur);
     ns_canvas_set_matrix(cr, &out);
 }
 
@@ -1802,7 +1828,7 @@ ns_ctx_translate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     double v[2];
     if (argc < 2 || !ns_canvas_finite_args(ctx, 2, argv, v)) return JS_UNDEFINED;
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
-    if (st) cairo_translate(st->cr, v[0], v[1]);
+    if (st) gfx_translate(st->cr, v[0], v[1]);
     return JS_UNDEFINED;
 }
 
@@ -1813,8 +1839,8 @@ ns_ctx_scale(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
     if (argc < 2 || !ns_canvas_finite_args(ctx, 2, argv, v)) return JS_UNDEFINED;
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
-    cairo_matrix_t m;
-    cairo_matrix_init_scale(&m, v[0], v[1]);
+    gfx_matrix_t m;
+    gfx_matrix_init_scale(&m, v[0], v[1]);
     ns_canvas_apply_matrix(st->cr, &m);
     return JS_UNDEFINED;
 }
@@ -1825,7 +1851,7 @@ ns_ctx_rotate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
     double v[1];
     if (argc < 1 || !ns_canvas_finite_args(ctx, 1, argv, v)) return JS_UNDEFINED;
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
-    if (st) cairo_rotate(st->cr, v[0]);
+    if (st) gfx_rotate(st->cr, v[0]);
     return JS_UNDEFINED;
 }
 
@@ -1890,6 +1916,36 @@ ns_ctx_direction_is_rtl(JSContext *ctx, JSValueConst this_val)
     return rtl;
 }
 
+/* pangocairo lays text out against a cairo_t: a scratch one carrying the
+ * canvas's current matrix stands in for the gfx context. */
+static cairo_t *
+ns_canvas_text_cairo(gfx_t *g)
+{
+    cairo_surface_t *scratch = cairo_image_surface_create(CAIRO_FORMAT_A8, 1, 1);
+    cairo_t *tcr = cairo_create(scratch);
+    cairo_surface_destroy(scratch);
+    gfx_matrix_t gm;
+    gfx_get_matrix(g, &gm);
+    cairo_matrix_t cm;
+    cairo_matrix_init(&cm, gm.xx, gm.yx, gm.xy, gm.yy, gm.x0, gm.y0);
+    cairo_set_matrix(tcr, &cm);
+    return tcr;
+}
+
+/* Appends the layout's glyph outlines at the current user-space origin. */
+static void
+ns_canvas_text_outline(gfx_t *g, NsPangoLayout *layout)
+{
+    cairo_t *tcr = ns_canvas_text_cairo(g);
+    cairo_move_to(tcr, 0, 0);
+    ns_pango_cairo_layout_path(tcr, layout);
+    cairo_path_t *outline = cairo_copy_path(tcr);
+    gfx_new_path(g);
+    gfx_append_cairo_path(g, outline);
+    cairo_path_destroy(outline);
+    cairo_destroy(tcr);
+}
+
 /* Lays out text and fills or strokes it per textAlign/textBaseline/direction and maxWidth. */
 static void
 ns_ctx_paint_text(JSContext *ctx, JSValueConst this_val,
@@ -1897,7 +1953,9 @@ ns_ctx_paint_text(JSContext *ctx, JSValueConst this_val,
                   double x, double y, double max_width,
                   gboolean stroke)
 {
-    NsPangoLayout *layout = ns_pango_cairo_create_layout(st->cr);
+    cairo_t *lcr = ns_canvas_text_cairo(st->cr);
+    NsPangoLayout *layout = ns_pango_cairo_create_layout(lcr);
+    cairo_destroy(lcr);
     NsPangoFontDescription *desc = ns_canvas_font_desc(st->font);
     ns_pango_layout_set_font_description(layout, desc);
     ns_pango_layout_set_text(layout, text, -1);
@@ -1944,22 +2002,36 @@ ns_ctx_paint_text(JSContext *ctx, JSValueConst this_val,
     else if (!strcmp(align, "start") &&  rtl)                dx = -tw;
     double xscale = 1.0;
     if (max_width > 0 && tw > max_width) xscale = max_width / tw;
-    cairo_save(st->cr);
+    /* The style is set before the text's own translation, so gradients
+     * and patterns lie in canvas space, and the current path is kept. */
+    gfx_path_t *keep = ns_ctx_path_stash(st->cr);
+    gfx_save(st->cr);
     ns_ctx_apply_composite(ctx, this_val, st->cr);
-    cairo_translate(st->cr, x + dx * xscale, y + dy);
-    if (xscale < 1.0) cairo_scale(st->cr, xscale, 1.0);
     if (stroke) {
         ns_ctx_set_stroke_source(ctx, this_val, st);
-        cairo_set_line_width(st->cr, st->line_width);
-        cairo_move_to(st->cr, 0, 0);
-        ns_pango_cairo_layout_path(st->cr, layout);
-        cairo_stroke(st->cr);
+        gfx_set_line_width(st->cr, st->line_width);
     } else {
         ns_ctx_set_fill_source(ctx, this_val, st);
-        cairo_move_to(st->cr, 0, 0);
-        ns_pango_cairo_show_layout(st->cr, layout);
     }
-    cairo_restore(st->cr);
+    gfx_translate(st->cr, x + dx * xscale, y + dy);
+    if (xscale < 1.0) gfx_scale(st->cr, xscale, 1.0);
+    if (stroke) {
+        ns_canvas_text_outline(st->cr, layout);
+        gfx_stroke(st->cr);
+    } else if (gfx_pattern_get_rgba(gfx_get_source(st->cr), NULL, NULL, NULL,
+                                    NULL)) {
+        /* A solid fill: glyphs drawn by pangocairo, into gfx's pixels. */
+        cairo_t *tcr = gfx_cairo_begin(st->cr);
+        cairo_move_to(tcr, 0, 0);
+        ns_pango_cairo_show_layout(tcr, layout);
+        gfx_cairo_end(st->cr, tcr);
+    } else {
+        /* A gradient or pattern: the glyph outlines, filled by gfx. */
+        ns_canvas_text_outline(st->cr, layout);
+        gfx_fill(st->cr);
+    }
+    gfx_restore(st->cr);
+    ns_ctx_path_restore(st->cr, keep);
     ns_pango_font_description_free(desc);
     g_object_unref(layout);
 }
@@ -2001,7 +2073,9 @@ ns_ctx_measureText(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
     const char *text = argc >= 1 ? JS_ToCString(ctx, argv[0]) : NULL;
     if (text && st) {
         ns_ctx_sync_styles(ctx, this_val, st);
-        NsPangoLayout *layout = ns_pango_cairo_create_layout(st->cr);
+        cairo_t *lcr = ns_canvas_text_cairo(st->cr);
+        NsPangoLayout *layout = ns_pango_cairo_create_layout(lcr);
+        cairo_destroy(lcr);
         NsPangoFontDescription *desc = ns_canvas_font_desc(st->font);
         ns_pango_layout_set_font_description(layout, desc);
         ns_pango_layout_set_text(layout, text, -1);
@@ -2050,10 +2124,10 @@ ns_ctx_quadraticCurveTo(JSContext *ctx, JSValueConst this_val,
     double cpx = ns_arg_d(ctx, argv[0]), cpy = ns_arg_d(ctx, argv[1]);
     double x   = ns_arg_d(ctx, argv[2]), y   = ns_arg_d(ctx, argv[3]);
     double x0, y0;
-    if (!cairo_has_current_point(st->cr))
-        cairo_move_to(st->cr, cpx, cpy);
-    cairo_get_current_point(st->cr, &x0, &y0);
-    cairo_curve_to(st->cr,
+    if (!gfx_has_current_point(st->cr))
+        gfx_move_to(st->cr, cpx, cpy);
+    gfx_get_current_point(st->cr, &x0, &y0);
+    gfx_curve_to(st->cr,
                    x0 + 2.0 / 3.0 * (cpx - x0), y0 + 2.0 / 3.0 * (cpy - y0),
                    x  + 2.0 / 3.0 * (cpx - x),  y  + 2.0 / 3.0 * (cpy - y),
                    x, y);
@@ -2066,7 +2140,7 @@ ns_ctx_bezierCurveTo(JSContext *ctx, JSValueConst this_val,
 {
     if (argc < 6) return JS_UNDEFINED;
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
-    if (st) cairo_curve_to(st->cr,
+    if (st) gfx_curve_to(st->cr,
         ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]),
         ns_arg_d(ctx, argv[2]), ns_arg_d(ctx, argv[3]),
         ns_arg_d(ctx, argv[4]), ns_arg_d(ctx, argv[5]));
@@ -2088,18 +2162,18 @@ ns_ctx_arcTo(JSContext *ctx, JSValueConst this_val,
         return ns_canvas_throw_dom(ctx, "IndexSizeError",
                                    "arcTo radius must not be negative");
     double x0, y0;
-    if (!cairo_has_current_point(st->cr))
-        cairo_move_to(st->cr, x1, y1);
-    cairo_get_current_point(st->cr, &x0, &y0);
+    if (!gfx_has_current_point(st->cr))
+        gfx_move_to(st->cr, x1, y1);
+    gfx_get_current_point(st->cr, &x0, &y0);
     double a1x = x0 - x1, a1y = y0 - y1;
     double a2x = x2 - x1, a2y = y2 - y1;
     double l1 = hypot(a1x, a1y), l2 = hypot(a2x, a2y);
-    if (l1 == 0 || l2 == 0 || r == 0) { cairo_line_to(st->cr, x1, y1); return JS_UNDEFINED; }
+    if (l1 == 0 || l2 == 0 || r == 0) { gfx_line_to(st->cr, x1, y1); return JS_UNDEFINED; }
     double u1x = a1x / l1, u1y = a1y / l1;
     double u2x = a2x / l2, u2y = a2y / l2;
     double cos_t = u1x * u2x + u1y * u2y;
     if (cos_t >= 1.0 || cos_t <= -1.0) {
-        cairo_line_to(st->cr, x1, y1);
+        gfx_line_to(st->cr, x1, y1);
         return JS_UNDEFINED;
     }
     double tan_half = sqrt((1 - cos_t) / (1 + cos_t));
@@ -2108,16 +2182,16 @@ ns_ctx_arcTo(JSContext *ctx, JSValueConst this_val,
     double t2x = x1 + u2x * dist, t2y = y1 + u2y * dist;
     double bisx = (u1x + u2x), bisy = (u1y + u2y);
     double blen = hypot(bisx, bisy);
-    if (blen == 0) { cairo_line_to(st->cr, t1x, t1y); return JS_UNDEFINED; }
+    if (blen == 0) { gfx_line_to(st->cr, t1x, t1y); return JS_UNDEFINED; }
     bisx /= blen; bisy /= blen;
     double cdist = sqrt(r * r + dist * dist);
     double cx = x1 + bisx * cdist, cy = y1 + bisy * cdist;
     double ang1 = atan2(t1y - cy, t1x - cx);
     double ang2 = atan2(t2y - cy, t2x - cx);
     double cross = u1x * u2y - u1y * u2x;
-    cairo_line_to(st->cr, t1x, t1y);
-    if (cross < 0) cairo_arc_negative(st->cr, cx, cy, r, ang1, ang2);
-    else           cairo_arc(st->cr, cx, cy, r, ang1, ang2);
+    gfx_line_to(st->cr, t1x, t1y);
+    if (cross < 0) gfx_arc_negative(st->cr, cx, cy, r, ang1, ang2);
+    else           gfx_arc(st->cr, cx, cy, r, ang1, ang2);
     return JS_UNDEFINED;
 }
 
@@ -2137,15 +2211,15 @@ ns_ctx_ellipse(JSContext *ctx, JSValueConst this_val,
         return ns_canvas_throw_dom(ctx, "IndexSizeError",
                                    "ellipse radius must not be negative");
     gboolean ccw = argc >= 8 && JS_ToBool(ctx, argv[7]);
-    cairo_save(st->cr);
-    cairo_translate(st->cr, x, y);
-    cairo_rotate(st->cr, rot);
+    gfx_save(st->cr);
+    gfx_translate(st->cr, x, y);
+    gfx_rotate(st->cr, rot);
     /* A zero radius is legal; cairo rejects a zero scale. */
-    cairo_scale(st->cr, rx > 0 ? rx : NS_CANVAS_DEGENERATE_SCALE,
+    gfx_scale(st->cr, rx > 0 ? rx : NS_CANVAS_DEGENERATE_SCALE,
                 ry > 0 ? ry : NS_CANVAS_DEGENERATE_SCALE);
-    if (ccw) cairo_arc_negative(st->cr, 0, 0, 1.0, a0, a1);
-    else     cairo_arc(st->cr, 0, 0, 1.0, a0, a1);
-    cairo_restore(st->cr);
+    if (ccw) gfx_arc_negative(st->cr, 0, 0, 1.0, a0, a1);
+    else     gfx_arc(st->cr, 0, 0, 1.0, a0, a1);
+    gfx_restore(st->cr);
     return JS_UNDEFINED;
 }
 
@@ -2156,15 +2230,15 @@ ns_ctx_clip(JSContext *ctx, JSValueConst this_val,
 {
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
-    cairo_path_t *saved = ns_ctx_prepare_path_and_rule(ctx, st->cr, argc, argv);
-    cairo_clip_preserve(st->cr);
+    gfx_path_t *saved = ns_ctx_prepare_path_and_rule(ctx, st->cr, argc, argv);
+    gfx_clip_preserve(st->cr);
     ns_ctx_restore_path(st->cr, saved);
     return JS_UNDEFINED;
 }
 
 /* Reads a..f from a DOMMatrix-like object into a cairo matrix; FALSE if not an object. */
 static gboolean
-ns_matrix_from_obj(JSContext *ctx, JSValueConst v, cairo_matrix_t *m)
+ns_matrix_from_obj(JSContext *ctx, JSValueConst v, gfx_matrix_t *m)
 {
     if (!JS_IsObject(v)) return FALSE;
     double a = 1, b = 0, c = 0, d = 1, e = 0, f = 0;
@@ -2175,7 +2249,7 @@ ns_matrix_from_obj(JSContext *ctx, JSValueConst v, cairo_matrix_t *m)
     tmp = JS_GetPropertyStr(ctx, v, "d"); JS_ToFloat64(ctx, &d, tmp); JS_FreeValue(ctx, tmp);
     tmp = JS_GetPropertyStr(ctx, v, "e"); JS_ToFloat64(ctx, &e, tmp); JS_FreeValue(ctx, tmp);
     tmp = JS_GetPropertyStr(ctx, v, "f"); JS_ToFloat64(ctx, &f, tmp); JS_FreeValue(ctx, tmp);
-    cairo_matrix_init(m, a, b, c, d, e, f);
+    gfx_matrix_init(m, a, b, c, d, e, f);
     return TRUE;
 }
 
@@ -2186,9 +2260,9 @@ ns_ctx_setTransform(JSContext *ctx, JSValueConst this_val,
 {
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
-    cairo_matrix_t m;
+    gfx_matrix_t m;
     if (argc == 0) {
-        cairo_identity_matrix(st->cr);
+        gfx_identity_matrix(st->cr);
         return JS_UNDEFINED;
     }
     if (argc == 1) {
@@ -2201,7 +2275,7 @@ ns_ctx_setTransform(JSContext *ctx, JSValueConst this_val,
     }
     double v[6];
     if (argc < 6 || !ns_canvas_finite_args(ctx, 6, argv, v)) return JS_UNDEFINED;
-    cairo_matrix_init(&m, v[0], v[1], v[2], v[3], v[4], v[5]);
+    gfx_matrix_init(&m, v[0], v[1], v[2], v[3], v[4], v[5]);
     ns_canvas_set_matrix(st->cr, &m);
     return JS_UNDEFINED;
 }
@@ -2215,8 +2289,8 @@ ns_ctx_transform(JSContext *ctx, JSValueConst this_val,
     if (argc < 6 || !ns_canvas_finite_args(ctx, 6, argv, v)) return JS_UNDEFINED;
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
-    cairo_matrix_t m;
-    cairo_matrix_init(&m, v[0], v[1], v[2], v[3], v[4], v[5]);
+    gfx_matrix_t m;
+    gfx_matrix_init(&m, v[0], v[1], v[2], v[3], v[4], v[5]);
     ns_canvas_apply_matrix(st->cr, &m);
     return JS_UNDEFINED;
 }
@@ -2227,7 +2301,7 @@ ns_ctx_resetTransform(JSContext *ctx, JSValueConst this_val,
 {
     (void)argc; (void)argv;
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
-    if (st) cairo_identity_matrix(st->cr);
+    if (st) gfx_identity_matrix(st->cr);
     return JS_UNDEFINED;
 }
 
@@ -2322,7 +2396,7 @@ ns_ctx_gradient_addColorStop(JSContext *ctx, JSValueConst this_val,
 }
 
 /* Resolves an image source (ImageBitmap, canvas, img) to a surface reference; caller unrefs. */
-static cairo_surface_t *
+static gfx_surface_t *
 ns_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h,
                         gboolean *origin_clean)
 {
@@ -2333,7 +2407,7 @@ ns_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h
         *out_w = bm->w;
         *out_h = bm->h;
         *origin_clean = bm->origin_clean;
-        return cairo_surface_reference(bm->surf);
+        return gfx_surface_reference(bm->surf);
     }
     const ns_node *n = ns_unwrap_element(src);
     if (!n) {
@@ -2351,7 +2425,7 @@ ns_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h
                 *out_w = st->w;
                 *out_h = st->h;
                 *origin_clean = st->origin_clean;
-                return cairo_surface_reference(st->surf);
+                return gfx_surface_reference(st->surf);
             }
         }
         return NULL;
@@ -2380,28 +2454,28 @@ ns_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h
     *origin_clean = ns_js_image_origin_clean(js, n, source,
         ns_element_get_attr(n, "crossorigin") != NULL);
     if (im_cache && im_cache->render_surface) {
-        cairo_surface_t *cached = im_cache->render_surface;
-        *out_w = cairo_image_surface_get_width(cached);
-        *out_h = cairo_image_surface_get_height(cached);
-        return cairo_surface_reference(cached);
+        gfx_surface_t *cached = im_cache->render_surface;
+        *out_w = gfx_image_surface_get_width(cached);
+        *out_h = gfx_image_surface_get_height(cached);
+        return gfx_surface_reference(cached);
     }
     int iw = ns_texture_get_width(tex);
     int ih = ns_texture_get_height(tex);
     if (iw <= 0 || ih <= 0) return NULL;
-    cairo_surface_t *surf =
-        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, iw, ih);
-    if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
-        cairo_surface_destroy(surf);
+    gfx_surface_t *surf =
+        gfx_image_surface_create(GFX_FORMAT_ARGB32, iw, ih);
+    if (gfx_surface_status(surf) != GFX_STATUS_SUCCESS) {
+        gfx_surface_destroy(surf);
         return NULL;
     }
-    guchar *dst = cairo_image_surface_get_data(surf);
-    int dst_stride = cairo_image_surface_get_stride(surf);
+    guchar *dst = gfx_image_surface_get_data(surf);
+    int dst_stride = gfx_image_surface_get_stride(surf);
     ns_texture_download(tex, dst, (gsize)dst_stride);
-    cairo_surface_mark_dirty(surf);
+    gfx_surface_mark_dirty(surf);
     *out_w = iw;
     *out_h = ih;
     if (im_cache)
-        im_cache->render_surface = cairo_surface_reference(surf);
+        im_cache->render_surface = gfx_surface_reference(surf);
     return surf;
 }
 
@@ -2417,11 +2491,11 @@ ns_ctx_drawImage(JSContext *ctx, JSValueConst this_val,
     if (argc < 3) return JS_UNDEFINED;
     int sw_total = 0, sh_total = 0;
     gboolean origin_clean = TRUE;
-    cairo_surface_t *src = ns_ctx_drawimage_source(ctx, argv[0],
+    gfx_surface_t *src = ns_ctx_drawimage_source(ctx, argv[0],
                                                    &sw_total, &sh_total,
                                                    &origin_clean);
     if (!src || sw_total <= 0 || sh_total <= 0) {
-        if (src) cairo_surface_destroy(src);
+        if (src) gfx_surface_destroy(src);
         return JS_UNDEFINED;
     }
     double sx, sy, sw, sh, dx, dy, dw, dh;
@@ -2454,31 +2528,31 @@ ns_ctx_drawImage(JSContext *ctx, JSValueConst this_val,
     if (!isfinite(sx) || !isfinite(sy) || !isfinite(sw) || !isfinite(sh) ||
         !isfinite(dx) || !isfinite(dy) || !isfinite(dw) || !isfinite(dh) ||
         sw == 0 || sh == 0 || dw == 0 || dh == 0) {
-        cairo_surface_destroy(src);
+        gfx_surface_destroy(src);
         return JS_UNDEFINED;
     }
     double ga = ns_ctx_global_alpha(ctx, this_val);
     gboolean smooth = ns_ctx_image_smoothing(ctx, this_val);
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) {
-        cairo_surface_destroy(src);
+        gfx_surface_destroy(src);
         return JS_UNDEFINED;
     }
-    cairo_save(st->cr);
+    gfx_save(st->cr);
     ns_ctx_apply_composite(ctx, this_val, st->cr);
-    cairo_translate(st->cr, dx, dy);
-    cairo_scale(st->cr, dw / sw, dh / sh);
-    cairo_translate(st->cr, -sx, -sy);
-    cairo_rectangle(st->cr, sx, sy, sw, sh);
-    cairo_clip(st->cr);
-    cairo_set_source_surface(st->cr, src, 0, 0);
-    cairo_pattern_set_filter(cairo_get_source(st->cr),
-                             smooth ? CAIRO_FILTER_BILINEAR
-                                    : CAIRO_FILTER_NEAREST);
-    if (ga < 1.0 - 1e-6) cairo_paint_with_alpha(st->cr, ga);
-    else                  cairo_paint(st->cr);
-    cairo_restore(st->cr);
-    cairo_surface_destroy(src);
+    gfx_translate(st->cr, dx, dy);
+    gfx_scale(st->cr, dw / sw, dh / sh);
+    gfx_translate(st->cr, -sx, -sy);
+    gfx_rectangle(st->cr, sx, sy, sw, sh);
+    gfx_clip(st->cr);
+    gfx_set_source_surface(st->cr, src, 0, 0);
+    gfx_pattern_set_filter(gfx_get_source(st->cr),
+                             smooth ? GFX_FILTER_BILINEAR
+                                    : GFX_FILTER_NEAREST);
+    if (ga < 1.0 - 1e-6) gfx_paint_with_alpha(st->cr, ga);
+    else                  gfx_paint(st->cr);
+    gfx_restore(st->cr);
+    gfx_surface_destroy(src);
     if (!origin_clean) st->origin_clean = FALSE;
     ns_ctx_request_repaint(ctx, this_val);
     return JS_UNDEFINED;
@@ -2493,10 +2567,10 @@ ns_ctx_createPattern(JSContext *ctx, JSValueConst this_val,
     if (argc < 1 || !JS_IsObject(argv[0])) return JS_NULL;
     int iw = 0, ih = 0;
     gboolean origin_clean = TRUE;
-    cairo_surface_t *probe = ns_ctx_drawimage_source(ctx, argv[0], &iw, &ih,
+    gfx_surface_t *probe = ns_ctx_drawimage_source(ctx, argv[0], &iw, &ih,
                                                      &origin_clean);
     if (!probe) return JS_NULL;
-    cairo_surface_destroy(probe);
+    gfx_surface_destroy(probe);
     JSValue obj = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, obj, "_type", JS_NewString(ctx, "pattern"));
     JS_SetPropertyStr(ctx, obj, "_node", JS_DupValue(ctx, argv[0]));
@@ -2780,15 +2854,15 @@ ns_ctx_getImageData(JSContext *ctx, JSValueConst this_val,
     int dw = (int)rw, dh = (int)rh;
     uint8_t *out = g_try_malloc0((size_t)dw * (size_t)dh * 4u);
     if (!out) return JS_ThrowRangeError(ctx, "getImageData allocation failed");
-    cairo_surface_t *surf = (st && st->surf) ? st->surf : NULL;
+    gfx_surface_t *surf = (st && st->surf) ? st->surf : NULL;
     const uint8_t *cd = NULL;
     int cw = 0, ch = 0, cs = 0;
     if (surf) {
-        cw = cairo_image_surface_get_width(surf);
-        ch = cairo_image_surface_get_height(surf);
-        cs = cairo_image_surface_get_stride(surf);
-        cairo_surface_flush(surf);
-        cd = cairo_image_surface_get_data(surf);
+        cw = gfx_image_surface_get_width(surf);
+        ch = gfx_image_surface_get_height(surf);
+        cs = gfx_image_surface_get_stride(surf);
+        gfx_surface_flush(surf);
+        cd = gfx_image_surface_get_data(surf);
     }
     if (cd)
     for (int y = 0; y < dh; y++) {
@@ -2851,11 +2925,11 @@ ns_ctx_putImageData(JSContext *ctx, JSValueConst this_val,
     if (rw <= 0 || rh <= 0) { JS_FreeValue(ctx, dv); return JS_UNDEFINED; }
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st || !st->surf) { JS_FreeValue(ctx, dv); return JS_UNDEFINED; }
-    int cw = cairo_image_surface_get_width(st->surf);
-    int ch = cairo_image_surface_get_height(st->surf);
-    int cs = cairo_image_surface_get_stride(st->surf);
-    cairo_surface_flush(st->surf);
-    uint8_t *cd = cairo_image_surface_get_data(st->surf);
+    int cw = gfx_image_surface_get_width(st->surf);
+    int ch = gfx_image_surface_get_height(st->surf);
+    int cs = gfx_image_surface_get_stride(st->surf);
+    gfx_surface_flush(st->surf);
+    uint8_t *cd = gfx_image_surface_get_data(st->surf);
     if (!cd) { JS_FreeValue(ctx, dv); return JS_UNDEFINED; }
     size_t byte_offset = 0, byte_len = 0, bpe = 0;
     JSValue ab = JS_GetTypedArrayBuffer(ctx, dv, &byte_offset, &byte_len, &bpe);
@@ -2890,7 +2964,7 @@ ns_ctx_putImageData(JSContext *ctx, JSValueConst this_val,
             p[0] = pb; p[1] = pg; p[2] = pr; p[3] = a;
         }
     }
-    cairo_surface_mark_dirty(st->surf);
+    gfx_surface_mark_dirty(st->surf);
     JS_FreeValue(ctx, ab);
     JS_FreeValue(ctx, dv);
     ns_ctx_request_repaint(ctx, this_val);
@@ -2906,7 +2980,7 @@ ns_ctx_strokeText(JSContext *ctx, JSValueConst this_val,
 
 /* Adds a closed rounded-rect subpath, clamping radii to half the shorter side. */
 static void
-ns_round_rect_subpath(cairo_t *cr, double x, double y, double w, double h,
+ns_round_rect_subpath(gfx_t *cr, double x, double y, double w, double h,
                       double rtl, double rtr, double rbr, double rbl)
 {
     double aw = fabs(w), ah = fabs(h);
@@ -2918,12 +2992,12 @@ ns_round_rect_subpath(cairo_t *cr, double x, double y, double w, double h,
     double x2 = x + w, y2 = y + h;
     if (w < 0) { double t = x; x = x2; x2 = t; }
     if (h < 0) { double t = y; y = y2; y2 = t; }
-    cairo_new_sub_path(cr);
-    cairo_arc(cr, x  + rtl, y  + rtl, rtl, G_PI,        1.5 * G_PI);
-    cairo_arc(cr, x2 - rtr, y  + rtr, rtr, 1.5 * G_PI,  0);
-    cairo_arc(cr, x2 - rbr, y2 - rbr, rbr, 0,           0.5 * G_PI);
-    cairo_arc(cr, x  + rbl, y2 - rbl, rbl, 0.5 * G_PI,  G_PI);
-    cairo_close_path(cr);
+    gfx_new_sub_path(cr);
+    gfx_arc(cr, x  + rtl, y  + rtl, rtl, G_PI,        1.5 * G_PI);
+    gfx_arc(cr, x2 - rtr, y  + rtr, rtr, 1.5 * G_PI,  0);
+    gfx_arc(cr, x2 - rbr, y2 - rbr, rbr, 0,           0.5 * G_PI);
+    gfx_arc(cr, x  + rbl, y2 - rbl, rbl, 0.5 * G_PI,  G_PI);
+    gfx_close_path(cr);
 }
 
 /* Expands a roundRect radii number or 1-4 element list into corners; FALSE if any negative. */
@@ -2979,19 +3053,19 @@ ns_ctx_reset(JSContext *ctx, JSValueConst this_val,
     (void)argc; (void)argv;
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
-    cairo_save(st->cr);
-    cairo_identity_matrix(st->cr);
-    cairo_set_operator(st->cr, CAIRO_OPERATOR_CLEAR);
-    cairo_paint(st->cr);
-    cairo_restore(st->cr);
-    cairo_identity_matrix(st->cr);
-    cairo_new_path(st->cr);
-    cairo_reset_clip(st->cr);
-    cairo_set_dash(st->cr, NULL, 0, 0);
-    cairo_set_line_width(st->cr, 1);
-    cairo_set_line_cap(st->cr, CAIRO_LINE_CAP_BUTT);
-    cairo_set_line_join(st->cr, CAIRO_LINE_JOIN_MITER);
-    cairo_set_miter_limit(st->cr, 10);
+    gfx_save(st->cr);
+    gfx_identity_matrix(st->cr);
+    gfx_set_operator(st->cr, GFX_OPERATOR_CLEAR);
+    gfx_paint(st->cr);
+    gfx_restore(st->cr);
+    gfx_identity_matrix(st->cr);
+    gfx_new_path(st->cr);
+    gfx_reset_clip(st->cr);
+    gfx_set_dash(st->cr, NULL, 0, 0);
+    gfx_set_line_width(st->cr, 1);
+    gfx_set_line_cap(st->cr, GFX_LINE_CAP_BUTT);
+    gfx_set_line_join(st->cr, GFX_LINE_JOIN_MITER);
+    gfx_set_miter_limit(st->cr, 10);
     JS_SetPropertyStr(ctx, this_val, "fillStyle", JS_NewString(ctx, "#000"));
     JS_SetPropertyStr(ctx, this_val, "strokeStyle", JS_NewString(ctx, "#000"));
     JS_SetPropertyStr(ctx, this_val, "lineWidth", JS_NewFloat64(ctx, 1));
@@ -3018,8 +3092,8 @@ ns_ctx_reset(JSContext *ctx, JSValueConst this_val,
     st->fill_r = st->fill_g = st->fill_b = 0; st->fill_a = 1;
     st->stroke_r = st->stroke_g = st->stroke_b = 0; st->stroke_a = 1;
     st->line_width = 1;
-    if (st->fill_pattern)   { cairo_pattern_destroy(st->fill_pattern);   st->fill_pattern = NULL; }
-    if (st->stroke_pattern) { cairo_pattern_destroy(st->stroke_pattern); st->stroke_pattern = NULL; }
+    if (st->fill_pattern)   { gfx_pattern_destroy(st->fill_pattern);   st->fill_pattern = NULL; }
+    if (st->stroke_pattern) { gfx_pattern_destroy(st->stroke_pattern); st->stroke_pattern = NULL; }
     st->shadow_r = st->shadow_g = st->shadow_b = 0;
     st->shadow_a = 0; st->shadow_blur = 0;
     st->shadow_ox = st->shadow_oy = 0;
@@ -3034,12 +3108,12 @@ ns_ctx_getTransform(JSContext *ctx, JSValueConst this_val,
 {
     (void)argc; (void)argv;
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
-    cairo_matrix_t m = { 1, 0, 0, 1, 0, 0 };
-    if (st) cairo_get_matrix(st->cr, &m);
+    gfx_matrix_t m = { 1, 0, 0, 1, 0, 0 };
+    if (st) gfx_get_matrix(st->cr, &m);
     return ns_dommatrix_make(ctx, m.xx, m.yx, m.xy, m.yy, m.x0, m.y0, FALSE);
 }
 
-/* isPointInPath([path], x, y, [fillRule]) via cairo_in_fill, preserving the current path. */
+/* isPointInPath([path], x, y, [fillRule]) via gfx_in_fill, preserving the current path. */
 static JSValue
 ns_ctx_isPointInPath(JSContext *ctx, JSValueConst this_val,
                      int argc, JSValueConst *argv)
@@ -3047,10 +3121,10 @@ ns_ctx_isPointInPath(JSContext *ctx, JSValueConst this_val,
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st || argc < 2) return JS_FALSE;
     int i = 0;
-    cairo_path_t *saved = NULL;
+    gfx_path_t *saved = NULL;
     if (ns_value_is_path2d(argv[0])) {
         if (argc < 3) return JS_FALSE;
-        saved = cairo_copy_path(st->cr);
+        saved = gfx_copy_path(st->cr);
         ns_replay_path2d(st->cr, argv[0]);
         i = 1;
     }
@@ -3059,16 +3133,16 @@ ns_ctx_isPointInPath(JSContext *ctx, JSValueConst this_val,
     const char *rule_s = NULL;
     if (argc > i + 2 && JS_IsString(argv[i + 2]))
         rule_s = JS_ToCString(ctx, argv[i + 2]);
-    cairo_fill_rule_t prev_rule = cairo_get_fill_rule(st->cr);
-    cairo_set_fill_rule(st->cr, ns_parse_fill_rule(rule_s));
+    gfx_fill_rule_t prev_rule = gfx_get_fill_rule(st->cr);
+    gfx_set_fill_rule(st->cr, ns_parse_fill_rule(rule_s));
     if (rule_s) JS_FreeCString(ctx, rule_s);
-    cairo_bool_t in = cairo_in_fill(st->cr, x, y);
-    cairo_set_fill_rule(st->cr, prev_rule);
+    gfx_bool_t in = gfx_in_fill(st->cr, x, y);
+    gfx_set_fill_rule(st->cr, prev_rule);
     ns_ctx_restore_path(st->cr, saved);
     return in ? JS_TRUE : JS_FALSE;
 }
 
-/* isPointInStroke([path], x, y) via cairo_in_stroke with the current line width. */
+/* isPointInStroke([path], x, y) via gfx_in_stroke with the current line width. */
 static JSValue
 ns_ctx_isPointInStroke(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv)
@@ -3077,24 +3151,24 @@ ns_ctx_isPointInStroke(JSContext *ctx, JSValueConst this_val,
     if (!st || argc < 2) return JS_FALSE;
     ns_ctx_sync_styles(ctx, this_val, st);
     int i = 0;
-    cairo_path_t *saved = NULL;
+    gfx_path_t *saved = NULL;
     if (ns_value_is_path2d(argv[0])) {
         if (argc < 3) return JS_FALSE;
-        saved = cairo_copy_path(st->cr);
+        saved = gfx_copy_path(st->cr);
         ns_replay_path2d(st->cr, argv[0]);
         i = 1;
     }
     double x = ns_arg_d(ctx, argv[i]);
     double y = ns_arg_d(ctx, argv[i + 1]);
-    cairo_set_line_width(st->cr, st->line_width);
-    cairo_bool_t in = cairo_in_stroke(st->cr, x, y);
+    gfx_set_line_width(st->cr, st->line_width);
+    gfx_bool_t in = gfx_in_stroke(st->cr, x, y);
     ns_ctx_restore_path(st->cr, saved);
     return in ? JS_TRUE : JS_FALSE;
 }
 
 /* Fetches the Path2D's recording context into out; throws TypeError if not a Path2D. */
 static JSValue
-ns_path2d_get_cr(JSContext *ctx, JSValueConst this_val, cairo_t **out)
+ns_path2d_get_cr(JSContext *ctx, JSValueConst this_val, gfx_t **out)
 {
     ns_path2d *p = JS_GetOpaque(this_val, ns_path2d_class_id);
     if (!p) return JS_ThrowTypeError(ctx, "Path2D expected");
@@ -3106,11 +3180,11 @@ static JSValue
 ns_path2d_moveTo(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv)
 {
-    cairo_t *cr = NULL;
+    gfx_t *cr = NULL;
     JSValue err = ns_path2d_get_cr(ctx, this_val, &cr);
     if (JS_IsException(err)) return err;
     if (argc < 2) return JS_UNDEFINED;
-    cairo_move_to(cr, ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]));
+    gfx_move_to(cr, ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]));
     return JS_UNDEFINED;
 }
 
@@ -3119,13 +3193,13 @@ static JSValue
 ns_path2d_lineTo(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv)
 {
-    cairo_t *cr = NULL;
+    gfx_t *cr = NULL;
     JSValue err = ns_path2d_get_cr(ctx, this_val, &cr);
     if (JS_IsException(err)) return err;
     if (argc < 2) return JS_UNDEFINED;
-    if (!cairo_has_current_point(cr))
-        cairo_move_to(cr, ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]));
-    cairo_line_to(cr, ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]));
+    if (!gfx_has_current_point(cr))
+        gfx_move_to(cr, ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]));
+    gfx_line_to(cr, ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]));
     return JS_UNDEFINED;
 }
 
@@ -3134,10 +3208,10 @@ ns_path2d_closePath(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
-    cairo_t *cr = NULL;
+    gfx_t *cr = NULL;
     JSValue err = ns_path2d_get_cr(ctx, this_val, &cr);
     if (JS_IsException(err)) return err;
-    cairo_close_path(cr);
+    gfx_close_path(cr);
     return JS_UNDEFINED;
 }
 
@@ -3145,11 +3219,11 @@ static JSValue
 ns_path2d_bezierCurveTo(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
-    cairo_t *cr = NULL;
+    gfx_t *cr = NULL;
     JSValue err = ns_path2d_get_cr(ctx, this_val, &cr);
     if (JS_IsException(err)) return err;
     if (argc < 6) return JS_UNDEFINED;
-    cairo_curve_to(cr,
+    gfx_curve_to(cr,
         ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]),
         ns_arg_d(ctx, argv[2]), ns_arg_d(ctx, argv[3]),
         ns_arg_d(ctx, argv[4]), ns_arg_d(ctx, argv[5]));
@@ -3161,16 +3235,16 @@ static JSValue
 ns_path2d_quadraticCurveTo(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv)
 {
-    cairo_t *cr = NULL;
+    gfx_t *cr = NULL;
     JSValue err = ns_path2d_get_cr(ctx, this_val, &cr);
     if (JS_IsException(err)) return err;
     if (argc < 4) return JS_UNDEFINED;
     double cpx = ns_arg_d(ctx, argv[0]), cpy = ns_arg_d(ctx, argv[1]);
     double x   = ns_arg_d(ctx, argv[2]), y   = ns_arg_d(ctx, argv[3]);
     double x0, y0;
-    if (!cairo_has_current_point(cr)) cairo_move_to(cr, cpx, cpy);
-    cairo_get_current_point(cr, &x0, &y0);
-    cairo_curve_to(cr,
+    if (!gfx_has_current_point(cr)) gfx_move_to(cr, cpx, cpy);
+    gfx_get_current_point(cr, &x0, &y0);
+    gfx_curve_to(cr,
                    x0 + 2.0 / 3.0 * (cpx - x0), y0 + 2.0 / 3.0 * (cpy - y0),
                    x  + 2.0 / 3.0 * (cpx - x),  y  + 2.0 / 3.0 * (cpy - y),
                    x, y);
@@ -3181,7 +3255,7 @@ static JSValue
 ns_path2d_arc(JSContext *ctx, JSValueConst this_val,
               int argc, JSValueConst *argv)
 {
-    cairo_t *cr = NULL;
+    gfx_t *cr = NULL;
     JSValue err = ns_path2d_get_cr(ctx, this_val, &cr);
     if (JS_IsException(err)) return err;
     if (argc < 5) return JS_UNDEFINED;
@@ -3191,8 +3265,8 @@ ns_path2d_arc(JSContext *ctx, JSValueConst this_val,
     double a0 = ns_arg_d(ctx, argv[3]);
     double a1 = ns_arg_d(ctx, argv[4]);
     gboolean ccw = argc >= 6 && JS_ToBool(ctx, argv[5]);
-    if (ccw) cairo_arc_negative(cr, x, y, r, a0, a1);
-    else     cairo_arc(cr, x, y, r, a0, a1);
+    if (ccw) gfx_arc_negative(cr, x, y, r, a0, a1);
+    else     gfx_arc(cr, x, y, r, a0, a1);
     return JS_UNDEFINED;
 }
 
@@ -3201,40 +3275,40 @@ static JSValue
 ns_path2d_arcTo(JSContext *ctx, JSValueConst this_val,
                 int argc, JSValueConst *argv)
 {
-    cairo_t *cr = NULL;
+    gfx_t *cr = NULL;
     JSValue err = ns_path2d_get_cr(ctx, this_val, &cr);
     if (JS_IsException(err)) return err;
     if (argc < 5) return JS_UNDEFINED;
     double x1 = ns_arg_d(ctx, argv[0]), y1 = ns_arg_d(ctx, argv[1]);
     double x2 = ns_arg_d(ctx, argv[2]), y2 = ns_arg_d(ctx, argv[3]);
     double r  = ns_arg_d(ctx, argv[4]);
-    if (!cairo_has_current_point(cr)) cairo_move_to(cr, x1, y1);
+    if (!gfx_has_current_point(cr)) gfx_move_to(cr, x1, y1);
     double x0, y0;
-    cairo_get_current_point(cr, &x0, &y0);
+    gfx_get_current_point(cr, &x0, &y0);
     double a1x = x0 - x1, a1y = y0 - y1;
     double a2x = x2 - x1, a2y = y2 - y1;
     double l1 = hypot(a1x, a1y), l2 = hypot(a2x, a2y);
-    if (l1 == 0 || l2 == 0 || r == 0) { cairo_line_to(cr, x1, y1); return JS_UNDEFINED; }
+    if (l1 == 0 || l2 == 0 || r == 0) { gfx_line_to(cr, x1, y1); return JS_UNDEFINED; }
     double u1x = a1x / l1, u1y = a1y / l1;
     double u2x = a2x / l2, u2y = a2y / l2;
     double cos_t = u1x * u2x + u1y * u2y;
-    if (cos_t >= 1.0 || cos_t <= -1.0) { cairo_line_to(cr, x1, y1); return JS_UNDEFINED; }
+    if (cos_t >= 1.0 || cos_t <= -1.0) { gfx_line_to(cr, x1, y1); return JS_UNDEFINED; }
     double tan_half = sqrt((1 - cos_t) / (1 + cos_t));
     double dist = r / tan_half;
     double t1x = x1 + u1x * dist, t1y = y1 + u1y * dist;
     double t2x = x1 + u2x * dist, t2y = y1 + u2y * dist;
     double bisx = (u1x + u2x), bisy = (u1y + u2y);
     double blen = hypot(bisx, bisy);
-    if (blen == 0) { cairo_line_to(cr, t1x, t1y); return JS_UNDEFINED; }
+    if (blen == 0) { gfx_line_to(cr, t1x, t1y); return JS_UNDEFINED; }
     bisx /= blen; bisy /= blen;
     double cdist = sqrt(r * r + dist * dist);
     double cx = x1 + bisx * cdist, cy = y1 + bisy * cdist;
     double ang1 = atan2(t1y - cy, t1x - cx);
     double ang2 = atan2(t2y - cy, t2x - cx);
     double cross = u1x * u2y - u1y * u2x;
-    cairo_line_to(cr, t1x, t1y);
-    if (cross < 0) cairo_arc_negative(cr, cx, cy, r, ang1, ang2);
-    else           cairo_arc(cr, cx, cy, r, ang1, ang2);
+    gfx_line_to(cr, t1x, t1y);
+    if (cross < 0) gfx_arc_negative(cr, cx, cy, r, ang1, ang2);
+    else           gfx_arc(cr, cx, cy, r, ang1, ang2);
     (void)t2x; (void)t2y;
     return JS_UNDEFINED;
 }
@@ -3244,7 +3318,7 @@ static JSValue
 ns_path2d_ellipse(JSContext *ctx, JSValueConst this_val,
                   int argc, JSValueConst *argv)
 {
-    cairo_t *cr = NULL;
+    gfx_t *cr = NULL;
     JSValue err = ns_path2d_get_cr(ctx, this_val, &cr);
     if (JS_IsException(err)) return err;
     double v[7];
@@ -3255,14 +3329,14 @@ ns_path2d_ellipse(JSContext *ctx, JSValueConst this_val,
         return ns_canvas_throw_dom(ctx, "IndexSizeError",
                                    "ellipse radius must not be negative");
     gboolean ccw = argc >= 8 && JS_ToBool(ctx, argv[7]);
-    cairo_save(cr);
-    cairo_translate(cr, x, y);
-    cairo_rotate(cr, rot);
-    cairo_scale(cr, rx > 0 ? rx : NS_CANVAS_DEGENERATE_SCALE,
+    gfx_save(cr);
+    gfx_translate(cr, x, y);
+    gfx_rotate(cr, rot);
+    gfx_scale(cr, rx > 0 ? rx : NS_CANVAS_DEGENERATE_SCALE,
                 ry > 0 ? ry : NS_CANVAS_DEGENERATE_SCALE);
-    if (ccw) cairo_arc_negative(cr, 0, 0, 1.0, a0, a1);
-    else     cairo_arc(cr, 0, 0, 1.0, a0, a1);
-    cairo_restore(cr);
+    if (ccw) gfx_arc_negative(cr, 0, 0, 1.0, a0, a1);
+    else     gfx_arc(cr, 0, 0, 1.0, a0, a1);
+    gfx_restore(cr);
     return JS_UNDEFINED;
 }
 
@@ -3270,11 +3344,11 @@ static JSValue
 ns_path2d_rect(JSContext *ctx, JSValueConst this_val,
                int argc, JSValueConst *argv)
 {
-    cairo_t *cr = NULL;
+    gfx_t *cr = NULL;
     JSValue err = ns_path2d_get_cr(ctx, this_val, &cr);
     if (JS_IsException(err)) return err;
     if (argc < 4) return JS_UNDEFINED;
-    cairo_rectangle(cr,
+    gfx_rectangle(cr,
         ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]),
         ns_arg_d(ctx, argv[2]), ns_arg_d(ctx, argv[3]));
     return JS_UNDEFINED;
@@ -3285,7 +3359,7 @@ static JSValue
 ns_path2d_roundRect(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv)
 {
-    cairo_t *cr = NULL;
+    gfx_t *cr = NULL;
     JSValue err = ns_path2d_get_cr(ctx, this_val, &cr);
     if (JS_IsException(err)) return err;
     if (argc < 4) return JS_UNDEFINED;
@@ -3305,14 +3379,14 @@ static JSValue
 ns_path2d_addPath(JSContext *ctx, JSValueConst this_val,
                   int argc, JSValueConst *argv)
 {
-    cairo_t *cr = NULL;
+    gfx_t *cr = NULL;
     JSValue err = ns_path2d_get_cr(ctx, this_val, &cr);
     if (JS_IsException(err)) return err;
     if (argc < 1 || !ns_value_is_path2d(argv[0])) return JS_UNDEFINED;
     ns_path2d *src = JS_GetOpaque(argv[0], ns_path2d_class_id);
     if (!src) return JS_UNDEFINED;
-    cairo_path_t *cp = cairo_copy_path(src->cr);
-    cairo_save(cr);
+    gfx_path_t *cp = gfx_copy_path(src->cr);
+    gfx_save(cr);
     if (argc >= 2 && JS_IsObject(argv[1])) {
         double a = 1, b = 0, c = 0, d = 1, e = 0, f = 0;
         JSValue v;
@@ -3322,13 +3396,13 @@ ns_path2d_addPath(JSContext *ctx, JSValueConst this_val,
         v = JS_GetPropertyStr(ctx, argv[1], "d"); JS_ToFloat64(ctx, &d, v); JS_FreeValue(ctx, v);
         v = JS_GetPropertyStr(ctx, argv[1], "e"); JS_ToFloat64(ctx, &e, v); JS_FreeValue(ctx, v);
         v = JS_GetPropertyStr(ctx, argv[1], "f"); JS_ToFloat64(ctx, &f, v); JS_FreeValue(ctx, v);
-        cairo_matrix_t m;
-        cairo_matrix_init(&m, a, b, c, d, e, f);
-        cairo_transform(cr, &m);
+        gfx_matrix_t m;
+        gfx_matrix_init(&m, a, b, c, d, e, f);
+        gfx_transform(cr, &m);
     }
-    cairo_append_path(cr, cp);
-    cairo_path_destroy(cp);
-    cairo_restore(cr);
+    gfx_append_path(cr, cp);
+    gfx_path_destroy(cp);
+    gfx_restore(cr);
     return JS_UNDEFINED;
 }
 
@@ -3371,12 +3445,12 @@ ns_svg_read_number(const char **pp, double *out)
 
 /* Appends an SVG elliptical arc using the SVG 1.1 endpoint-to-center conversion (F.6.5). */
 static void
-ns_path2d_arc_svg(cairo_t *cr, double x1, double y1,
+ns_path2d_arc_svg(gfx_t *cr, double x1, double y1,
                   double rx, double ry, double phi_deg,
                   gboolean large_arc, gboolean sweep,
                   double x2, double y2)
 {
-    if (rx == 0 || ry == 0) { cairo_line_to(cr, x2, y2); return; }
+    if (rx == 0 || ry == 0) { gfx_line_to(cr, x2, y2); return; }
     rx = fabs(rx); ry = fabs(ry);
     double phi = phi_deg * G_PI / 180.0;
     double cos_phi = cos(phi), sin_phi = sin(phi);
@@ -3401,23 +3475,23 @@ ns_path2d_arc_svg(cairo_t *cr, double x1, double y1,
     double cy = sin_phi * cxp + cos_phi * cyp + (y1 + y2) / 2.0;
     double a1 = atan2((y1p - cyp) / ry, (x1p - cxp) / rx);
     double a2 = atan2((-y1p - cyp) / ry, (-x1p - cxp) / rx);
-    cairo_save(cr);
-    cairo_translate(cr, cx, cy);
-    cairo_rotate(cr, phi);
-    cairo_scale(cr, rx, ry);
+    gfx_save(cr);
+    gfx_translate(cr, cx, cy);
+    gfx_rotate(cr, phi);
+    gfx_scale(cr, rx, ry);
     if (sweep) {
         if (a2 < a1) a2 += 2 * G_PI;
-        cairo_arc(cr, 0, 0, 1.0, a1, a2);
+        gfx_arc(cr, 0, 0, 1.0, a1, a2);
     } else {
         if (a2 > a1) a2 -= 2 * G_PI;
-        cairo_arc_negative(cr, 0, 0, 1.0, a1, a2);
+        gfx_arc_negative(cr, 0, 0, 1.0, a1, a2);
     }
-    cairo_restore(cr);
+    gfx_restore(cr);
 }
 
 /* Parses SVG path data (MLHVZCSQTA, abs/rel) into cairo path ops; stops at bad input. */
 static void
-ns_path2d_parse_svg(cairo_t *cr, const char *d)
+ns_path2d_parse_svg(gfx_t *cr, const char *d)
 {
     if (!d) return;
     const char *p = d;
@@ -3447,29 +3521,29 @@ ns_path2d_parse_svg(cairo_t *cr, const char *d)
         case 'M': case 'm':
             if (!ns_svg_read_number(&p, &x) || !ns_svg_read_number(&p, &y)) return;
             if (rel) { x += cx; y += cy; }
-            cairo_move_to(cr, x, y);
+            gfx_move_to(cr, x, y);
             cx = x; cy = y; sx = x; sy = y;
             break;
         case 'L': case 'l':
             if (!ns_svg_read_number(&p, &x) || !ns_svg_read_number(&p, &y)) return;
             if (rel) { x += cx; y += cy; }
-            cairo_line_to(cr, x, y);
+            gfx_line_to(cr, x, y);
             cx = x; cy = y;
             break;
         case 'H': case 'h':
             if (!ns_svg_read_number(&p, &x)) return;
             if (rel) x += cx;
-            cairo_line_to(cr, x, cy);
+            gfx_line_to(cr, x, cy);
             cx = x;
             break;
         case 'V': case 'v':
             if (!ns_svg_read_number(&p, &y)) return;
             if (rel) y += cy;
-            cairo_line_to(cr, cx, y);
+            gfx_line_to(cr, cx, y);
             cy = y;
             break;
         case 'Z': case 'z':
-            cairo_close_path(cr);
+            gfx_close_path(cr);
             cx = sx; cy = sy;
             break;
         case 'C': case 'c':
@@ -3477,7 +3551,7 @@ ns_path2d_parse_svg(cairo_t *cr, const char *d)
                 !ns_svg_read_number(&p, &x2) || !ns_svg_read_number(&p, &y2) ||
                 !ns_svg_read_number(&p, &x)  || !ns_svg_read_number(&p, &y)) return;
             if (rel) { x1 += cx; y1 += cy; x2 += cx; y2 += cy; x += cx; y += cy; }
-            cairo_curve_to(cr, x1, y1, x2, y2, x, y);
+            gfx_curve_to(cr, x1, y1, x2, y2, x, y);
             last_cx = x2; last_cy = y2;
             cx = x; cy = y;
             break;
@@ -3489,7 +3563,7 @@ ns_path2d_parse_svg(cairo_t *cr, const char *d)
                 prev_cmd == 'S' || prev_cmd == 's') {
                 x1 = 2 * cx - last_cx; y1 = 2 * cy - last_cy;
             } else { x1 = cx; y1 = cy; }
-            cairo_curve_to(cr, x1, y1, x2, y2, x, y);
+            gfx_curve_to(cr, x1, y1, x2, y2, x, y);
             last_cx = x2; last_cy = y2;
             cx = x; cy = y;
             break;
@@ -3497,7 +3571,7 @@ ns_path2d_parse_svg(cairo_t *cr, const char *d)
             if (!ns_svg_read_number(&p, &x1) || !ns_svg_read_number(&p, &y1) ||
                 !ns_svg_read_number(&p, &x)  || !ns_svg_read_number(&p, &y)) return;
             if (rel) { x1 += cx; y1 += cy; x += cx; y += cy; }
-            cairo_curve_to(cr,
+            gfx_curve_to(cr,
                 cx + 2.0 / 3.0 * (x1 - cx), cy + 2.0 / 3.0 * (y1 - cy),
                 x  + 2.0 / 3.0 * (x1 - x),  y  + 2.0 / 3.0 * (y1 - y),
                 x, y);
@@ -3511,7 +3585,7 @@ ns_path2d_parse_svg(cairo_t *cr, const char *d)
                 prev_cmd == 'T' || prev_cmd == 't') {
                 x1 = 2 * cx - last_qx; y1 = 2 * cy - last_qy;
             } else { x1 = cx; y1 = cy; }
-            cairo_curve_to(cr,
+            gfx_curve_to(cr,
                 cx + 2.0 / 3.0 * (x1 - cx), cy + 2.0 / 3.0 * (y1 - cy),
                 x  + 2.0 / 3.0 * (x1 - x),  y  + 2.0 / 3.0 * (y1 - y),
                 x, y);
@@ -3542,17 +3616,19 @@ ns_path2d_ctor(JSContext *ctx, JSValueConst this_val,
 {
     (void)this_val;
     ns_path2d *p = g_new0(ns_path2d, 1);
-    p->rs = cairo_recording_surface_create(CAIRO_CONTENT_COLOR_ALPHA, NULL);
-    p->cr = cairo_create(p->rs);
+    /* Only the path matters: a gfx context on a 1 x 1 surface keeps it,
+     * unclipped. */
+    p->rs = gfx_image_surface_create(GFX_FORMAT_A8, 1, 1);
+    p->cr = gfx_create(p->rs);
     JSValue obj = JS_NewObjectClass(ctx, ns_path2d_class_id);
     JS_SetOpaque(obj, p);
     ns_path2d_attach_methods(ctx, obj);
     if (argc >= 1 && ns_value_is_path2d(argv[0])) {
         ns_path2d *src = JS_GetOpaque(argv[0], ns_path2d_class_id);
         if (src) {
-            cairo_path_t *cp = cairo_copy_path(src->cr);
-            cairo_append_path(p->cr, cp);
-            cairo_path_destroy(cp);
+            gfx_path_t *cp = gfx_copy_path(src->cr);
+            gfx_append_path(p->cr, cp);
+            gfx_path_destroy(cp);
         }
     } else if (argc >= 1 && JS_IsString(argv[0])) {
         const char *d = JS_ToCString(ctx, argv[0]);
@@ -3811,11 +3887,11 @@ ns_element_getContext(JSContext *ctx, JSValueConst this_val,
         JS_FreeValue(ctx, cv);
     }
     if (opaque && st->surf) {
-        cairo_t *cr = cairo_create(st->surf);
-        cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
-        cairo_set_source_rgba(cr, 0, 0, 0, 1);
-        cairo_paint(cr);
-        cairo_destroy(cr);
+        gfx_t *cr = gfx_create(st->surf);
+        gfx_set_operator(cr, GFX_OPERATOR_SOURCE);
+        gfx_set_source_rgba(cr, 0, 0, 0, 1);
+        gfx_paint(cr);
+        gfx_destroy(cr);
     }
     JSValue proto = ns_ctx_prototype(ctx);
     JSValue obj = JS_IsObject(proto) ? JS_NewObjectProto(ctx, proto)
@@ -3849,22 +3925,22 @@ ns_element_getContext(JSContext *ctx, JSValueConst this_val,
 }
 
 /* cairo PNG stream callback appending bytes to a GByteArray closure. */
-cairo_status_t
+gfx_status_t
 ns_canvas_png_write(void *closure, const unsigned char *data, unsigned int length)
 {
     g_byte_array_append((GByteArray *)closure, data, length);
-    return CAIRO_STATUS_SUCCESS;
+    return GFX_STATUS_SUCCESS;
 }
 
 /* Encodes a surface as PNG and wraps it in a Blob-like object; null on failure. */
 JSValue
-ns_canvas_blob_from_surface(JSContext *ctx, cairo_surface_t *surface)
+ns_canvas_blob_from_surface(JSContext *ctx, gfx_surface_t *surface)
 {
     if (!surface) return JS_NULL;
     GByteArray *buf = g_byte_array_new();
-    cairo_status_t status = cairo_surface_write_to_png_stream(
+    gfx_status_t status = gfx_surface_write_to_png_stream(
         surface, ns_canvas_png_write, buf);
-    if (status != CAIRO_STATUS_SUCCESS) {
+    if (status != GFX_STATUS_SUCCESS) {
         g_byte_array_free(buf, TRUE);
         return JS_NULL;
     }

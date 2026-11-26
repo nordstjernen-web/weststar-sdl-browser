@@ -91,6 +91,14 @@ jobs:
           cat js.txt
           grep -q 'js-ok 42 timer-ok' js.txt
 
+      - name: Canvas 2D smoke
+        run: |
+          set -o pipefail
+          ./builddir/src/sdl/weststar --headless --dump=text --settle-ms=500             "file://$PWD/data/fixtures/canvas-2d.html" > canvas.txt
+          grep -E '^(PASS|FAIL)' canvas.txt
+          grep -q 'PASS toDataURL' canvas.txt
+          ! grep -q '^FAIL' canvas.txt
+
       - name: No WebGL, no video
         run: |
           set -o pipefail

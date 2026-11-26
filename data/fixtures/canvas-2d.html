@@ -1,0 +1,35 @@
+<!doctype html>
+<!-- Canvas 2D checks: each prints PASS or FAIL. Run headless with
+     --dump=text; CI fails on any FAIL. -->
+<html><body style="margin:6px">
+<canvas id="c" width="480" height="260"></canvas><pre id="out"></pre>
+<script>
+var c=document.getElementById("c"),x=c.getContext("2d"),r=[];
+function px(X,Y){var d=x.getImageData(X,Y,1,1).data;return [d[0],d[1],d[2],d[3]];}
+function near(a,b,t){for(var i=0;i<4;i++)if(Math.abs(a[i]-b[i])>(t||3))return false;return true;}
+function ck(n,ok,v){r.push((ok?"PASS ":"FAIL ")+n+(ok?"":" got "+v));}
+x.fillStyle="#ff0000";x.fillRect(10,10,60,40);ck("fillRect",near(px(40,30),[255,0,0,255]),px(40,30));
+x.fillStyle="rgba(0,0,255,0.5)";x.fillRect(40,20,60,40);ck("alpha over",near(px(50,30),[128,0,127,255],4),px(50,30));
+x.globalCompositeOperation="destination-out";x.fillRect(80,30,10,10);x.globalCompositeOperation="source-over";ck("destination-out halves alpha",near(px(85,35),[0,0,255,64],3),px(85,35));
+x.save();x.beginPath();x.arc(160,40,30,0,Math.PI*2);x.clip();x.fillStyle="#0a0";x.fillRect(120,0,100,100);x.restore();
+ck("arc clip inside",near(px(160,40),[0,170,0,255]),px(160,40));ck("arc clip outside",px(135,12)[3]==0,px(135,12));
+var p=new Path2D("M220 10 L280 10 L250 60 Z");x.fillStyle="#fa0";x.fill(p);ck("Path2D fill",near(px(250,25),[255,170,0,255]),px(250,25));ck("isPointInPath",x.isPointInPath(p,250,25)&&!x.isPointInPath(p,222,55),"");
+var g=x.createLinearGradient(300,0,460,0);g.addColorStop(0,"#000");g.addColorStop(1,"#fff");x.fillStyle=g;x.fillRect(300,10,160,40);ck("linear gradient mid",near(px(380,30),[128,128,128,255],6),px(380,30));
+var id=x.createImageData(4,4);for(var i=0;i<id.data.length;i+=4){id.data[i]=10;id.data[i+1]=200;id.data[i+2]=30;id.data[i+3]=255;}x.putImageData(id,470,10);ck("putImageData",near(px(471,11),[10,200,30,255],0),px(471,11));
+var c2=document.createElement("canvas");c2.width=20;c2.height=20;var y=c2.getContext("2d");y.fillStyle="#123456";y.fillRect(0,0,20,20);x.drawImage(c2,10,70,40,40);ck("drawImage canvas scaled",near(px(30,90),[18,52,86,255]),px(30,90));
+x.lineWidth=8;x.strokeStyle="#609";x.lineCap="butt";x.setLineDash([12,8]);x.beginPath();x.moveTo(60,80);x.lineTo(200,80);x.stroke();x.setLineDash([]);ck("dashed stroke on",near(px(66,80),[102,0,153,255]),px(66,80));ck("dashed stroke gap",px(76,80)[3]==0,px(76,80));
+x.font="28px sans-serif";x.fillStyle="#222";x.fillText("Weststar",60,130);var w=x.measureText("Weststar").width;ck("measureText",w>80&&w<160,w);
+var tg=x.createLinearGradient(220,100,380,100);tg.addColorStop(0,"red");tg.addColorStop(1,"blue");x.fillStyle=tg;x.font="bold 34px sans-serif";x.fillText("gradient",220,135);
+var hit=0;for(var X=220;X<380;X++)for(var Y=105;Y<140;Y++)if(px(X,Y)[3]>200)hit++;ck("gradient fillText inked",hit>300,hit);
+x.strokeStyle="#080";x.lineWidth=1;x.strokeText("stroke",390,135);
+if(x.createConicGradient){var cg=x.createConicGradient(0,80,200);cg.addColorStop(0,"red");cg.addColorStop(1,"blue");x.fillStyle=cg;x.beginPath();x.arc(80,200,45,0,Math.PI*2);x.fill();ck("conic gradient",px(110,203)[0]>200&&px(110,203)[3]==255,px(110,203));}
+x.shadowColor="rgba(0,0,0,0.6)";x.shadowBlur=6;x.shadowOffsetX=5;x.shadowOffsetY=5;x.fillStyle="#3cf";x.fillRect(160,170,70,50);x.shadowColor="transparent";ck("shadow",px(233,224)[3]>20,px(233,224));
+x.save();x.translate(330,200);x.rotate(0.4);x.fillStyle="#c30";x.fillRect(-40,-20,80,40);x.restore();ck("rotated rect",near(px(330,200),[204,51,0,255]),px(330,200));
+ck("fillRect leaves the arc alone",px(60,205)[2]<200||px(60,205)[0]>100,px(60,205));
+var lt=null,rt=null;for(var X=226;X<300&&!lt;X++)for(var Y=110;Y<140;Y++){var q=px(X,Y);if(q[3]==255){lt=q;break;}}
+for(var X=370;X>300&&!rt;X--)for(var Y=110;Y<140;Y++){var q=px(X,Y);if(q[3]==255){rt=q;break;}}
+ck("gradient text runs red to blue",lt&&rt&&lt[0]>lt[2]&&rt[2]>rt[0],String(lt)+" / "+String(rt));
+x.beginPath();x.moveTo(5,250);x.lineTo(40,250);x.strokeText("t",440,250);ck("text keeps the current path",x.isPointInStroke?x.isPointInStroke(20,250):true,"");
+var u=c.toDataURL();ck("toDataURL png",u.indexOf("data:image/png;base64,")==0&&u.length>1000,u.length);
+document.getElementById("out").textContent=r.join("\n");
+</script></body></html>

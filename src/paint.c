@@ -7736,7 +7736,9 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             paint_svg(cr, b);
     }
     if (!self_hidden && ns_node_is_tag(b->dom, NS_TAG_CANVAS) && g_paint_js) {
-        cairo_surface_t *surf = ns_js_canvas_surface(g_paint_js, b->dom);
+        gfx_surface_t *gsurf = ns_js_canvas_surface(g_paint_js, b->dom);
+        /* The canvas draws with gfx; Cairo reads the same pixels. */
+        cairo_surface_t *surf = gsurf ? gfx_cairo_surface_wrap(gsurf) : NULL;
         if (surf) {
             int sw = cairo_image_surface_get_width(surf);
             int sh = cairo_image_surface_get_height(surf);
@@ -7752,6 +7754,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
                 cairo_paint(cr);
                 cairo_restore(cr);
             }
+            cairo_surface_destroy(surf);
         }
     }
 
