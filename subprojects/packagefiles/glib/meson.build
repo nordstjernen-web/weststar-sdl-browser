@@ -80,6 +80,10 @@ foreach f : ['close_range', 'fallocate', 'fsync', 'getauxval', 'getpwuid_r',
     conf.set('HAVE_' + f.to_upper(), 1)
   endif
 endforeach
+# Windows' aligned allocator, which gmem.c uses where C11's is missing.
+if is_windows and cc.has_function('_aligned_malloc', prefix: '#include <malloc.h>')
+  conf.set('HAVE__ALIGNED_MALLOC', 1)
+endif
 if cc.links('''#include <langinfo.h>
                int main(void) { return nl_langinfo(CODESET)[0]; }''',
             name: 'nl_langinfo(CODESET)')
