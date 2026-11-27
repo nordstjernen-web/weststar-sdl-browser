@@ -116,10 +116,21 @@ So the shell goes first, and Cairo after it:
       the browser still takes from GLib is data structures, Unicode
       tables, string and URI functions, logging, and GObject for the
       text library: 318 functions, from 370.
-   5. *GLib's data structures and GObject* (about 500 functions at 21,000
+   5. *GLib's data structures and GObject* (318 functions at 21,000
       call sites, and the Pango fork's type system) come from a trimmed
-      GLib vendored in the tree and built statically, its few OS calls
-      redirected to the SDL layer — rather than rewriting the call sites.
+      GLib built statically, its few OS calls redirected to the SDL
+      layer — rather than rewriting the call sites. Started: with
+      `-Dglib=bundled` the browser builds the 72 source files of GLib
+      2.80 and GObject that those functions live in, from the release
+      pinned in `subprojects/glib.wrap`, with a build of its own
+      (`subprojects/packagefiles/glib/`) in place of GLib's, and links
+      them statically; with unused sections dropped that is about 1 MB.
+      GIO, GModule, PCRE2, libffi and libintl are not built or needed.
+      It is set up for Linux and the BSDs so far. Next: Windows, and
+      then the OS calls inside those files (threads for `g_once` and
+      GObject's locks, the clock, the environment, the locale's
+      character set) on the SDL layer, which is what a platform without
+      a GLib port needs.
    6. *SDL2 as well as SDL3* in the shell, since the Amiga-family ports
       and XP-capable builds are SDL2.
    7. *Toolchains and targets*: the code kept to C11 (C23 `#embed`

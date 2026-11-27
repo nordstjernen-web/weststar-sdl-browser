@@ -150,6 +150,10 @@ foreach name, floor : ns_floors
   if name == 'fontconfig' and not get_option('fontconfig').enabled()
     continue
   endif
+  # GLib and GObject may come from the pinned subproject instead.
+  if get_option('glib') == 'bundled' and (name == 'glib-2.0' or name == 'gobject-2.0')
+    continue
+  endif
   if not dependency(name, version: floor, required: false).found()
     installed = dependency(name, required: false)
     ns_unmet_floors += '  @0@ @1@ (@2@)'.format(name, floor,
@@ -163,8 +167,17 @@ if ns_unmet_floors.length() > 0
         'their distributions that ship all of them; see docs/building.md.')
 endif
 
-glib    = dependency('glib-2.0', version: ns_floors['glib-2.0'])
-gobject = dependency('gobject-2.0', version: ns_floors['gobject-2.0'])
+# GLib and GObject: the system's, or with -Dglib=bundled the part of them
+# the browser uses, built statically from the pinned release
+# (subprojects/glib.wrap and packagefiles/glib/).
+if get_option('glib') == 'bundled'
+  glib_proj = subproject('glib')
+  glib    = glib_proj.get_variable('glib_dep')
+  gobject = glib_proj.get_variable('gobject_dep')
+else
+  glib    = dependency('glib-2.0', version: ns_floors['glib-2.0'])
+  gobject = dependency('gobject-2.0', version: ns_floors['gobject-2.0'])
+endif
 
 # SDL3 opens the window, takes input and plays audio. The chrome is drawn
 # with Nuklear, vendored in subprojects/nuklear.
@@ -472,6 +485,7 @@ summary({
   'JavaScript engine': js_engine + ' ' + libquickjs.version(),
   'Crypto library': crypto_backend + ' ' + libcrypto.version(),
   'Built-in CA certificates': have_ca_bundle ? get_option('ca_bundle') : 'none',
+  'GLib': get_option('glib') == 'bundled' ? 'bundled ' + glib.version() : 'system ' + glib.version(),
   'Fonts found by': have_system_fontconfig ? 'fontconfig ' + libfontconfig.version() : 'nsfc (in tree)',
 }, section: 'Features')
 

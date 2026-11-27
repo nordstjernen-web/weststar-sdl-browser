@@ -150,7 +150,8 @@ jobs:
     # The portable build profile: mbedTLS (fetched as a meson subproject)
     # instead of OpenSSL, nsfc, the in-tree font finder, instead of
     # fontconfig, which is not even installed, CA certificates compiled
-    # in, and the C11 language level older toolchains stop at. Algorithms mbedTLS lacks (EdDSA) must report NotSupportedError
+    # in, the C11 language level older toolchains stop at, and GLib built
+    # from the pinned release instead of taken from the system. Algorithms mbedTLS lacks (EdDSA) must report NotSupportedError
     # (SKIP), never fail.
     name: gcc on ubuntu-26.04, portable profile
     runs-on: ubuntu-26.04
@@ -179,14 +180,16 @@ jobs:
         run: |
           meson setup builddir --werror -Db_lto=false -Dpdfjs=disabled \
             -Dcrypto=mbedtls -Dfontconfig=disabled \
-            -Dca_bundle=/etc/ssl/certs/ca-certificates.crt -Dc_std=gnu11
+            -Dca_bundle=/etc/ssl/certs/ca-certificates.crt -Dc_std=gnu11 \
+            -Dglib=bundled
           meson compile -C builddir
 
-      - name: No libcrypto and no fontconfig in the binary
+      - name: No libcrypto, fontconfig or GLib in the binary
         run: |
-          # curl may bring its own TLS library; Weststar itself must not
-          # link OpenSSL's libcrypto, nor fontconfig.
-          ! objdump -p builddir/src/sdl/weststar | grep -E 'NEEDED +(libcrypto|libfontconfig)'
+          # curl may bring its own TLS library, and the distribution's
+          # HarfBuzz its own GLib; Weststar itself must not link OpenSSL's
+          # libcrypto, fontconfig, or the system's GLib and GObject.
+          ! objdump -p builddir/src/sdl/weststar | grep -E 'NEEDED +(libcrypto|libfontconfig|libglib|libgobject)'
 
       - name: nsfc and SDL layer tests
         run: |
@@ -198,6 +201,18 @@ jobs:
           set -o pipefail
           ./builddir/src/sdl/weststar --headless --dump=text about:start > about.txt
           grep -q 'Search duckduckgo.com' about.txt
+
+      - name: Canvas and pattern checks
+        run: |
+          set -o pipefail
+          ./builddir/src/sdl/weststar --headless --dump=text --settle-ms=500 \
+            "file://$PWD/data/fixtures/canvas-2d.html" > canvas.txt
+          grep -q 'PASS toDataURL' canvas.txt
+          ! grep -q '^FAIL' canvas.txt
+          ./builddir/src/sdl/weststar --headless --dump=text --settle-ms=1000 \
+            "file://$PWD/data/fixtures/pattern.html" > pattern.txt
+          grep -q 'PASS checkValidity' pattern.txt
+          ! grep -q '^FAIL' pattern.txt
 
       - name: Text is drawn with the fonts nsfc found
         run: |

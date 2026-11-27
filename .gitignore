@@ -46,6 +46,7 @@ compile_commands.json
 /subprojects/wasm-micro-runtime-*/
 /subprojects/wuffs-*/
 /subprojects/mbedtls-*/
+/subprojects/glib-*/
 
 # Editor / OS
 *~
