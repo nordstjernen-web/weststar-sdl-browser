@@ -193,7 +193,7 @@ jobs:
       - name: The binary uses SDL2 from the wrap, and no SDL3
         run: |
           ldd builddir/src/sdl/weststar | grep -i libsdl
-          ldd builddir/src/sdl/weststar | grep -E 'libSDL2-2\.0\.so.* => .*/builddir/subprojects/'
+          ldd builddir/src/sdl/weststar | grep -E 'libSDL2-2\.0\.so.* => .*/subprojects/SDL2-[0-9.]+/'
           ! ldd builddir/src/sdl/weststar | grep -i libSDL3
 
       - name: gfx, nsfc and SDL layer tests
