@@ -52,6 +52,10 @@ conf.set('USE_SYSTEM_PRINTF', true)
 conf.set('HAVE_C99_SNPRINTF', 1)
 conf.set('HAVE_C99_VSNPRINTF', 1)
 
+# GLib's own threads are SDL's; the C library's thread option is kept on
+# Unix for what else the files may call, and left off on Windows, where
+# clang rejects it at link time as unused.
+threads_dep = is_windows ? declare_dependency() : dependency('threads')
 # MinGW's C99 printf rather than the old C runtime's.
 gnu = ['-D_GNU_SOURCE'] + (is_windows ? ['-D__USE_MINGW_ANSI_STDIO=1'] : [])
 foreach h : ['alloca.h', 'dirent.h', 'sched.h', 'stdatomic.h', 'stdint.h',
@@ -76,7 +80,7 @@ foreach f : ['close_range', 'fallocate', 'fsync', 'getauxval', 'getpwuid_r',
   if is_windows and ['stpcpy', 'posix_memalign', 'memalign', 'strlcpy', 'aligned_alloc'].contains(f)
     continue
   endif
-  if cc.has_function(f, args: gnu, dependencies: dependency('threads'))
+  if cc.has_function(f, args: gnu, dependencies: threads_dep)
     conf.set('HAVE_' + f.to_upper(), 1)
   endif
 endforeach
@@ -112,7 +116,6 @@ foreach t : [['char', 'CHAR'], ['short', 'SHORT'], ['int', 'INT'],
 endforeach
 configure_file(output: 'config.h', configuration: conf)
 
-threads_dep = dependency('threads')
 # Threads, locks and clocks come from SDL (glib/ns-gthread-sdl.c,
 # glib/ns-gclock.c), as everything else the browser asks a system for.
 sdl3_dep = dependency('sdl3')
