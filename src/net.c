@@ -76,6 +76,13 @@ static GHashTable *g_hsts_cache;
 static gint64      g_hsts_cache_mtime_us;
 static NsMutex     g_hsts_lock;
 static char *g_ca_bundle;
+#ifdef NS_HAVE_CA_BUNDLE
+/* The CA certificates compiled in with -Dca_bundle, and whether they are
+ * the trust store in use: where no certificate file was found, or where
+ * NS_CA_BUNDLE=builtin asks for them. */
+#include "ca_bundle.h"
+static gboolean g_ca_builtin;
+#endif
 static const char *g_ec_curves = "X25519:P-256:P-384";
 static char *g_accept_encoding;
 static char *g_proxy_override;
@@ -2019,6 +2026,17 @@ static void
 ns_net_resolve_ca_bundle(void)
 {
     if (g_ca_bundle) return;
+    /* NS_CA_BUNDLE names Weststar's own choice: a file, or "builtin" for
+     * the certificates compiled in, on a system whose own are too old. */
+    const char *own = ns_getenv("NS_CA_BUNDLE");
+#ifdef NS_HAVE_CA_BUNDLE
+    if (g_ca_builtin) return;
+    if (own && strcmp(own, "builtin") == 0) {
+        g_ca_builtin = TRUE;
+        return;
+    }
+#endif
+    if (ns_net_try_ca_bundle(own)) return;
     const char *env = ns_getenv("CURL_CA_BUNDLE");
     if (!env) env = ns_getenv("SSL_CERT_FILE");
     if (ns_net_try_ca_bundle(env)) return;
@@ -2085,10 +2103,18 @@ ns_net_resolve_ca_bundle(void)
     for (int i = 0; win_paths[i]; i++)
         if (ns_net_try_ca_bundle(win_paths[i])) return;
 
+#ifndef NS_HAVE_CA_BUNDLE
     g_info("ns_net: no CA bundle file found; relying on "
            "CURLSSLOPT_NATIVE_CA via the Windows certificate store. "
            "If HTTPS fails, install mingw-w64-ucrt-x86_64-ca-certificates or "
            "set CURL_CA_BUNDLE.");
+#endif
+#endif
+
+#ifdef NS_HAVE_CA_BUNDLE
+    /* No certificate file anywhere: the compiled-in set. */
+    g_ca_builtin = TRUE;
+    g_info("ns_net: no CA bundle file found; using the built-in certificates");
 #endif
 }
 
@@ -2516,6 +2542,21 @@ ns_net_apply_curl_tls(void *curl_handle)
             }
         }
     }
+#endif
+#ifdef NS_HAVE_CA_BUNDLE
+    if (g_ca_builtin) {
+        /* The array ends with a NUL that is not part of the file. */
+        struct curl_blob blob = {
+            .data = (void *)(uintptr_t)ns_ca_bundle_pem,
+            .len = sizeof ns_ca_bundle_pem - 1,
+            .flags = CURL_BLOB_NOCOPY,
+        };
+        curl_easy_setopt(curl, CURLOPT_CAINFO_BLOB, &blob);
+        /* Nothing but these: not the file and folder libcurl was built
+         * to look in. */
+        curl_easy_setopt(curl, CURLOPT_CAINFO, NULL);
+        curl_easy_setopt(curl, CURLOPT_CAPATH, NULL);
+    } else
 #endif
     if (g_ca_bundle) {
         curl_easy_setopt(curl, CURLOPT_CAINFO, g_ca_bundle);

@@ -83,6 +83,10 @@ So the shell goes first, and Cairo after it:
       `mbedtls` build lacks only EdDSA, reported as NotSupportedError.
       `data/fixtures/webcrypto.html` checks both in CI. (TLS for HTTPS is
       libcurl's, built against whatever TLS library the platform has.)
+      The CA certificates are done too: `-Dca_bundle=<file>` compiles a
+      PEM file into the browser, handed to libcurl from memory where the
+      system has no certificate file, or where `NS_CA_BUNDLE=builtin`
+      says the system's are too old to use.
    5. *GLib's data structures and GObject* (about 500 functions at 21,000
       call sites, and the Pango fork's type system) come from a trimmed
       GLib vendored in the tree and built statically, its few OS calls

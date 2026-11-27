@@ -208,6 +208,16 @@ if not have_system_fontconfig
 endif
 libfreetype = dependency('freetype2')
 
+# A CA certificate file compiled into the browser as its own trust store,
+# for systems without one or with one that is too old (src/net.c).
+have_ca_bundle = get_option('ca_bundle') != ''
+if have_ca_bundle
+  if not fs.is_file(get_option('ca_bundle'))
+    error('-Dca_bundle=@0@: no such file'.format(get_option('ca_bundle')))
+  endif
+  ca_bundle_file = files(get_option('ca_bundle'))
+endif
+
 libavif = dependency('libavif', required: get_option('avif'))
 have_avif = libavif.found()
 
@@ -355,6 +365,7 @@ liblexbor = dependency('lexbor', version: '>=3.0.0',
 ns_feature_macros = {
   'NS_HAVE_FONTCONFIG=1': libfontconfig.found(),
   'NS_FC_INTREE=1': not have_system_fontconfig,
+  'NS_HAVE_CA_BUNDLE=1': have_ca_bundle,
   'NS_HAVE_FREETYPE=1': libfreetype.found(),
   'NS_HAVE_AVIF=1': have_avif,
   'NS_HAVE_PDFJS=1': have_pdfjs,
@@ -462,6 +473,7 @@ summary({
   'SDL': sdl3_dep.version(),
   'JavaScript engine': js_engine + ' ' + libquickjs.version(),
   'Crypto library': crypto_backend + ' ' + libcrypto.version(),
+  'Built-in CA certificates': have_ca_bundle ? get_option('ca_bundle') : 'none',
   'Fonts found by': have_system_fontconfig ? 'fontconfig ' + libfontconfig.version() : 'nsfc (in tree)',
 }, section: 'Features')
 

@@ -80,6 +80,11 @@ if have_pdfjs
   endforeach
 endif
 
+# The CA certificates of -Dca_bundle, the browser's own trust store.
+if have_ca_bundle
+  ns_embeds += [['ca_bundle.h', ca_bundle_file, 'ns_ca_bundle_pem']]
+endif
+
 # The chrome's SVG icons (src/sdl/icons.c), embedded like any other file,
 # and ns_icons.h, a table over them by name, written at configure time.
 ns_icon_names = [

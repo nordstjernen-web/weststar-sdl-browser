@@ -19,6 +19,9 @@ The first Weststar release: Northstar 1.0.27 ported from GTK 4 to SDL3.
 * fontconfig is optional: with `-Dfontconfig=disabled`, or where it is
   not installed, the browser finds the fonts in the platform's font
   folders itself (`src/fc/`), for platforms that have no fontconfig.
+* `-Dca_bundle=<file>` compiles a set of CA certificates into the
+  browser, for systems with no root certificates or with ones too old;
+  `NS_CA_BUNDLE` chooses a certificate file, or `builtin`.
 * Colour emoji are drawn at the size of the text; with fontconfig they
   were drawn at the size of the font's bitmaps, 109 pixels tall.
 * Removed: WebGL, `<video>`, Media Source Extensions, camera capture,
