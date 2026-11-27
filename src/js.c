@@ -18,7 +18,8 @@
 #include <zlib.h>
 
 #include <curl/curl.h>
-#include <gio/gio.h>
+#include <glib-object.h>
+#include "mime_guess.h"
 #include "ns_pango.h"
 
 #include "quickjs_compat.h"
@@ -9271,7 +9272,7 @@ typedef struct ns_js_fetch_state {
     char          *requested_url;
     char          *origin_url;
     guint          id;
-    GCancellable  *cancellable;
+    NsCancellable  *cancellable;
     JSValue        signal;
     JSValue        abort_handler;
     gboolean       aborted;
@@ -9320,7 +9321,7 @@ ns_js_fetch_state_free(ns_js_fetch_state *st)
     if (st->js && st->js->fetch_states_by_id && st->id)
         g_hash_table_remove(st->js->fetch_states_by_id,
                             GUINT_TO_POINTER(st->id));
-    if (st->cancellable) g_object_unref(st->cancellable);
+    ns_cancellable_unref(st->cancellable);
     g_free(st->requested_url);
     g_free(st->origin_url);
     g_free(st->fb_send_url);
@@ -9396,7 +9397,7 @@ ns_fetch_on_signal_abort(JSContext *ctx, JSValueConst this_val,
     if (!st || st->settled) return JS_UNDEFINED;
     st->aborted = TRUE;
     st->settled = TRUE;
-    if (st->cancellable) g_cancellable_cancel(st->cancellable);
+    if (st->cancellable) ns_cancellable_cancel(st->cancellable);
     ns_fetch_reject_with_abort(ctx, &st->reject, st->signal);
     return JS_UNDEFINED;
 }
@@ -10175,7 +10176,7 @@ ns_js_fetch_for(JSContext *ctx, JSValueConst frame_url, int argc,
         st->id = ++st->js->next_fetch_id;
         g_hash_table_insert(st->js->fetch_states_by_id,
                             GUINT_TO_POINTER(st->id), st);
-        st->cancellable = g_cancellable_new();
+        st->cancellable = ns_cancellable_new();
         st->signal = signal_v;
         JSValue id_v = JS_NewInt64(ctx, (int64_t)st->id);
         st->abort_handler =
@@ -31501,9 +31502,8 @@ ns_js_file_from_path(JSContext *ctx, const char *path)
     if (!base || (base_w && base_w > base)) base = base_w;
 #endif
     const char *bname = base ? base + 1 : path;
-    g_autofree char *mime = g_content_type_guess(path, (const guchar *)contents,
-                                                 len < 4096 ? len : 4096, NULL);
-    g_autofree char *mime_type = mime ? g_content_type_get_mime_type(mime) : NULL;
+    const char *mime_type = ns_mime_guess(path, (const guchar *)contents,
+                                          len < 4096 ? len : 4096);
     JSValue file = JS_NULL;
     JSValue global = JS_GetGlobalObject(ctx);
     JSValue file_ctor = JS_GetPropertyStr(ctx, global, "File");

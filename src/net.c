@@ -5,6 +5,7 @@
  */
 
 #include "net.h"
+#include "mime_guess.h"
 #include "plat/ns_plat.h"
 #include "plat/ns_env.h"
 #include "plat/ns_fs.h"
@@ -30,6 +31,9 @@
 #include <time.h>
 
 #include <glib/gstdio.h>
+#ifndef G_OS_WIN32
+#include <unistd.h>
+#endif
 
 #include <lexbor/unicode/idna.h>
 #include <lexbor/url/url.h>
@@ -49,7 +53,7 @@
 #endif
 
 static void ns_net_fetch_async(const char *url, const char *top_url,
-                               GCancellable *cancellable,
+                               NsCancellable *cancellable,
                                NsTaskReadyCallback callback,
                                gpointer user_data);
 
@@ -175,7 +179,7 @@ origin_slot_key(const char *origin)
 
 /* Blocks until one of the per-origin connection slots is free; FALSE if cancelled. */
 static gboolean
-ns_net_acquire_origin_slot(const char *origin, GCancellable *cancellable)
+ns_net_acquire_origin_slot(const char *origin, NsCancellable *cancellable)
 {
     char *key = origin_slot_key(origin);
     if (!key) return FALSE;
@@ -191,7 +195,7 @@ ns_net_acquire_origin_slot(const char *origin, GCancellable *cancellable)
         key = NULL;
     }
     while (s->in_use >= NS_NET_MAX_PER_ORIGIN) {
-        if (cancellable && g_cancellable_is_cancelled(cancellable)) {
+        if (cancellable && ns_cancellable_is_cancelled(cancellable)) {
             ns_mutex_unlock(&g_origin_slots_lock);
             g_free(key);
             return FALSE;
@@ -2007,8 +2011,8 @@ ns_xferinfo_cb(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
 {
     (void)dltotal; (void)dlnow; (void)ultotal; (void)ulnow;
     if (g_atomic_int_get(&g_net_aborting)) return 1;
-    GCancellable *c = clientp;
-    return (c && g_cancellable_is_cancelled(c)) ? 1 : 0;
+    NsCancellable *c = clientp;
+    return (c && ns_cancellable_is_cancelled(c)) ? 1 : 0;
 }
 
 /* Adopts path as the CA bundle if it exists. */
@@ -4563,15 +4567,10 @@ maybe_guess_ftp_content_type(ns_response *resp)
     g_autoptr(ns_url_parts) parts = ns_url_parts_new(resp->final_url);
     const char *path = parts && parts->pathname ? parts->pathname
                                                 : resp->final_url;
-    gboolean uncertain = FALSE;
-    char *ctype = g_content_type_guess(path,
-                                       resp->body ? resp->body->data : NULL,
-                                       resp->body ? resp->body->len : 0,
-                                       &uncertain);
-    char *mime = ctype ? g_content_type_get_mime_type(ctype) : NULL;
+    const char *mime = ns_mime_guess(path,
+                                     resp->body ? resp->body->data : NULL,
+                                     resp->body ? resp->body->len : 0);
     resp->content_type = g_strdup(mime ? mime : "application/octet-stream");
-    g_free(mime);
-    g_free(ctype);
 }
 
 /* file: is readable by file: pages and by top-level navigations the user
@@ -4642,12 +4641,12 @@ synthesize_file_response(const char *url, const char *top_url,
         resp->status = 200;
     }
 
-    gboolean uncertain = FALSE;
-    char *ctype = g_content_type_guess(path, NULL, 0, &uncertain);
-    char *mime = ctype ? g_content_type_get_mime_type(ctype) : NULL;
+    /* By the file's name; a name that says nothing (README, Makefile) is
+     * told by how the file begins. */
+    const char *mime = ns_mime_guess(path,
+                                     resp->body ? resp->body->data : NULL,
+                                     resp->body ? resp->body->len : 0);
     resp->content_type = g_strdup(mime ? mime : "application/octet-stream");
-    g_free(mime);
-    g_free(ctype);
     g_free(path);
     return TRUE;
 }
@@ -5359,7 +5358,7 @@ view_source_emit_error(ns_response *resp, const char *inner_url,
 static gboolean
 synthesize_view_source_response(const char *url, const char *top_url,
                                 gboolean navigation,
-                                GCancellable *cancellable, ns_response *resp)
+                                NsCancellable *cancellable, ns_response *resp)
 {
     static const char prefix[] = "view-source:";
     if (!g_str_has_prefix(url, prefix)) return FALSE;
@@ -5580,7 +5579,7 @@ static ns_response *
 ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
                   const void *body, gsize body_len, const char *content_type,
                   GPtrArray *extra_headers,
-                  GCancellable *cancellable, GError **error,
+                  NsCancellable *cancellable, GError **error,
                   gboolean follow_redirects, char **location_out,
                   gboolean navigation, const char *partition_top)
 {
@@ -5761,7 +5760,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     if (origin_slot) {
         origin_held = ns_net_acquire_origin_slot(origin_slot, cancellable);
         if (!origin_held) {
-            g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_CANCELLED,
+            g_set_error_literal(error, NS_IO_ERROR, NS_IO_ERROR_CANCELLED,
                                 "fetch cancelled");
             g_free(origin_slot);
             g_free(referer);
@@ -6195,8 +6194,8 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
 
     if (rc != CURLE_OK) {
         if (rc == CURLE_ABORTED_BY_CALLBACK && cancellable &&
-            g_cancellable_is_cancelled(cancellable)) {
-            g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_CANCELLED,
+            ns_cancellable_is_cancelled(cancellable)) {
+            g_set_error_literal(error, NS_IO_ERROR, NS_IO_ERROR_CANCELLED,
                                 "fetch cancelled");
             curl_easy_cleanup(curl);
             if (headers) curl_slist_free_all(headers);
@@ -6513,7 +6512,7 @@ ns_cors_credentials_allowed(const char *raw_headers)
 static ns_response *
 ns_cors_preflight(const char *url, const char *top_url, const char *method,
                   const char *content_type, GPtrArray *extra_headers,
-                  ns_fetch_destination dest, GCancellable *cancellable,
+                  ns_fetch_destination dest, NsCancellable *cancellable,
                   const char *partition_top)
 {
     const char *cred_mode = ns_fetch_credentials_of(extra_headers);
@@ -6602,7 +6601,7 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
               const void *body, gsize body_len, const char *content_type,
               GPtrArray *extra_headers, ns_fetch_destination dest,
               ns_fetch_policy *policy,
-              GCancellable *cancellable, GError **error,
+              NsCancellable *cancellable, GError **error,
               gboolean navigation)
 {
     GBytes *extension_bytes = NULL;
@@ -6775,8 +6774,8 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
         hops++;
         ns_response_free(resp);
         resp = NULL;
-        if (cancellable && g_cancellable_is_cancelled(cancellable)) {
-            g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_CANCELLED,
+        if (cancellable && ns_cancellable_is_cancelled(cancellable)) {
+            g_set_error_literal(error, NS_IO_ERROR, NS_IO_ERROR_CANCELLED,
                                 "fetch cancelled");
             break;
         }
@@ -7097,7 +7096,7 @@ ns_fetch_task_abandon(NsTask *task, const GError *err)
 static GHashTable *g_fetch_host_active;
 
 static void ns_fetch_thread(NsTask *task, gpointer task_data,
-                            GCancellable *cancellable);
+                            NsCancellable *cancellable);
 
 static char *
 ns_fetch_task_host(NsTask *task)
@@ -7181,7 +7180,7 @@ ns_fetch_throttle_submit(NsTask *task)
 static void
 ns_fetch_thread(NsTask       *task,
                 gpointer      task_data,
-                GCancellable *cancellable)
+                NsCancellable *cancellable)
 {
     ns_fetch_ctx *ctx = task_data;
     GError *err = NULL;
@@ -7227,7 +7226,7 @@ ns_fetch_thread(NsTask       *task,
 /* Opens a connect-only curl transfer to warm DNS, TCP and TLS for a URL. */
 static void
 ns_preconnect_thread(NsTask *task, gpointer task_data,
-                     GCancellable *cancellable)
+                     NsCancellable *cancellable)
 {
     (void)cancellable;
     const char *url = task_data;
@@ -7312,7 +7311,7 @@ ns_net_resolve_blob_for(const char *url, const char *top_url, char **out_type)
 /* Completes a blob: fetch immediately from the resolver (404 if missing); FALSE otherwise. */
 static gboolean
 ns_net_complete_blob(const char *url, const char *top_url,
-                     GCancellable *cancellable,
+                     NsCancellable *cancellable,
                      NsTaskReadyCallback callback, gpointer user_data)
 {
     if (!g_blob_resolver || !g_str_has_prefix(url, "blob:")) return FALSE;
@@ -7344,7 +7343,7 @@ ns_net_complete_blob(const char *url, const char *top_url,
 static void
 ns_net_fetch_async(const char        *url,
                    const char        *top_url,
-                   GCancellable      *cancellable,
+                   NsCancellable      *cancellable,
                    NsTaskReadyCallback callback,
                    gpointer            user_data)
 {
@@ -7359,7 +7358,7 @@ ns_net_post_async(const char         *url,
                   const void         *body,
                   gsize               body_len,
                   const char         *content_type,
-                  GCancellable       *cancellable,
+                  NsCancellable       *cancellable,
                   NsTaskReadyCallback callback,
                   gpointer            user_data)
 {
@@ -7371,7 +7370,7 @@ ns_net_post_async(const char         *url,
 /* Completes an async request immediately with a ready response. */
 static void
 ns_net_return_response(ns_response *resp, ns_fetch_ctx *gate,
-                       GCancellable *cancellable,
+                       NsCancellable *cancellable,
                        NsTaskReadyCallback callback, gpointer user_data)
 {
     NsTask *task = ns_task_new(cancellable, callback, user_data);
@@ -7392,7 +7391,7 @@ ns_net_request_async(const char         *url,
                      const char *const  *extra_headers,
                      ns_fetch_destination dest,
                      ns_fetch_policy    *policy,
-                     GCancellable       *cancellable,
+                     NsCancellable       *cancellable,
                      NsTaskReadyCallback callback,
                      gpointer            user_data)
 {
@@ -7471,7 +7470,7 @@ ns_net_request_blocking(const char        *url,
                         const char *const *extra_headers,
                         ns_fetch_destination dest,
                         ns_fetch_policy   *policy,
-                        GCancellable      *cancellable,
+                        NsCancellable      *cancellable,
                         GError           **error)
 {
     if (!top_url && dest != NS_FETCH_DEST_DOCUMENT) top_url = "about:blank";
@@ -7519,7 +7518,7 @@ ns_net_request_blocking(const char        *url,
 }
 
 ns_response *
-ns_net_fetch_blocking(const char *url, GCancellable *cancellable, GError **error)
+ns_net_fetch_blocking(const char *url, NsCancellable *cancellable, GError **error)
 {
     return ns_net_request_blocking(url, NULL, "GET", NULL, 0, NULL, NULL,
                                    NS_FETCH_DEST_DOCUMENT, NULL,

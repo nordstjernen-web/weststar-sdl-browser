@@ -48,7 +48,7 @@ wtl_override_options = {
   'werror': false,
 }
 
-wtl_deps = [libm, glib, gobject, gio,
+wtl_deps = [libm, glib, gobject,
   dependency('fribidi', version: ns_floors['fribidi']),
   dependency('harfbuzz', version: ns_floors['harfbuzz']),
 ]

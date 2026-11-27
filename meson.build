@@ -137,7 +137,6 @@ message('weststar build profile: ' +
 ns_floors = {
   'glib-2.0': '>=2.80',
   'gobject-2.0': '>=2.80',
-  'gio-2.0': '>=2.80',
   'harfbuzz': '>=8.3',
   'fribidi': '>=1.0.6',
   'fontconfig': '>=2.15',
@@ -166,7 +165,6 @@ endif
 
 glib    = dependency('glib-2.0', version: ns_floors['glib-2.0'])
 gobject = dependency('gobject-2.0', version: ns_floors['gobject-2.0'])
-gio     = dependency('gio-2.0', version: ns_floors['gio-2.0'])
 
 # SDL3 opens the window, takes input and plays audio. The chrome is drawn
 # with Nuklear, vendored in subprojects/nuklear.

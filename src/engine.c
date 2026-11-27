@@ -1409,7 +1409,7 @@ img_async_item_finish(img_async_item *it)
 /* NsTask worker that decodes encoded image bytes off the main thread. */
 static void
 image_decode_in_worker(NsTask *task, gpointer task_data,
-                       GCancellable *cancellable)
+                       NsCancellable *cancellable)
 {
     (void)cancellable;
     gsize len = 0;

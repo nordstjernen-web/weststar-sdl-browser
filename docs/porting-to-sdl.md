@@ -94,6 +94,12 @@ So the shell goes first, and Cairo after it:
       PEM file into the browser, handed to libcurl from memory where the
       system has no certificate file, or where `NS_CA_BUNDLE=builtin`
       says the system's are too old to use.
+      GIO is no longer linked at all: the last of it was the flag that
+      cancels a fetch (`src/cancellable.c` now), the desktop's MIME
+      database for the type of a local or FTP file (a table of
+      extensions and file signatures, `src/mime_guess.c`, the same on
+      every platform), and a list interface on the text library's font
+      classes that nothing used.
    5. *GLib's data structures and GObject* (about 500 functions at 21,000
       call sites, and the Pango fork's type system) come from a trimmed
       GLib vendored in the tree and built statically, its few OS calls

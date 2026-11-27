@@ -11,7 +11,7 @@
 #include "mainctx.h"
 
 #include "gfx.h"
-#include <gio/gio.h>
+#include <glib-object.h>
 #include <glib.h>
 #include <math.h>
 #include <stdint.h>

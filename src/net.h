@@ -7,7 +7,7 @@
 #ifndef NS_NET_H
 #define NS_NET_H
 
-#include <gio/gio.h>
+#include <glib-object.h>
 #include <glib.h>
 
 #include "fetch_policy.h"
@@ -121,7 +121,7 @@ void ns_net_post_async(const char         *url,
                        const void         *body,
                        gsize               body_len,
                        const char         *content_type,
-                       GCancellable       *cancellable,
+                       NsCancellable       *cancellable,
                        NsTaskReadyCallback callback,
                        gpointer            user_data);
 
@@ -134,7 +134,7 @@ void ns_net_request_async(const char         *url,
                           const char *const  *extra_headers,
                           ns_fetch_destination dest,
                           ns_fetch_policy    *policy,
-                          GCancellable       *cancellable,
+                          NsCancellable       *cancellable,
                           NsTaskReadyCallback callback,
                           gpointer            user_data);
 
@@ -151,7 +151,7 @@ void         ns_net_preload_expect(const char *key);
 void         ns_net_preload_clear(void);
 
 ns_response *ns_net_fetch_blocking(const char   *url,
-                                   GCancellable *cancellable,
+                                   NsCancellable *cancellable,
                                    GError      **error);
 
 ns_response *ns_net_request_blocking(const char        *url,
@@ -163,7 +163,7 @@ ns_response *ns_net_request_blocking(const char        *url,
                                      const char *const *extra_headers,
                                      ns_fetch_destination dest,
                                      ns_fetch_policy   *policy,
-                                     GCancellable      *cancellable,
+                                     NsCancellable      *cancellable,
                                      GError           **error);
 
 gboolean ns_net_hsts_should_upgrade(const char *host);

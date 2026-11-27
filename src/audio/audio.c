@@ -77,7 +77,7 @@ struct NsAudioContext {
     NsMutex       lock;
     char         *document_url;
     ns_fetch_policy *policy;
-    GCancellable *cancel;
+    NsCancellable *cancel;
     GHashTable   *failures;
 };
 
@@ -749,12 +749,11 @@ local_file_path(const char *url)
 }
 
 /* Returns a new ref to the context's current fetch cancellable, or NULL. */
-static GCancellable *
+static NsCancellable *
 context_cancellable(NsAudioContext *context)
 {
     ns_mutex_lock(&context->lock);
-    GCancellable *cancel = context->cancel ? g_object_ref(context->cancel)
-                                           : NULL;
+    NsCancellable *cancel = ns_cancellable_ref(context->cancel);
     ns_mutex_unlock(&context->lock);
     return cancel;
 }
@@ -764,13 +763,13 @@ static void
 context_cancel_fetches(NsAudioContext *context)
 {
     ns_mutex_lock(&context->lock);
-    GCancellable *old = context->cancel;
-    context->cancel = g_cancellable_new();
+    NsCancellable *old = context->cancel;
+    context->cancel = ns_cancellable_new();
     g_hash_table_remove_all(context->failures);
     ns_mutex_unlock(&context->lock);
     if (old) {
-        g_cancellable_cancel(old);
-        g_object_unref(old);
+        ns_cancellable_cancel(old);
+        ns_cancellable_unref(old);
     }
 }
 
@@ -812,12 +811,12 @@ fetch_audio_bytes(NsAudioContext *context, const char *url,
     if (strncmp(url, "http://", 7) != 0 && strncmp(url, "https://", 8) != 0 &&
         strncmp(url, "data:", 5) != 0)
         return NULL;
-    GCancellable *cancel = context_cancellable(context);
+    NsCancellable *cancel = context_cancellable(context);
     GError *err = NULL;
     ns_response *resp = ns_net_request_blocking(
         url, document_url, "GET", NULL, 0, NULL, NULL, NS_FETCH_DEST_MEDIA,
         context ? context->policy : NULL, cancel, &err);
-    if (cancel) g_object_unref(cancel);
+    ns_cancellable_unref(cancel);
     GBytes *bytes = NULL;
     if (resp && !resp->error && resp->status >= 200 && resp->status < 300 &&
         resp->body && resp->body->len > 0 &&
@@ -1110,7 +1109,7 @@ static void
 context_free(NsAudioContext *context)
 {
     if (!context) return;
-    g_clear_object(&context->cancel);
+    ns_cancellable_clear(&context->cancel);
     g_clear_pointer(&context->failures, g_hash_table_destroy);
     g_free(context->document_url);
     ns_fetch_policy_unref(context->policy);
@@ -1336,7 +1335,7 @@ ns_audio_context_new(const char *document_url, ns_fetch_policy *policy)
     NsAudioContext *context = g_new0(NsAudioContext, 1);
     context->policy = ns_fetch_policy_ref(policy);
     ns_mutex_init(&context->lock);
-    context->cancel = g_cancellable_new();
+    context->cancel = ns_cancellable_new();
     context->failures = g_hash_table_new_full(g_str_hash, g_str_equal,
                                               g_free, NULL);
     context->document_url = g_strdup(document_url);

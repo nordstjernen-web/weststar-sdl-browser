@@ -544,7 +544,7 @@ ns_decode_job_free(ns_decode_job *job)
 /* NsTask worker decoding an image body off the main thread. */
 static void
 image_decode_worker(NsTask *task, gpointer task_data,
-                    GCancellable *cancellable)
+                    NsCancellable *cancellable)
 {
     (void)cancellable;
     ns_decode_job *job = task_data;

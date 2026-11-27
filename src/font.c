@@ -10,7 +10,7 @@
 #include "brand.h"
 #include "bytes.h"
 
-#include <gio/gio.h>
+#include <glib-object.h>
 #include "ns_pango.h"
 #include <stdio.h>
 #include <string.h>
@@ -34,12 +34,12 @@ typedef struct ns_font_entry {
     char *url;
     gboolean loaded;
     gboolean inflight;
-    GCancellable *cancel;
+    NsCancellable *cancel;
 } ns_font_entry;
 
 typedef struct ns_font_pending {
     GPtrArray *families;
-    GCancellable *cancel;
+    NsCancellable *cancel;
 } ns_font_pending;
 
 static GHashTable        *g_entries;
@@ -104,7 +104,7 @@ ns_font_pending_free(gpointer data)
 {
     ns_font_pending *p = data;
     if (!p) return;
-    if (p->cancel) g_object_unref(p->cancel);
+    ns_cancellable_unref(p->cancel);
     if (p->families) g_ptr_array_free(p->families, TRUE);
     g_free(p);
 }
@@ -396,7 +396,7 @@ ns_font_on_fetched(NsTask *res, gpointer user_data)
                                          : NULL;
             g_free(key);
             if (!e) continue;
-            g_clear_object(&e->cancel);
+            ns_cancellable_clear(&e->cancel);
             e->inflight = FALSE;
         }
     }
@@ -489,19 +489,19 @@ ns_font_request(const char *family, const char *src_url, const char *base_url,
         }
         if (!seen) g_ptr_array_add(pending->families, g_strdup(family));
         existing->inflight = TRUE;
-        g_set_object(&existing->cancel, pending->cancel);
+        ns_cancellable_set(&existing->cancel, pending->cancel);
         return;
     }
 
     pending = g_new0(ns_font_pending, 1);
     pending->families = g_ptr_array_new_with_free_func(g_free);
-    pending->cancel = g_cancellable_new();
+    pending->cancel = ns_cancellable_new();
     g_ptr_array_add(pending->families, g_strdup(family));
     if (g_pending_by_url)
         g_hash_table_insert(g_pending_by_url, g_strdup(existing->url), pending);
 
     existing->inflight = TRUE;
-    g_set_object(&existing->cancel, pending->cancel);
+    ns_cancellable_set(&existing->cancel, pending->cancel);
 
     ns_font_fetch_ctx *ctx = g_new0(ns_font_fetch_ctx, 1);
     ctx->url = g_strdup(existing->url);

@@ -10,7 +10,7 @@
  * ns_task_return_* itself.
  *
  * The cancellable is only a flag here: the thread function may poll it,
- * and once it is cancelled ns_task_propagate_* report G_IO_ERROR_CANCELLED
+ * and once it is cancelled ns_task_propagate_* report NS_IO_ERROR_CANCELLED
  * whatever the task returned, as GTask does.
  *
  * Copyright 2026 Andreas Røsdal
@@ -20,16 +20,17 @@
 #ifndef NS_TASK_H
 #define NS_TASK_H
 
-#include <gio/gio.h>
+#include <glib.h>
+#include "cancellable.h"
 
 typedef struct NsTask NsTask;
 
 typedef void (*NsTaskReadyCallback)(NsTask *task, gpointer user_data);
 typedef void (*NsTaskThreadFunc)(NsTask *task, gpointer task_data,
-                                 GCancellable *cancellable);
+                                 NsCancellable *cancellable);
 
 /* The caller owns the returned reference. callback may be NULL. */
-NsTask  *ns_task_new(GCancellable *cancellable, NsTaskReadyCallback callback,
+NsTask  *ns_task_new(NsCancellable *cancellable, NsTaskReadyCallback callback,
                      gpointer user_data);
 NsTask  *ns_task_ref(NsTask *task);
 void     ns_task_unref(NsTask *task);
@@ -39,7 +40,7 @@ void     ns_task_set_task_data(NsTask *task, gpointer task_data,
 gpointer ns_task_get_task_data(NsTask *task);
 void     ns_task_set_source_tag(NsTask *task, gpointer source_tag);
 gpointer ns_task_get_source_tag(NsTask *task);
-GCancellable *ns_task_get_cancellable(NsTask *task);
+NsCancellable *ns_task_get_cancellable(NsTask *task);
 
 /* Runs fn on a worker thread; the task holds its own reference meanwhile. */
 void     ns_task_run_in_thread(NsTask *task, NsTaskThreadFunc fn);

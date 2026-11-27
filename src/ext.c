@@ -12,7 +12,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <gio/gio.h>
+#include <glib-object.h>
+#include "mime_guess.h"
 #include <libpsl.h>
 
 #include "config.h"
@@ -1404,14 +1405,9 @@ ns_ext_resource_load(const char *url, GBytes **bytes,
         return TRUE;
     }
 
-    gboolean uncertain = FALSE;
-    g_autofree char *type = g_content_type_guess(path,
-                                                  (const guchar *)data,
-                                                  len, &uncertain);
     if (content_type) {
-        *content_type = type ? g_content_type_get_mime_type(type) : NULL;
-        if (!*content_type)
-            *content_type = g_strdup("application/octet-stream");
+        const char *type = ns_mime_guess(path, (const guchar *)data, len);
+        *content_type = g_strdup(type ? type : "application/octet-stream");
     }
     if (bytes) *bytes = g_bytes_new_take(data, len);
     else g_free(data);

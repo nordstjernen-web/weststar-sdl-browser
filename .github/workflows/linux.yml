@@ -76,10 +76,11 @@ jobs:
           NSFC_TEST_FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf \
             meson test -C builddir --suite nsfc --print-errorlogs
 
-      - name: No GTK or Cairo in the binary
+      - name: No GTK, Cairo or GIO in the binary
         run: |
           test -x builddir/src/sdl/weststar
           ! ldd builddir/src/sdl/weststar | grep -i -E 'libgtk|libgdk|libcairo|libpixman'
+          ! objdump -p builddir/src/sdl/weststar | grep -E 'NEEDED +libgio'
           ldd builddir/src/sdl/weststar | grep -i libSDL3
 
       - name: Headless smoke (about:start)

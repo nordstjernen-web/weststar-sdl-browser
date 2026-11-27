@@ -10,7 +10,7 @@
 struct NsTask {
     gint                refs;
     NsLoop             *loop;
-    GCancellable       *cancellable;
+    NsCancellable       *cancellable;
     NsTaskReadyCallback callback;
     gpointer            user_data;
     gpointer            task_data;
@@ -27,13 +27,13 @@ struct NsTask {
 };
 
 NsTask *
-ns_task_new(GCancellable *cancellable, NsTaskReadyCallback callback,
+ns_task_new(NsCancellable *cancellable, NsTaskReadyCallback callback,
             gpointer user_data)
 {
     NsTask *task = g_new0(NsTask, 1);
     task->refs = 1;
     task->loop = ns_loop_ref_thread_default();
-    task->cancellable = cancellable ? g_object_ref(cancellable) : NULL;
+    task->cancellable = ns_cancellable_ref(cancellable);
     task->callback = callback;
     task->user_data = user_data;
     return task;
@@ -54,7 +54,7 @@ ns_task_unref(NsTask *task)
         task->result_destroy(task->result);
     g_clear_error(&task->error);
     if (task->task_data_destroy) task->task_data_destroy(task->task_data);
-    g_clear_object(&task->cancellable);
+    ns_cancellable_clear(&task->cancellable);
     ns_loop_unref(task->loop);
     g_free(task);
 }
@@ -86,7 +86,7 @@ ns_task_get_source_tag(NsTask *task)
     return task->source_tag;
 }
 
-GCancellable *
+NsCancellable *
 ns_task_get_cancellable(NsTask *task)
 {
     return task->cancellable;
@@ -180,7 +180,7 @@ static gboolean
 task_propagate_error(NsTask *task, GError **error)
 {
     if (task->cancellable &&
-        g_cancellable_set_error_if_cancelled(task->cancellable, error))
+        ns_cancellable_set_error_if_cancelled(task->cancellable, error))
         return TRUE;
     if (task->error) {
         g_propagate_error(error, task->error);

@@ -19,6 +19,9 @@ The first Weststar release: Northstar 1.0.27 ported from GTK 4 to SDL3.
 * fontconfig is optional: with `-Dfontconfig=disabled`, or where it is
   not installed, the browser finds the fonts in the platform's font
   folders itself (`src/fc/`), for platforms that have no fontconfig.
+* GIO is no longer needed, and GLib's main loop is not used: the
+  watchdog starts and watches the browser through SDL. A local file
+  without a telling name (`README`) is shown by what it contains.
 * Scrolling moves the page's texture with SDL's renderer; only the strip
   that came into view, and fixed boxes, are painted and uploaded.
 * `-Dca_bundle=<file>` compiles a set of CA certificates into the

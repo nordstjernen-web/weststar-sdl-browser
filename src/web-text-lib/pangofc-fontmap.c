@@ -35,7 +35,6 @@
 #include "config.h"
 #include <math.h>
 
-#include <gio/gio.h>
 
 #include "pango-context.h"
 #include "pango-font-private.h"
@@ -1425,13 +1424,13 @@ ns_pango_fc_fontset_foreach (NsPangoFontset           *fontset,
  */
 
 static GType
-ns_pango_fc_font_map_get_item_type (GListModel *list)
+ns_pango_fc_font_map_get_item_type (gpointer    list)
 {
   return NS_TYPE_PANGO_FONT_FAMILY;
 }
 
 static guint
-ns_pango_fc_font_map_get_n_items (GListModel *list)
+ns_pango_fc_font_map_get_n_items (gpointer    list)
 {
   NsPangoFcFontMap *fcfontmap = NS_PANGO_FC_FONT_MAP (list);
 
@@ -1441,7 +1440,7 @@ ns_pango_fc_font_map_get_n_items (GListModel *list)
 }
 
 static gpointer
-ns_pango_fc_font_map_get_item (GListModel *list,
+ns_pango_fc_font_map_get_item (gpointer    list,
                             guint       position)
 {
   NsPangoFcFontMap *fcfontmap = NS_PANGO_FC_FONT_MAP (list);
@@ -1454,17 +1453,8 @@ ns_pango_fc_font_map_get_item (GListModel *list,
   return NULL;
 }
 
-static void
-ns_pango_fc_font_map_list_model_init (GListModelInterface *iface)
-{
-  iface->get_item_type = ns_pango_fc_font_map_get_item_type;
-  iface->get_n_items = ns_pango_fc_font_map_get_n_items;
-  iface->get_item = ns_pango_fc_font_map_get_item;
-}
-
 G_DEFINE_ABSTRACT_TYPE_WITH_CODE (NsPangoFcFontMap, ns_pango_fc_font_map, NS_TYPE_PANGO_FONT_MAP,
-                                  G_ADD_PRIVATE (NsPangoFcFontMap)
-                                  G_IMPLEMENT_INTERFACE (G_TYPE_LIST_MODEL, ns_pango_fc_font_map_list_model_init))
+                                  G_ADD_PRIVATE (NsPangoFcFontMap))
 
 static void
 start_fontconfig_thread (NsPangoFcFontMap *fcfontmap)
@@ -2438,7 +2428,6 @@ ns_pango_fc_font_map_cache_clear (NsPangoFcFontMap *fcfontmap)
 
   added = fcfontmap->priv->n_families;
 
-  g_list_model_items_changed (G_LIST_MODEL (fcfontmap), 0, removed, added);
   if (removed != added)
     g_object_notify (G_OBJECT (fcfontmap), "n-items");
 
@@ -3211,13 +3200,13 @@ ns_pango_fc_face_class_init (NsPangoFcFaceClass *class)
 typedef NsPangoFontFamilyClass NsPangoFcFamilyClass;
 
 static GType
-ns_pango_fc_family_get_item_type (GListModel *list)
+ns_pango_fc_family_get_item_type (gpointer    list)
 {
   return NS_TYPE_PANGO_FONT_FACE;
 }
 
 static guint
-ns_pango_fc_family_get_n_items (GListModel *list)
+ns_pango_fc_family_get_n_items (gpointer    list)
 {
   NsPangoFcFamily *fcfamily = NS_PANGO_FC_FAMILY (list);
 
@@ -3227,7 +3216,7 @@ ns_pango_fc_family_get_n_items (GListModel *list)
 }
 
 static gpointer
-ns_pango_fc_family_get_item (GListModel *list,
+ns_pango_fc_family_get_item (gpointer    list,
                           guint       position)
 {
   NsPangoFcFamily *fcfamily = NS_PANGO_FC_FAMILY (list);
@@ -3240,16 +3229,7 @@ ns_pango_fc_family_get_item (GListModel *list,
   return NULL;
 }
 
-static void
-ns_pango_fc_family_list_model_init (GListModelInterface *iface)
-{
-  iface->get_item_type = ns_pango_fc_family_get_item_type;
-  iface->get_n_items = ns_pango_fc_family_get_n_items;
-  iface->get_item = ns_pango_fc_family_get_item;
-}
-
-G_DEFINE_TYPE_WITH_CODE (NsPangoFcFamily, ns_pango_fc_family, NS_TYPE_PANGO_FONT_FAMILY,
-                         G_IMPLEMENT_INTERFACE (G_TYPE_LIST_MODEL, ns_pango_fc_family_list_model_init))
+G_DEFINE_TYPE_WITH_CODE (NsPangoFcFamily, ns_pango_fc_family, NS_TYPE_PANGO_FONT_FAMILY,)
 
 static NsPangoFcFace *
 create_face (NsPangoFcFamily *fcfamily,
@@ -3612,7 +3592,6 @@ insert_face (NsPangoFcFontMap *fcfontmap,
               FcPatternReference (pattern);
               family->faces[i] = create_face (family, name, pattern, FALSE);
 
-              g_list_model_items_changed (G_LIST_MODEL (family), i, 1, 1);
 
               g_object_unref (face);
 
@@ -3638,7 +3617,6 @@ insert_face (NsPangoFcFontMap *fcfontmap,
         {
           if (family->faces[i] == face)
             {
-              g_list_model_items_changed (G_LIST_MODEL (family), i, 0, 1);
               break;
             }
         }
@@ -3697,7 +3675,6 @@ ns_pango_fc_font_map_add_pattern (NsPangoFcFontMap *fcfontmap,
             {
               if (priv->families[i] == family)
                 {
-                  g_list_model_items_changed (G_LIST_MODEL (fcfontmap), i, 0, 1);
                   break;
                 }
             }

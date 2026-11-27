@@ -82,7 +82,7 @@ Libraries the build needs from the system:
 | Library | For |
 |---------|-----|
 | [SDL3](https://libsdl.org) ≥ 3.2 | the window, input, audio output |
-| GLib, GObject, GIO ≥ 2.80 | the main loop, threads, resources |
+| GLib, GObject ≥ 2.80 | strings, lists and hash tables; the text library's object types |
 | [libcurl](https://curl.se) ≥ 8.5 | HTTP, HTTPS, WebSocket |
 | OpenSSL (libcrypto), or Mbed TLS with `-Dcrypto=mbedtls` | Web Crypto, random numbers, hashing |
 | HarfBuzz ≥ 8.3, FriBidi ≥ 1.0.6 | text shaping, bidirectional text |

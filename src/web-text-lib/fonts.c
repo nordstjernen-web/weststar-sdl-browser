@@ -25,7 +25,6 @@
 #include <string.h>
 #include <locale.h>
 
-#include <gio/gio.h>
 
 #include "pango-types.h"
 #include "pango-font-private.h"
@@ -2383,13 +2382,13 @@ ns_pango_font_metrics_get_strikethrough_thickness (NsPangoFontMetrics *metrics)
  */
 
 static GType
-ns_pango_font_family_get_item_type (GListModel *list)
+ns_pango_font_family_get_item_type (gpointer    list)
 {
   return NS_TYPE_PANGO_FONT_FACE;
 }
 
 static guint
-ns_pango_font_family_get_n_items (GListModel *list)
+ns_pango_font_family_get_n_items (gpointer    list)
 {
   NsPangoFontFamily *family = NS_PANGO_FONT_FAMILY (list);
   int n_faces;
@@ -2400,7 +2399,7 @@ ns_pango_font_family_get_n_items (GListModel *list)
 }
 
 static gpointer
-ns_pango_font_family_get_item (GListModel *list,
+ns_pango_font_family_get_item (gpointer    list,
                             guint       position)
 {
   NsPangoFontFamily *family = NS_PANGO_FONT_FAMILY (list);
@@ -2420,16 +2419,7 @@ ns_pango_font_family_get_item (GListModel *list,
   return face;
 }
 
-static void
-ns_pango_font_family_list_model_init (GListModelInterface *iface)
-{
-  iface->get_item_type = ns_pango_font_family_get_item_type;
-  iface->get_n_items = ns_pango_font_family_get_n_items;
-  iface->get_item = ns_pango_font_family_get_item;
-}
-
-G_DEFINE_ABSTRACT_TYPE_WITH_CODE (NsPangoFontFamily, ns_pango_font_family, G_TYPE_OBJECT,
-                                  G_IMPLEMENT_INTERFACE (G_TYPE_LIST_MODEL, ns_pango_font_family_list_model_init))
+G_DEFINE_ABSTRACT_TYPE_WITH_CODE (NsPangoFontFamily, ns_pango_font_family, G_TYPE_OBJECT,)
 
 static NsPangoFontFace *ns_pango_font_family_real_get_face (NsPangoFontFamily *family,
                                                        const char      *name);
@@ -2482,7 +2472,7 @@ ns_pango_font_family_get_property (GObject    *object,
       break;
 
     case PROP_N_ITEMS:
-      g_value_set_uint (value, ns_pango_font_family_get_n_items (G_LIST_MODEL (object)));
+      g_value_set_uint (value, ns_pango_font_family_get_n_items (object));
       break;
 
     case PROP_NAME:

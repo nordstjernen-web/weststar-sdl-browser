@@ -21,7 +21,6 @@
 
 #include "config.h"
 
-#include <gio/gio.h>
 
 #include "pango-fontmap-private.h"
 #include "pango-fontset-simple.h"
@@ -50,9 +49,7 @@ static gboolean ns_pango_font_map_real_add_font_file (NsPangoFontMap  *fontmap,
                                                    const char    *filename,
                                                    GError       **error);
 
-static guint ns_pango_font_map_get_n_items (GListModel *list);
-
-static void ns_pango_font_map_list_model_init (GListModelInterface *iface);
+static guint ns_pango_font_map_get_n_items (gpointer    list);
 
 typedef struct {
   guint n_families;
@@ -70,8 +67,7 @@ static GParamSpec *properties[N_PROPERTIES] = { NULL, };
 
 G_DEFINE_ABSTRACT_TYPE_WITH_CODE (NsPangoFontMap, ns_pango_font_map, G_TYPE_OBJECT,
                                   G_ADD_PRIVATE (NsPangoFontMap)
-                                  g_type_add_class_private (g_define_type_id, sizeof (NsPangoFontMapClassPrivate));
-                                  G_IMPLEMENT_INTERFACE (G_TYPE_LIST_MODEL, ns_pango_font_map_list_model_init))
+                                  g_type_add_class_private (g_define_type_id, sizeof (NsPangoFontMapClassPrivate));)
 
 static void
 ns_pango_font_map_get_property (GObject    *object,
@@ -86,7 +82,7 @@ ns_pango_font_map_get_property (GObject    *object,
       break;
 
     case PROP_N_ITEMS:
-      g_value_set_uint (value, ns_pango_font_map_get_n_items (G_LIST_MODEL (object)));
+      g_value_set_uint (value, ns_pango_font_map_get_n_items (object));
       break;
 
     default:
@@ -410,9 +406,8 @@ ns_pango_font_map_real_changed (NsPangoFontMap *fontmap)
   guint removed, added;
 
   removed = priv->n_families;
-  added = g_list_model_get_n_items (G_LIST_MODEL (fontmap));
+  added = ns_pango_font_map_get_n_items (fontmap);
 
-  g_list_model_items_changed (G_LIST_MODEL (fontmap), 0, removed, added);
   if (removed != added)
     g_object_notify_by_pspec (G_OBJECT (fontmap), properties[PROP_N_ITEMS]);
 }
@@ -507,7 +502,7 @@ ns_pango_font_map_real_add_font_file (NsPangoFontMap  *fontmap,
                                    const char    *filename,
                                    GError       **error)
 {
-  g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+  g_set_error (error, G_FILE_ERROR, G_FILE_ERROR_NOSYS,
                "Adding font files not supported for %s",
                G_OBJECT_TYPE_NAME (fontmap));
 
@@ -515,13 +510,13 @@ ns_pango_font_map_real_add_font_file (NsPangoFontMap  *fontmap,
 }
 
 static GType
-ns_pango_font_map_get_item_type (GListModel *list)
+ns_pango_font_map_get_item_type (gpointer    list)
 {
   return NS_TYPE_PANGO_FONT_FAMILY;
 }
 
 static guint
-ns_pango_font_map_get_n_items (GListModel *list)
+ns_pango_font_map_get_n_items (gpointer    list)
 {
   NsPangoFontMap *fontmap = NS_PANGO_FONT_MAP (list);
   int n_families;
@@ -532,7 +527,7 @@ ns_pango_font_map_get_n_items (GListModel *list)
 }
 
 static gpointer
-ns_pango_font_map_get_item (GListModel *list,
+ns_pango_font_map_get_item (gpointer    list,
                          guint       position)
 {
   NsPangoFontMap *fontmap = NS_PANGO_FONT_MAP (list);
@@ -552,10 +547,3 @@ ns_pango_font_map_get_item (GListModel *list,
   return family;
 }
 
-static void
-ns_pango_font_map_list_model_init (GListModelInterface *iface)
-{
-  iface->get_item_type = ns_pango_font_map_get_item_type;
-  iface->get_n_items = ns_pango_font_map_get_n_items;
-  iface->get_item = ns_pango_font_map_get_item;
-}
