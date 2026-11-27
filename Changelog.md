@@ -26,8 +26,8 @@ The first Weststar release: Northstar 1.0.27 ported from GTK 4 to SDL3.
   end no longer hangs the page: the match is given up on after a
   quarter of a second.
 * `-Dglib=bundled` builds the part of GLib the browser uses from a pinned
-  release, statically, instead of using the system's GLib (Linux and
-  the BSDs so far).
+  release, statically, instead of using the system's GLib (Linux, the
+  BSDs and Windows).
 * Scrolling moves the page's texture with SDL's renderer; only the strip
   that came into view, and fixed boxes, are painted and uploaded.
 * `-Dca_bundle=<file>` compiles a set of CA certificates into the

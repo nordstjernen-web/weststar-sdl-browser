@@ -126,15 +126,18 @@ So the shell goes first, and Cairo after it:
       (`subprojects/packagefiles/glib/`) in place of GLib's, and links
       them statically; with unused sections dropped that is about 1 MB.
       GIO, GModule, PCRE2, libffi and libintl are not built or needed.
-      It is set up for Linux and the BSDs so far. Its OS calls are
-      moving to SDL: GLib's mutexes, condition variables, read-write
+      It builds for Linux, the BSDs and Windows (where the CI build
+      uses it); macOS is not set up. Its OS calls are moving to SDL: GLib's mutexes, condition variables, read-write
       locks, thread-local values and threads are SDL's
       (`glib/ns-gthread-sdl.c` in place of `gthread-posix.c`, so `g_once`
       and GObject's type system lock with SDL too), and its two clocks
       are SDL's (`glib/ns-gclock.c`), which lets GLib's main loop and its
       pipe, poll and wake-up helpers go: 68 files of GLib's own remain.
-      Next: the environment, the locale's character set and the file
-      functions inside those files, and Windows.
+      With threads on SDL, Windows needed only its type sizes and two
+      more of GLib's files (`gwin32.c`, `gstdio.c`). What those files
+      still ask the C library for is the environment, the locale's
+      character set, files and folders, and `stderr`; whether that needs
+      changing is for the first platform without them to say (stage 7).
    6. *SDL2 as well as SDL3* in the shell, since the Amiga-family ports
       and XP-capable builds are SDL2.
    7. *Toolchains and targets*: the code kept to C11 (C23 `#embed`
