@@ -265,6 +265,7 @@ once (`apt install ccache` / `dnf install ccache`). Optionally use the
 | `wasm` | `auto` | Build the WebAssembly JS API over vendored WAMR. `auto` turns it off on 32-bit x86, which WAMR does not support; disable it on other platforms WAMR does not support. |
 | `js_engine` | `quickjs-ng` | JavaScript engine: `quickjs-ng`, or `quickjs` for Fabrice Bellard's original QuickJS. See [quickjs.md](quickjs.md). |
 | `audio` | `auto` | Enable in-process audio playback (needs SDL3 3.2 or newer). |
+| `crypto` | `openssl` | The crypto library behind Web Crypto, random numbers and Safe Browsing hashes: `openssl` (OpenSSL's libcrypto from the system), or `mbedtls` for the portable build profile, Mbed TLS 3.6 from the system or else fetched and built as a subproject (`subprojects/mbedtls.wrap`). The `mbedtls` build lacks Ed25519 and Ed448, which Web Crypto then reports as not supported. HTTPS is libcurl's either way. |
 | `avif` | `auto` | Decode AVIF through libavif. Disabling drops a full AV1 decoder; AVIF images then fail to decode. |
 | `pdfjs` | `auto` | The PDF viewer, built on PDF.js and embedded at build time. `auto` builds it when PDF.js is available; `enabled` makes PDF.js a required dependency, so the build fails without it; `disabled` leaves the viewer out, and a PDF shows a link to the file. |
 | `pdfjs_dir` | *(empty)* | Directory of an installed PDF.js to use instead of the pinned release, such as Arch's `/usr/share/pdf.js`. See below. |

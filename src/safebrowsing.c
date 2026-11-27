@@ -17,7 +17,7 @@
 
 #include <string.h>
 
-#include <openssl/evp.h>
+#include "plat/ns_crypto.h"
 
 static GHashTable *g_blocked;
 static GHashTable *g_allow;
@@ -33,9 +33,9 @@ host_sha256_hex(const char *host)
 {
     if (!host || !*host) return NULL;
     char *low = g_ascii_strdown(host, -1);
-    unsigned char digest[EVP_MAX_MD_SIZE];
-    unsigned int len = 0;
-    if (EVP_Digest(low, strlen(low), digest, &len, EVP_sha256(), NULL) != 1) {
+    unsigned char digest[NS_HASH_MAX_SIZE];
+    unsigned int len = (unsigned int)ns_hash_size(NS_HASH_SHA256);
+    if (!ns_hash(NS_HASH_SHA256, low, strlen(low), digest)) {
         g_free(low);
         return NULL;
     }

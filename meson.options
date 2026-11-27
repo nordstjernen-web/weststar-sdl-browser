@@ -8,6 +8,8 @@ option('audio', type: 'feature', value: 'auto',
        description: 'Enable in-process audio playback (SDL3 output + minimp3/pl_mpeg decode). Disable to build without audio; SDL3 itself is always required for the window.')
 option('js_engine', type: 'combo', choices: ['quickjs-ng', 'quickjs'], value: 'quickjs-ng',
        description: 'JavaScript engine: quickjs-ng (default) or the original QuickJS by Fabrice Bellard, each built from its pinned subproject.')
+option('crypto', type: 'combo', choices: ['openssl', 'mbedtls'], value: 'openssl',
+       description: 'Library behind Web Crypto, random numbers and hashing: OpenSSL libcrypto (default), or Mbed TLS 3.6 for portable builds without OpenSSL (the system copy if installed, else the release pinned in subprojects/mbedtls.wrap, built statically). The mbedtls build lacks Ed25519 and Ed448, which Web Crypto then refuses with NotSupportedError. HTTPS is unaffected: it goes through libcurl and its own TLS library.')
 option('pdfjs', type: 'feature', value: 'auto',
        description: 'Show PDF documents in a viewer built on PDF.js, run as sandboxed script inside the engine and embedded at build time. Auto: built when PDF.js is available. Enabled: required, the build fails without it. Disabled: left out, and a PDF shows a notice with a link to the file. PDF.js comes from pdfjs_dir when that is set, else from the release pinned in subprojects/pdfjs-dist.wrap, which is fetched and never committed.')
 option('pdfjs_dir', type: 'string', value: '',

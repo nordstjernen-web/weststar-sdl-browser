@@ -198,6 +198,8 @@ if have_avif
   northstar_engine_sources += files('image_avif.c')
 endif
 
+northstar_engine_sources += files('plat/ns_crypto_' + crypto_backend + '.c')
+
 northstar_win_resources = []
 if host_system == 'windows'
   windows = import('windows')

@@ -84,7 +84,7 @@ Libraries the build needs from the system:
 | [SDL3](https://libsdl.org) ≥ 3.2 | the window, input, audio output |
 | GLib, GObject, GIO ≥ 2.80 | the main loop, threads, resources |
 | [libcurl](https://curl.se) ≥ 8.5 | HTTP, HTTPS, WebSocket |
-| OpenSSL (libcrypto) | Web Crypto, hashing |
+| OpenSSL (libcrypto), or Mbed TLS with `-Dcrypto=mbedtls` | Web Crypto, random numbers, hashing |
 | HarfBuzz ≥ 8.3, FriBidi ≥ 1.0.6 | text shaping, bidirectional text |
 | fontconfig ≥ 2.15, FreeType | finding fonts, rasterizing glyphs |
 | libpsl | public-suffix rules for cookies |

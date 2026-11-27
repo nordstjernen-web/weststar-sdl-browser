@@ -754,7 +754,8 @@ ns_wc_normalize(JSContext *ctx, JSValueConst alg, ns_wc_op op, ns_wc_alg *out)
     int params = -1;
     for (gsize i = 0; i < G_N_ELEMENTS(ns_wc_registry); i++) {
         if (ns_wc_registry[i].op == op &&
-            !g_ascii_strcasecmp(ns_wc_registry[i].name, name)) {
+            !g_ascii_strcasecmp(ns_wc_registry[i].name, name) &&
+            ns_crypto_algorithm_available(ns_wc_registry[i].name)) {
             out->name = ns_wc_registry[i].name;
             params = ns_wc_registry[i].params;
             break;
@@ -779,7 +780,7 @@ ns_wc_supports(const char *name, ns_wc_op op)
 {
     for (gsize i = 0; i < G_N_ELEMENTS(ns_wc_registry); i++)
         if (ns_wc_registry[i].op == op && !strcmp(ns_wc_registry[i].name, name))
-            return TRUE;
+            return ns_crypto_algorithm_available(name);
     return FALSE;
 }
 

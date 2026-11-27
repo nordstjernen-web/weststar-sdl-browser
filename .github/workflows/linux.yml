@@ -94,10 +94,20 @@ jobs:
       - name: Canvas 2D smoke
         run: |
           set -o pipefail
-          ./builddir/src/sdl/weststar --headless --dump=text --settle-ms=500             "file://$PWD/data/fixtures/canvas-2d.html" > canvas.txt
+          ./builddir/src/sdl/weststar --headless --dump=text --settle-ms=500 \
+            "file://$PWD/data/fixtures/canvas-2d.html" > canvas.txt
           grep -E '^(PASS|FAIL)' canvas.txt
           grep -q 'PASS toDataURL' canvas.txt
           ! grep -q '^FAIL' canvas.txt
+
+      - name: Web Crypto checks
+        run: |
+          set -o pipefail
+          ./builddir/src/sdl/weststar --headless --dump=text --settle-ms=3000 \
+            "file://$PWD/data/fixtures/webcrypto.html" > webcrypto.txt
+          grep -E '^(PASS|FAIL|SKIP)' webcrypto.txt
+          grep -q '^PASS' webcrypto.txt
+          ! grep -q '^FAIL' webcrypto.txt
 
       - name: No WebGL, no video
         run: |
@@ -118,3 +128,49 @@ jobs:
             > gui.log 2>&1 || true
           cat gui.log
           test "$(cat gui.status)" = 124
+
+  mbedtls:
+    # The portable build profile's crypto: mbedTLS (fetched as a meson
+    # subproject) instead of OpenSSL. Algorithms mbedTLS lacks (EdDSA) must
+    # report NotSupportedError (SKIP), never fail.
+    name: gcc on ubuntu-26.04, -Dcrypto=mbedtls
+    runs-on: ubuntu-26.04
+    timeout-minutes: 40
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      NS_ALLOW_ROOT: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config meson ninja-build git \
+            libsdl3-dev libcurl4-openssl-dev \
+            libharfbuzz-dev libfribidi-dev libfontconfig-dev \
+            libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev \
+            libglib2.0-dev zlib1g-dev libbrotli-dev libzstd-dev
+
+      - name: Configure and build
+        run: |
+          meson setup builddir --werror -Db_lto=false -Dpdfjs=disabled -Dcrypto=mbedtls
+          meson compile -C builddir
+
+      - name: No libcrypto in the binary
+        run: |
+          # curl may bring its own TLS library; Weststar itself must not
+          # link OpenSSL's libcrypto.
+          ! objdump -p builddir/src/sdl/weststar | grep -E 'NEEDED +libcrypto'
+
+      - name: Web Crypto checks
+        run: |
+          set -o pipefail
+          ./builddir/src/sdl/weststar --headless --dump=text --settle-ms=3000 \
+            "file://$PWD/data/fixtures/webcrypto.html" > webcrypto.txt
+          grep -E '^(PASS|FAIL|SKIP)' webcrypto.txt
+          grep -q '^PASS' webcrypto.txt
+          ! grep -q '^FAIL' webcrypto.txt

@@ -73,7 +73,13 @@ So the shell goes first, and Cairo after it:
    4. *A portable build profile*: fontconfig optional (fonts found in the
       platform's font folders, with a small bundled fallback set), TLS and
       Web Crypto through mbedTLS instead of OpenSSL, and a bundled CA
-      certificate set for systems whose root store is too old.
+      certificate set for systems whose root store is too old. Crypto is
+      done: Web Crypto, random numbers and Safe Browsing go through
+      `src/plat/ns_crypto.h`, with OpenSSL (the default) or Mbed TLS
+      (`-Dcrypto=mbedtls`, fetched as a subproject) behind it; the
+      `mbedtls` build lacks only EdDSA, reported as NotSupportedError.
+      `data/fixtures/webcrypto.html` checks both in CI. (TLS for HTTPS is
+      libcurl's, built against whatever TLS library the platform has.)
    5. *GLib's data structures and GObject* (about 500 functions at 21,000
       call sites, and the Pango fork's type system) come from a trimmed
       GLib vendored in the tree and built statically, its few OS calls

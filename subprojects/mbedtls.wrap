@@ -1,0 +1,13 @@
+[wrap-file]
+# Mbed TLS 3.6 LTS, used only by -Dcrypto=mbedtls (Web Crypto, random
+# numbers and hashing on platforms without OpenSSL) when no system mbedTLS
+# is installed. Only its crypto library is built; see
+# packagefiles/mbedtls/meson.build.
+directory = mbedtls-3.6.8
+source_url = https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.8/mbedtls-3.6.8.tar.bz2
+source_filename = mbedtls-3.6.8.tar.bz2
+source_hash = bc54b818e87f49c0b3281dd85d24adaede0e63b4e822e3fbd49c005a38b9595b
+patch_directory = mbedtls
+
+[provide]
+mbedcrypto = mbedcrypto_dep

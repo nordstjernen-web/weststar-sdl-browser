@@ -21,7 +21,7 @@
 
 #include <curl/curl.h>
 #include <glib/gstdio.h>
-#include <openssl/evp.h>
+#include "plat/ns_crypto.h"
 
 #ifdef G_OS_WIN32
 #include <io.h>
@@ -415,10 +415,10 @@ sbg_checksum_matches(const guint32 *values, gsize n, const guint8 *want,
         return TRUE;
     if (want_len != 32)
         return FALSE;
-    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    NsHashCtx *ctx = ns_hash_new(NS_HASH_SHA256);
     if (!ctx)
         return FALSE;
-    gboolean ok = EVP_DigestInit_ex(ctx, EVP_sha256(), NULL) == 1;
+    gboolean ok = TRUE;
     guint8 chunk[4096];
     gsize used = 0;
     for (gsize i = 0; ok && i < n; i++) {
@@ -426,18 +426,16 @@ sbg_checksum_matches(const guint32 *values, gsize n, const guint8 *want,
         memcpy(chunk + used, &be, 4);
         used += 4;
         if (used == sizeof chunk) {
-            ok = EVP_DigestUpdate(ctx, chunk, used) == 1;
+            ok = ns_hash_update(ctx, chunk, used);
             used = 0;
         }
     }
     if (ok && used)
-        ok = EVP_DigestUpdate(ctx, chunk, used) == 1;
-    guint8 digest[EVP_MAX_MD_SIZE];
-    unsigned int dlen = 0;
-    if (ok)
-        ok = EVP_DigestFinal_ex(ctx, digest, &dlen) == 1;
-    EVP_MD_CTX_free(ctx);
-    return ok && dlen == 32 && memcmp(digest, want, 32) == 0;
+        ok = ns_hash_update(ctx, chunk, used);
+    guint8 digest[NS_HASH_MAX_SIZE];
+    /* Finishing also frees the context, so it runs even after a failed update. */
+    ok = ns_hash_finish(ctx, digest) && ok;
+    return ok && memcmp(digest, want, 32) == 0;
 }
 
 static void
@@ -1241,8 +1239,7 @@ ns_sbg_check_url(const char *url)
     gboolean *hit = g_new0(gboolean, n + 1);
     for (gsize i = 0; i < n; i++) {
         const char *e = g_ptr_array_index(exprs, i);
-        unsigned int dlen = 0;
-        EVP_Digest(e, strlen(e), hashes[i], &dlen, EVP_sha256(), NULL);
+        ns_hash(NS_HASH_SHA256, e, strlen(e), hashes[i]);
         guint32 be;
         memcpy(&be, hashes[i], 4);
         prefixes[i] = GUINT32_FROM_BE(be);

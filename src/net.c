@@ -34,13 +34,10 @@
 #include <lexbor/unicode/idna.h>
 #include <lexbor/url/url.h>
 
-#include <openssl/rand.h>
-
 #include <libpsl.h>
 #include <sqlite3.h>
 #include "ns_pango.h"
-#include <openssl/crypto.h>
-#include <openssl/opensslv.h>
+#include "plat/ns_crypto.h"
 
 #ifdef G_OS_WIN32
 #include <windows.h>
@@ -2136,13 +2133,14 @@ ns_net_share_new(gboolean with_cookies)
     return share;
 }
 
-/* Primes OpenSSL's RNG in the background so the first TLS handshake doesn't seed it. */
+/* Primes the crypto library's RNG in the background so the first TLS handshake (with an
+ * OpenSSL-backed libcurl) or Web Crypto call doesn't seed it. */
 static gpointer
 ns_rng_warmup_thread(gpointer data)
 {
     (void)data;
     unsigned char buf[32];
-    (void)RAND_bytes(buf, (int)sizeof buf);
+    (void)ns_crypto_random(buf, sizeof buf);
     return NULL;
 }
 
@@ -3291,7 +3289,7 @@ about_diagnostics_html(void)
     g_free(glibv);
     diag_kv(s, "Pango", ns_pango_version_string());
     diag_kv(s, "SQLite", sqlite3_libversion());
-    diag_kv(s, "TLS / crypto", OpenSSL_version(OPENSSL_VERSION));
+    diag_kv(s, "TLS / crypto", ns_crypto_library_version());
     diag_kv(s, "Networking", curl_version());
 
     diag_heading(s, "Features");

@@ -171,7 +171,17 @@ libcurl = dependency('libcurl', version: ns_floors['libcurl'])
 if libcurl.version().version_compare('<8.11')
   warning('libcurl @0@ predates stable WebSocket support (curl 8.11): WebSocket will be unavailable at runtime unless this libcurl was built with the ws/wss protocols.'.format(libcurl.version()))
 endif
-libcrypto = dependency('libcrypto')
+# Web Crypto, random numbers and hashing (src/plat/ns_crypto.h) come from
+# OpenSSL's libcrypto, or with -Dcrypto=mbedtls from Mbed TLS 3.6 LTS: the
+# system's if installed, else the release pinned in subprojects/mbedtls.wrap,
+# built statically. That build has no libcrypto; it lacks Ed25519 and Ed448.
+crypto_backend = get_option('crypto')
+if crypto_backend == 'openssl'
+  libcrypto = dependency('libcrypto')
+else
+  libcrypto = dependency('mbedcrypto', version: ['>=3.6.0', '<4'],
+                         fallback: ['mbedtls', 'mbedcrypto_dep'])
+endif
 libm = cc.find_library('m', required: false)
 
 libpsl = dependency('libpsl')
@@ -433,6 +443,7 @@ summary({
   'Audio playback (SDL3)': have_audio,
   'SDL': sdl3_dep.version(),
   'JavaScript engine': js_engine + ' ' + libquickjs.version(),
+  'Crypto library': crypto_backend + ' ' + libcrypto.version(),
 }, section: 'Features')
 
 # Text is shaped through web-text-lib (src/web-text-lib/), the in-tree Pango

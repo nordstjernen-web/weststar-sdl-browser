@@ -1,5 +1,6 @@
 /* Weststar SDL Browser — engine-neutral crypto key and SubtleCrypto operation API.
- * Key generation, import/export, sign/verify, encrypt/decrypt and derive bits over OpenSSL.
+ * Key generation, import/export, sign/verify, encrypt/decrypt and derive bits over the
+ * platform crypto layer (plat/ns_crypto.h: OpenSSL or Mbed TLS).
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -38,7 +39,7 @@ typedef struct ns_crypto_key {
     guint32    usages;
     guint8    *raw;
     gsize      raw_len;
-    void      *pkey;
+    void      *pkey;      /* NsPkey * for public and private keys */
     int        refcount;
 } ns_crypto_key;
 
@@ -74,6 +75,9 @@ guint8        *ns_crypto_rsa_exponent(const ns_crypto_key *k, gsize *len);
 guint8        *ns_crypto_digest(const char *hash, const guint8 *data,
                                 gsize len, gsize *out_len);
 gboolean       ns_crypto_eddsa_context_supported(void);
+/* False for a registered WebCrypto algorithm (Ed25519, SHA3-256, ...) that
+ * the crypto library this build uses cannot do. */
+gboolean       ns_crypto_algorithm_available(const char *name);
 
 ns_crypto_key *ns_crypto_generate_secret(const char *algo, const char *hash,
                                          int length_bits, gboolean extractable,
