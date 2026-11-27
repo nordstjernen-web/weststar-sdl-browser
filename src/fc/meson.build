@@ -21,9 +21,10 @@ test(
       '../plat/ns_env.c',
       '../plat/ns_fs.c',
       '../plat/ns_plat.c',
+      '../plat/ns_sdl2.c',
     ),
-    dependencies: [sdl3_dep, libfreetype, libm] +
-      (host_machine.system() == 'windows' ? [cc.find_library('shell32')] : []),
+    dependencies: [sdl_dep, libfreetype, libm] +
+      ns_plat_test_win_libs,
     # nsfc's headers come before the system's fontconfig, if any.
     include_directories: [nsfc_inc, include_directories('..')],
     # As for the browser: no -pie on Windows, where clang rejects it as
@@ -47,7 +48,7 @@ if sdl2_dep.found()
       ),
       c_args: ['-DNS_SDL2'],
       dependencies: [sdl2_dep, libfreetype, libm] +
-        (host_machine.system() == 'windows' ? [cc.find_library('shell32')] : []),
+        ns_plat_test_win_libs,
       include_directories: [nsfc_inc, include_directories('..')],
       pie: host_machine.system() != 'windows',
     ),

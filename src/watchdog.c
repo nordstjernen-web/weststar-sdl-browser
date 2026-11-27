@@ -20,14 +20,26 @@
 #include <string.h>
 
 #include <glib.h>
-#include <SDL3/SDL_process.h>
-#include <SDL3/SDL_timer.h>
+#include "plat/ns_sdl.h"
 
 #ifdef G_OS_WIN32
 #include <windows.h>
 #else
 #include <signal.h>
 #include <unistd.h>
+#endif
+
+/* SDL2 has no process API: an SDL2 build starts the browser with the
+ * system's own calls, CreateProcessW or fork and exec. The Amiga family
+ * has neither, and runs without the watchdog. */
+#if defined(NS_SDL2) && (defined(__amigaos4__) || defined(__MORPHOS__) || \
+                         defined(__AROS__))
+#define NS_WATCHDOG_NO_PROCESSES 1
+#endif
+#if defined(NS_SDL2) && !defined(G_OS_WIN32) && !defined(NS_WATCHDOG_NO_PROCESSES)
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #endif
 
 #ifdef __linux__
@@ -166,6 +178,13 @@ gboolean
 ns_watchdog_should_supervise(int argc, char **argv, gboolean enabled_by_default)
 {
     gboolean forced = FALSE;
+#ifdef NS_WATCHDOG_NO_PROCESSES
+    (void)argc;
+    (void)argv;
+    (void)forced;
+    (void)enabled_by_default;
+    return FALSE;
+#endif
     for (int i = 1; i < argc; i++) {
         if (!argv[i]) continue;
         if (g_strcmp0(argv[i], NS_WATCHDOG_CHILD_FLAG) == 0) return FALSE;
@@ -179,7 +198,13 @@ ns_watchdog_should_supervise(int argc, char **argv, gboolean enabled_by_default)
 typedef struct {
     char       **child_argv;
     char        *session_path;
+#ifndef NS_SDL2
     SDL_Process *process;
+#elif defined(G_OS_WIN32)
+    HANDLE       process;
+#else
+    long         process; /* the browser's process id, 0 when none */
+#endif
     int          burst_count;
     gint64       burst_start_us;
     gint64       spawned_us;
@@ -269,6 +294,8 @@ ns_watchdog_stopping(void)
 #endif
 }
 
+#ifndef NS_SDL2
+
 /* How the browser gets standard stream `fd`: the supervisor's own. A
  * Windows program started from the desktop has none, and SDL fails to
  * start a process that is to inherit a stream that is not there; the
@@ -289,10 +316,9 @@ ns_watchdog_stdio(int fd)
     return SDL_PROCESS_STDIO_INHERITED;
 }
 
-/* Launches the browser child, in recovery mode when asked: with
- * NS_WATCHDOG_RECOVER=1 in its environment, and only in its. */
+/* Starts the browser; FALSE with *error set when it could not be. */
 static gboolean
-ns_watchdog_spawn(ns_watchdog *wd, gboolean recover)
+ns_watchdog_start_process(ns_watchdog *wd, gboolean recover, char **error)
 {
     SDL_Environment *env = SDL_CreateEnvironment(true);
     SDL_PropertiesID props = SDL_CreateProperties();
@@ -317,11 +343,228 @@ ns_watchdog_spawn(ns_watchdog *wd, gboolean recover)
                               ns_watchdog_stdio(2));
         wd->process = SDL_CreateProcessWithProperties(props);
     }
-    char *error = wd->process ? NULL : g_strdup(SDL_GetError());
+    if (!wd->process)
+        *error = g_strdup(SDL_GetError());
     if (props) SDL_DestroyProperties(props);
     if (env) SDL_DestroyEnvironment(env);
 
-    if (!wd->process) {
+    return wd->process != NULL;
+}
+
+#ifndef G_OS_WIN32
+static long
+ns_watchdog_process_id(ns_watchdog *wd)
+{
+    return (long)SDL_GetNumberProperty(
+        SDL_GetProcessProperties(wd->process), SDL_PROP_PROCESS_PID_NUMBER, 0);
+}
+#endif
+
+/* Waits for the browser to exit, and forgets it. */
+static gboolean
+ns_watchdog_wait_process(ns_watchdog *wd, int *code)
+{
+    bool waited = SDL_WaitProcess(wd->process, true, code);
+    if (!waited)
+        g_warning("ns_watchdog: lost track of the browser: %s", SDL_GetError());
+    SDL_DestroyProcess(wd->process);
+    wd->process = NULL;
+    return waited;
+}
+
+#elif defined(G_OS_WIN32)
+
+/* One argument of a command line, quoted so that the C runtime reads it
+ * back as it was. */
+static void
+ns_watchdog_append_arg(GString *cmd, const char *arg)
+{
+    if (cmd->len)
+        g_string_append_c(cmd, ' ');
+    if (*arg && !strpbrk(arg, " \t\n\v\"")) {
+        g_string_append(cmd, arg);
+        return;
+    }
+    g_string_append_c(cmd, '"');
+    for (const char *p = arg;; p++) {
+        gsize slashes = 0;
+        while (*p == '\\') {
+            p++;
+            slashes++;
+        }
+        if (!*p) {
+            for (gsize k = 0; k < slashes * 2; k++)
+                g_string_append_c(cmd, '\\');
+            break;
+        }
+        gsize n = *p == '"' ? slashes * 2 + 1 : slashes;
+        for (gsize k = 0; k < n; k++)
+            g_string_append_c(cmd, '\\');
+        g_string_append_c(cmd, *p);
+    }
+    g_string_append_c(cmd, '"');
+}
+
+/* The supervisor's standard handles, for the browser to inherit: none
+ * when it has none, as when started from the desktop. */
+static gboolean
+ns_watchdog_std_handles(STARTUPINFOW *si)
+{
+    static const DWORD ids[] = {
+        STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE,
+    };
+    HANDLE h[3];
+    gboolean any = FALSE;
+    for (int i = 0; i < 3; i++) {
+        h[i] = GetStdHandle(ids[i]);
+        if (h[i] == INVALID_HANDLE_VALUE ||
+            (h[i] && !SetHandleInformation(h[i], HANDLE_FLAG_INHERIT,
+                                           HANDLE_FLAG_INHERIT)))
+            h[i] = NULL;
+        any = any || h[i];
+    }
+    if (!any)
+        return FALSE;
+    si->dwFlags |= STARTF_USESTDHANDLES;
+    si->hStdInput = h[0];
+    si->hStdOutput = h[1];
+    si->hStdError = h[2];
+    return TRUE;
+}
+
+static gboolean
+ns_watchdog_start_process(ns_watchdog *wd, gboolean recover, char **error)
+{
+    GString *cmd = g_string_new(NULL);
+    for (char **a = wd->child_argv; *a; a++)
+        ns_watchdog_append_arg(cmd, *a);
+    wchar_t *wcmd = (wchar_t *)g_utf8_to_utf16(cmd->str, -1, NULL, NULL, NULL);
+    wchar_t *wexe = (wchar_t *)g_utf8_to_utf16(wd->child_argv[0], -1, NULL,
+                                               NULL, NULL);
+    g_string_free(cmd, TRUE);
+    /* The browser inherits the supervisor's environment; the supervisor
+     * itself does not read this variable. */
+    SetEnvironmentVariableW(L"" NS_WATCHDOG_RECOVER_ENV, recover ? L"1" : NULL);
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    memset(&si, 0, sizeof si);
+    memset(&pi, 0, sizeof pi);
+    si.cb = sizeof si;
+    BOOL inherit = ns_watchdog_std_handles(&si);
+    BOOL ok = wcmd && wexe &&
+              CreateProcessW(wexe, wcmd, NULL, NULL, inherit, 0, NULL, NULL,
+                             &si, &pi);
+    if (ok) {
+        CloseHandle(pi.hThread);
+        wd->process = pi.hProcess;
+    } else {
+        *error = g_win32_error_message((gint)GetLastError());
+    }
+    g_free(wcmd);
+    g_free(wexe);
+    return ok;
+}
+
+static gboolean
+ns_watchdog_wait_process(ns_watchdog *wd, int *code)
+{
+    DWORD status = 1;
+    gboolean waited =
+        WaitForSingleObject(wd->process, INFINITE) == WAIT_OBJECT_0 &&
+        GetExitCodeProcess(wd->process, &status);
+    if (!waited)
+        g_warning("ns_watchdog: lost track of the browser (error %lu)",
+                  (unsigned long)GetLastError());
+    *code = (int)status;
+    CloseHandle(wd->process);
+    wd->process = NULL;
+    return waited;
+}
+
+#elif !defined(NS_WATCHDOG_NO_PROCESSES)
+
+static gboolean
+ns_watchdog_start_process(ns_watchdog *wd, gboolean recover, char **error)
+{
+    pid_t pid = fork();
+    if (pid < 0) {
+        *error = g_strdup(g_strerror(errno));
+        return FALSE;
+    }
+    if (pid == 0) {
+        /* The browser-to-be: its environment is its own now. */
+        if (recover)
+            setenv(NS_WATCHDOG_RECOVER_ENV, "1", 1);
+        else
+            unsetenv(NS_WATCHDOG_RECOVER_ENV);
+        execv(wd->child_argv[0], wd->child_argv);
+        _exit(127);
+    }
+    wd->process = (long)pid;
+    return TRUE;
+}
+
+static long
+ns_watchdog_process_id(ns_watchdog *wd)
+{
+    return wd->process;
+}
+
+static gboolean
+ns_watchdog_wait_process(ns_watchdog *wd, int *code)
+{
+    int status = 0;
+    pid_t r;
+    do {
+        r = waitpid((pid_t)wd->process, &status, 0);
+    } while (r < 0 && errno == EINTR);
+    wd->process = 0;
+    if (r < 0) {
+        g_warning("ns_watchdog: lost track of the browser: %s",
+                  g_strerror(errno));
+        return FALSE;
+    }
+    *code = WIFEXITED(status) ? WEXITSTATUS(status)
+          : WIFSIGNALED(status) ? -WTERMSIG(status) : 1;
+    return TRUE;
+}
+
+#else /* NS_WATCHDOG_NO_PROCESSES: never supervised */
+
+static gboolean
+ns_watchdog_start_process(ns_watchdog *wd, gboolean recover, char **error)
+{
+    (void)wd;
+    (void)recover;
+    *error = g_strdup("this system cannot start the browser as a process "
+                      "of its own");
+    return FALSE;
+}
+
+static long
+ns_watchdog_process_id(ns_watchdog *wd)
+{
+    (void)wd;
+    return 0;
+}
+
+static gboolean
+ns_watchdog_wait_process(ns_watchdog *wd, int *code)
+{
+    (void)wd;
+    *code = 1;
+    return FALSE;
+}
+
+#endif
+
+/* Launches the browser child, in recovery mode when asked: with
+ * NS_WATCHDOG_RECOVER=1 in its environment, and only in its. */
+static gboolean
+ns_watchdog_spawn(ns_watchdog *wd, gboolean recover)
+{
+    char *error = NULL;
+    if (!ns_watchdog_start_process(wd, recover, &error)) {
         g_warning("ns_watchdog: failed to launch browser: %s", error);
         char *detail = g_strdup_printf("Failed to launch the browser process: %s",
                                        error);
@@ -332,8 +575,7 @@ ns_watchdog_spawn(ns_watchdog *wd, gboolean recover)
     }
     wd->spawned_us = ns_time_monotonic_us();
 #ifndef G_OS_WIN32
-    g_child_pid = (sig_atomic_t)SDL_GetNumberProperty(
-        SDL_GetProcessProperties(wd->process), SDL_PROP_PROCESS_PID_NUMBER, 0);
+    g_child_pid = (sig_atomic_t)ns_watchdog_process_id(wd);
     /* A stop that arrived while the browser was being started. */
     if (g_stop_requested && g_child_pid > 0) {
         kill((pid_t)g_child_pid, SIGTERM);
@@ -348,15 +590,11 @@ ns_watchdog_spawn(ns_watchdog *wd, gboolean recover)
 static gboolean
 ns_watchdog_wait(ns_watchdog *wd, int *code)
 {
-    bool waited = SDL_WaitProcess(wd->process, true, code);
+    gboolean waited = ns_watchdog_wait_process(wd, code);
 #ifndef G_OS_WIN32
     g_child_pid = 0;
     alarm(0);
 #endif
-    if (!waited)
-        g_warning("ns_watchdog: lost track of the browser: %s", SDL_GetError());
-    SDL_DestroyProcess(wd->process);
-    wd->process = NULL;
     return waited;
 }
 
@@ -429,7 +667,8 @@ ns_watchdog_build_child_argv(const char *self_exe, int argc, char **argv,
 /* Supervisor main: runs and restarts the browser child; returns its final exit status.
  * The supervisor is a process of its own that only starts the browser and
  * waits for it, so it needs no event loop: it starts the browser with
- * SDL's process API and blocks until it exits. On Unix, SIGINT and
+ * SDL's process API (in an SDL2 build, the system's) and blocks until it
+ * exits. On Unix, SIGINT and
  * SIGTERM are passed on to the browser from their handlers. */
 int
 ns_watchdog_run_supervisor(const char *self_exe, int argc, char **argv)

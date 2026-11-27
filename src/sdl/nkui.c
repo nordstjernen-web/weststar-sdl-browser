@@ -1,4 +1,4 @@
-/* Weststar SDL Browser — the Nuklear backend: SDL3 input in, chrome pixels out.
+/* Weststar SDL Browser — the Nuklear backend: SDL input in, chrome pixels out.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

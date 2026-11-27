@@ -1,4 +1,4 @@
-# The SDL3 frontend: the window, its chrome (drawn with Nuklear) and the page
+# The SDL frontend (SDL3, or SDL2 with -Dsdl=sdl2): the window, its chrome (drawn with Nuklear) and the page
 # view that drives the engine thread.
 weststar_sdl_sources = files(
   '../appmain.c',
@@ -41,7 +41,7 @@ executable(
     weststar_sdl_sources + northstar_audio_sources +
     northstar_win_resources + ns_embedded_headers + [sb_key_h] +
     pdf_viewer_headers,
-  dependencies: northstar_deps + [sdl3_dep, libnuklear, weststar_gfx_dep] +
+  dependencies: northstar_deps + [sdl_dep, libnuklear, weststar_gfx_dep] +
     northstar_audio_deps,
   link_with: [northstar_audio_libs, weststar_nuklear_lib],
   include_directories: [include_directories('..', '.'), ns_embedded_inc],

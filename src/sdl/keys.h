@@ -6,7 +6,7 @@
 #ifndef NS_SDL_KEYS_H
 #define NS_SDL_KEYS_H
 
-#include <SDL3/SDL.h>
+#include "plat/ns_sdl.h"
 #include <glib.h>
 
 G_BEGIN_DECLS

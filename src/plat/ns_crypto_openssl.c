@@ -14,7 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <SDL3/SDL_stdinc.h>
+#include "plat/ns_sdl.h"
 
 #include <openssl/bn.h>
 #include <openssl/core_names.h>

@@ -1,0 +1,17 @@
+[wrap-file]
+# SDL 2.32.8, used only by -Dsdl=sdl2 when no system SDL2 is installed, or
+# when forced with --force-fallback-for=sdl2: genuine SDL2, where a system's
+# libsdl2 may be sdl2-compat (SDL2's API over SDL3). Built statically with
+# WrapDB's meson port. See docs/porting-to-sdl.md, stage 6.6.
+directory = SDL2-2.32.8
+source_url = https://github.com/libsdl-org/SDL/releases/download/release-2.32.8/SDL2-2.32.8.tar.gz
+source_filename = SDL2-2.32.8.tar.gz
+source_hash = 0ca83e9c9b31e18288c7ec811108e58bac1f1bb5ec6577ad386830eac51c787e
+source_fallback_url = https://github.com/mesonbuild/wrapdb/releases/download/sdl2_2.32.8-1/SDL2-2.32.8.tar.gz
+patch_filename = sdl2_2.32.8-1_patch.zip
+patch_url = https://wrapdb.mesonbuild.com/v2/sdl2_2.32.8-1/get_patch
+patch_hash = 5df17ea39ca418826db20e96bd821fa52b5718dac64b6225119fb6588c2744f0
+wrapdb_version = 2.32.8-1
+
+[provide]
+sdl2 = sdl2_dep

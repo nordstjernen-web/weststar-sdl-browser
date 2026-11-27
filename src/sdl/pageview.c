@@ -777,12 +777,30 @@ ensure_texture(NsPageView *v, int w, int h)
  * textures and each scroll draws one into the other. The strips the move
  * leaves behind hold old pixels until the patch's rectangles, which cover
  * them, are uploaded. */
+#ifdef NS_SDL2
+/* SDL2's Direct3D 9 renderer (Windows XP's) keeps a copy in memory of a
+ * texture that is uploaded to, and sends all of it again after the
+ * texture was drawn into: a scroll drawn on the GPU would be lost. There
+ * the page comes whole after a scroll instead. */
+static gboolean
+renderer_scrolls(SDL_Renderer *renderer)
+{
+    SDL_RendererInfo info;
+    return SDL_GetRendererInfo(renderer, &info) != 0 ||
+           SDL_strcmp(info.name, "direct3d") != 0;
+}
+#endif
+
 static gboolean
 scroll_texture(NsPageView *v, int dx, int dy)
 {
     int w = v->tex_w - ABS(dx), h = v->tex_h - ABS(dy);
     if (w <= 0 || h <= 0)
         return FALSE;
+#ifdef NS_SDL2
+    if (!renderer_scrolls(v->renderer))
+        return FALSE;
+#endif
     if (!v->texture_back)
         v->texture_back = create_page_texture(v, v->tex_w, v->tex_h);
     if (!v->texture_back)

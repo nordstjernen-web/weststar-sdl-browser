@@ -15,10 +15,15 @@
 
 #include "config.h"
 
+#ifdef NS_SDL2
+/* SDL2 under SDL3's names: the browser's src/plat/ns_sdl.h. */
+#include "ns_sdl.h"
+#else
 #include <SDL3/SDL_atomic.h>
 #include <SDL3/SDL_mutex.h>
 #include <SDL3/SDL_thread.h>
 #include <SDL3/SDL_timer.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -303,7 +308,9 @@ g_system_thread_new (GThreadFunc proxy,
 {
   NsThread *thread = g_slice_new0 (NsThread);
   GRealThread *base_thread = (GRealThread *) thread;
+#ifndef NS_SDL2
   SDL_PropertiesID props;
+#endif
 
   base_thread->ref_count = 2;
   base_thread->ours = TRUE;
@@ -314,6 +321,11 @@ g_system_thread_new (GThreadFunc proxy,
   thread->proxy = proxy;
   g_mutex_init (&thread->lock);
 
+#ifdef NS_SDL2
+  thread->sdl_thread = SDL_CreateThreadWithStackSize (ns_thread_entry, name,
+                                                      (size_t) stack_size,
+                                                      thread);
+#else
   props = SDL_CreateProperties ();
   SDL_SetPointerProperty (props, SDL_PROP_THREAD_CREATE_ENTRY_FUNCTION_POINTER,
                           (void *) ns_thread_entry);
@@ -324,6 +336,7 @@ g_system_thread_new (GThreadFunc proxy,
                            (Sint64) stack_size);
   thread->sdl_thread = SDL_CreateThreadWithProperties (props);
   SDL_DestroyProperties (props);
+#endif
 
   if (thread->sdl_thread == NULL)
     {

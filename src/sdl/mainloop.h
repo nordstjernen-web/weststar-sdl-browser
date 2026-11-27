@@ -6,7 +6,7 @@
 #ifndef NS_SDL_MAINLOOP_H
 #define NS_SDL_MAINLOOP_H
 
-#include <SDL3/SDL.h>
+#include "plat/ns_sdl.h"
 #include <glib.h>
 #include "plat/ns_loop.h"
 

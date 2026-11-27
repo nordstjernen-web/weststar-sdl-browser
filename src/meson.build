@@ -227,7 +227,7 @@ endif
 # A dependency that was not found is ignored, so optional libraries are
 # listed unconditionally.
 northstar_deps = [
-  sdl3_dep,
+  sdl_dep,
   glib,
   gobject,
   pango,
@@ -264,6 +264,7 @@ if host_system == 'windows'
     cc.find_library('advapi32'),
     cc.find_library('shell32'),
     cc.find_library('user32'),
+    cc.find_library('comdlg32'),
   ]
 elif host_system == 'linux'
   northstar_link_args += cc.get_supported_link_arguments(
@@ -280,7 +281,7 @@ elif host_system == 'netbsd'
   )
 endif
 
-# Optional in-process audio playback over SDL3, with minimp3 and pl_mpeg
+# Optional in-process audio playback over SDL, with minimp3 and pl_mpeg
 # decoding MP3 and MPEG-1 audio and, where present, vorbisfile and opusfile
 # decoding Ogg.
 northstar_audio_sources = files('audio/stub.c')
@@ -288,7 +289,7 @@ northstar_audio_deps = []
 northstar_audio_libs = []
 if have_audio
   northstar_audio_sources = files('audio/audio.c')
-  northstar_audio_deps = [sdl3_dep, libplmpeg, libvorbisfile, libopusfile,
+  northstar_audio_deps = [sdl_dep, libplmpeg, libvorbisfile, libopusfile,
                           libm]
   northstar_audio_libs = static_library(
     'minimp3',

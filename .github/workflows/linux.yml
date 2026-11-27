@@ -73,7 +73,7 @@ jobs:
       - name: nsfc and SDL layer tests
         # The in-tree font finder, built and tested here although this
         # build finds its fonts through fontconfig; and both again on
-        # SDL2 (libsdl2-dev), which the browser itself does not use yet.
+        # SDL2 (libsdl2-dev). The whole browser on SDL2: the sdl2 job.
         run: |
           NSFC_TEST_FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf \
             meson test -C builddir --suite nsfc --suite plat --print-errorlogs
@@ -144,6 +144,87 @@ jobs:
           # The browser must still be running after five seconds. Its own
           # exit status is recorded inside the Xvfb session: xvfb-run can
           # fail on its own when cleaning up its temporary directory.
+          xvfb-run -a -s '-screen 0 1280x900x24' sh -c \
+            'timeout 5 ./builddir/src/sdl/weststar --no-watchdog about:start; echo $? > gui.status' \
+            > gui.log 2>&1 || true
+          cat gui.log
+          test "$(cat gui.status)" = 124
+
+  sdl2:
+    # The whole browser on SDL2 (-Dsdl=sdl2), as Windows XP and the Amiga
+    # family build it: genuine SDL2, the release pinned in
+    # subprojects/sdl2.wrap, built here as a shared library. Neither
+    # libsdl3-dev nor libsdl2-dev (which may be sdl2-compat, SDL2's API
+    # over SDL3) is installed; SDL2 gets the X11, OpenGL and sound
+    # headers it builds its backends from.
+    name: gcc on ubuntu-26.04, SDL2
+    runs-on: ubuntu-26.04
+    timeout-minutes: 40
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      NS_ALLOW_ROOT: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config meson ninja-build git \
+            libcurl4-openssl-dev libssl-dev \
+            libharfbuzz-dev libfribidi-dev libfontconfig-dev \
+            libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev \
+            libglib2.0-dev zlib1g-dev libbrotli-dev libzstd-dev \
+            libopusfile-dev libvorbis-dev xvfb xauth fonts-dejavu-core \
+            libx11-dev libxext-dev libxi-dev libxrandr-dev libxfixes-dev \
+            libxcursor-dev libxkbcommon-dev libgl-dev libegl-dev \
+            libasound2-dev libpulse-dev
+
+      - name: Configure and build
+        run: |
+          meson setup builddir --werror -Db_lto=false -Dpdfjs=disabled \
+            -Dsdl=sdl2 --force-fallback-for=sdl2 \
+            -Dsdl2:default_library=shared
+          meson compile -C builddir
+
+      - name: The binary uses SDL2 from the wrap, and no SDL3
+        run: |
+          ldd builddir/src/sdl/weststar | grep -i libsdl
+          ldd builddir/src/sdl/weststar | grep -E 'libSDL2-2\.0\.so.* => .*/builddir/subprojects/'
+          ! ldd builddir/src/sdl/weststar | grep -i libSDL3
+
+      - name: gfx, nsfc and SDL layer tests
+        run: |
+          NSFC_TEST_FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf \
+            meson test -C builddir --suite gfx --suite nsfc --suite plat \
+            --print-errorlogs
+
+      - name: Headless smokes
+        run: |
+          set -o pipefail
+          ./builddir/src/sdl/weststar --headless --dump=text about:start > about.txt
+          grep -q 'Search duckduckgo.com' about.txt
+          ./builddir/src/sdl/weststar --headless --dump=text --settle-ms=300 \
+            'data:text/html,<p id="a">before</p><script>var a=document.getElementById("a");a.textContent="js-ok "+(6*7);setTimeout(function(){a.textContent+=" timer-ok"},50);</script>' \
+            > js.txt
+          cat js.txt
+          grep -q 'js-ok 42 timer-ok' js.txt
+          ./builddir/src/sdl/weststar --headless --dump=text --settle-ms=500 \
+            "file://$PWD/data/fixtures/canvas-2d.html" > canvas.txt
+          grep -q 'PASS toDataURL' canvas.txt
+          ! grep -q '^FAIL' canvas.txt
+          ./builddir/src/sdl/weststar --headless --dump=text --settle-ms=3000 \
+            "file://$PWD/data/fixtures/webcrypto.html" > webcrypto.txt
+          grep -q '^PASS' webcrypto.txt
+          ! grep -q '^FAIL' webcrypto.txt
+
+      - name: GUI smoke (SDL2 window under Xvfb)
+        run: |
+          # As in the SDL3 job: still running after five seconds, its exit
+          # status recorded inside the Xvfb session.
           xvfb-run -a -s '-screen 0 1280x900x24' sh -c \
             'timeout 5 ./builddir/src/sdl/weststar --no-watchdog about:start; echo $? > gui.status' \
             > gui.log 2>&1 || true

@@ -3338,6 +3338,13 @@ about_diagnostics_html(void)
                                   glib_minor_version, glib_micro_version);
     diag_kv(s, "GLib", glibv);
     g_free(glibv);
+    int sdlv = SDL_GetVersion();
+    char *sdl_version = g_strdup_printf("%d.%d.%d",
+                                        SDL_VERSIONNUM_MAJOR(sdlv),
+                                        SDL_VERSIONNUM_MINOR(sdlv),
+                                        SDL_VERSIONNUM_MICRO(sdlv));
+    diag_kv(s, NS_SDL_NAME, sdl_version);
+    g_free(sdl_version);
     diag_kv(s, "Pango", ns_pango_version_string());
     diag_kv(s, "SQLite", sqlite3_libversion());
     diag_kv(s, "TLS / crypto", ns_crypto_library_version());
@@ -4710,7 +4717,7 @@ static const char k_about_start_template[] =
     "<p class=\"foot\">"
     "<a href=\"https://github.com/nordstjernen-web/weststar-sdl-browser\">"
     "Open source</a> &middot; "
-    "<a href=\"about:license\">GPL-3.0</a> &middot; SDL3"
+    "<a href=\"about:license\">GPL-3.0</a> &middot; " NS_SDL_NAME
     "</p>"
     "</main>"
     "<script>\n"

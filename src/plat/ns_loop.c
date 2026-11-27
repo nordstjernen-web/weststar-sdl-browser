@@ -8,7 +8,7 @@
 #include "plat/ns_loop.h"
 #include "plat/ns_plat.h"
 
-#include <SDL3/SDL_log.h>
+#include "plat/ns_sdl.h"
 #include <stdint.h>
 #include <stdlib.h>
 

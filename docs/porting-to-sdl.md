@@ -139,19 +139,69 @@ So the shell goes first, and Cairo after it:
       character set, files and folders, and `stderr`; whether that needs
       changing is for the first platform without them to say (stage 7).
    6. *SDL2 as well as SDL3*, since the Amiga-family ports and
-      XP-capable builds are SDL2. Started, from the bottom: the code
-      stays written against SDL3, and `src/plat/ns_sdl.h`, which the
-      sources include in place of SDL's headers, gives an SDL2 build
-      (`NS_SDL2`) the SDL3 names: other spellings of the same thing,
-      SDL3's true-for-success convention over SDL2's zero, and in
-      `ns_sdl2.c` what SDL2 lacks, over POSIX or Win32 — files and
-      folders, calendar time, thread-local keys that are ready when
-      zeroed, once-only initialisation, and read-write locks as plain
-      mutexes. The platform layer (threads, locks, files, environment,
-      system services) and the font finder build and pass their tests on
-      SDL2 in CI. Still SDL3's alone: the window and its renderer, the
-      event loop, audio, the watchdog's child process, and the bundled
-      GLib's thread file.
+      XP-capable builds are SDL2. Done: `meson setup -Dsdl=sdl2` builds
+      the whole browser on SDL 2.0.18 or later. The code stays written
+      against SDL3, and `src/plat/ns_sdl.h`, which every source includes
+      in place of SDL's headers, gives an SDL2 build (`NS_SDL2`) the SDL3
+      names: other spellings of the same thing, SDL3's true-for-success
+      convention over SDL2's zero, and in `ns_sdl2.c` what SDL2 lacks,
+      over POSIX or Win32. For the platform layer that is files and
+      folders, calendar time (by arithmetic, as Windows' C library knows
+      no time before 1970), thread-local keys that are ready when
+      zeroed, once-only initialisation, read-write locks as plain mutexes,
+      and on Windows an environment reader whose answers stay valid (SDL2's
+      shares one buffer between calls). For the shell:
+      - *Events*: SDL2's are translated as they are taken from the queue
+        into structures of SDL3's shape under SDL3's names (`SDL_Event`,
+        `key.key`, `key.down`, float mouse positions, the wheel's precise
+        amounts), and SDL2's window sub-events into SDL3's window events,
+        so `window.c`, `pageview.c` and `nkui.c` read them unchanged. The
+        loop's wake-up from other threads is an SDL2 user event the same
+        way. SDL2 does not say where a drop landed (the pointer's place
+        stands in) nor, before 2.26, where the wheel turned (likewise).
+      - *Window and renderer*: SDL2's calls under SDL3's names; the
+        window's size in pixels is the renderer's output size. On Windows
+        the window is per-monitor DPI aware and the UI is scaled by the
+        display's DPI; on macOS and Wayland by the pixel density, as SDL3
+        does; on X11 SDL2 knows no desktop scale, and `NS_UI_SCALE` sets
+        it. On Windows the renderer is Direct3D 11 unless one is chosen, as
+        with SDL3; SDL2's Direct3D 9 renderer (Windows XP's) loses a scroll
+        drawn into a texture that is also uploaded to, so there a scrolled
+        page is sent whole. Premultiplied blending is a custom blend mode,
+        which SDL2's software renderer lacks: the chrome then blends as
+        straight alpha, with slightly dark edges.
+      - *Dialogs*: SDL2 has message boxes but no file dialogs. On Windows
+        the save dialog is the system's (`GetSaveFileNameW`, there since
+        Windows 95); elsewhere the file is saved straight into the
+        Downloads folder under a name not yet taken, and the status bar
+        says where.
+      - *The system's theme*: read from the registry on Windows 10 and
+        later; elsewhere light, unless chosen in the settings; a change
+        is not noticed while running.
+      - *Audio*: SDL3's audio streams over SDL2's: the conversion streams
+        are SDL2's own (2.0.7 and later), and the device stream is SDL2's
+        callback device, which pulls from a stream the mixer fills; its
+        lock is the device's.
+      - *The watchdog*: SDL2 has no process API, so the supervisor starts
+        the browser itself, with `CreateProcessW` on Windows and `fork`
+        and `execv` elsewhere, and waits for it with
+        `WaitForSingleObject` or `waitpid`. The Amiga family has neither,
+        and runs without the watchdog.
+      - *The bundled GLib*: its thread and clock files include `ns_sdl.h`
+        too (the browser hands it to the subproject as the `weststar-sdl`
+        dependency), and start threads with
+        `SDL_CreateThreadWithStackSize`.
+      SDL2 is the system's when installed; else, or with
+      `--force-fallback-for=sdl2`, the release pinned in
+      `subprojects/sdl2.wrap` (2.32.8, WrapDB's meson port), built
+      statically. That is genuine SDL2: a system's SDL2 may be
+      sdl2-compat, SDL2's API over SDL3 (MSYS2's is, as may be a
+      distribution's). Both were tested on Windows: the platform, font
+      and rasterizer tests, the headless smokes, and the window with
+      typing, the address bar and wheel scrolling, on Direct3D 11 and on
+      Direct3D 9. CI builds the Linux browser against the wrap's SDL2 as
+      a shared library, and runs the same tests and the window under
+      Xvfb.
    7. *Toolchains and targets*: the code kept to C11 (C23 `#embed`
       already has a fallback; the portable CI job builds with
       `-Dc_std=gnu11` and warnings as errors), a 32-bit Windows build against the old
@@ -368,7 +418,8 @@ GLib's main loop is not used anywhere. The watchdog's supervisor, a
 process of its own that restarts the browser after a crash or a hang,
 needs no loop at all: it starts the browser with `SDL_CreateProcess`
 (with `NS_WATCHDOG_RECOVER` in that one child's environment for a
-recovery start) and blocks in `SDL_WaitProcess` until it exits. On Unix,
+recovery start) and blocks in `SDL_WaitProcess` until it exits; in an
+SDL2 build, with the system's own calls (stage 6.6). On Unix,
 SIGINT and SIGTERM are passed on to the browser from their signal
 handlers, with an alarm that kills it if it has not gone after three
 seconds.
@@ -395,6 +446,11 @@ shrinks the same way. The window's contents after a series of wheel,
 arrow, Page Down and End scrolls are identical, pixel for pixel, to those
 of full repaints (`NS_DAMAGE=0`), with and without fixed boxes on the
 page.
+
+SDL2's Direct3D 9 renderer, the one Windows XP has, keeps a copy in
+memory of a texture that is uploaded to and sends all of it again after
+the texture was drawn into, which would undo the scroll; with that
+renderer the shell asks for the whole frame after a scroll instead.
 
 ## What is gone, and where it went
 

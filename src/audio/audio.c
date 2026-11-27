@@ -1,4 +1,4 @@
-/* Weststar SDL Browser — in-process audio decoding and SDL3 playback on a worker thread.
+/* Weststar SDL Browser — in-process audio decoding and SDL playback on a worker thread.
  * Decodes MP3, Vorbis, Opus and MPEG-1 audio, mixes up to 16 players; null output when headless.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -13,8 +13,10 @@
 #include "trace.h"
 
 #include <glib.h>
-#include <SDL3/SDL.h>
+#include "plat/ns_sdl.h"
+#ifndef NS_SDL2
 #include <SDL3/SDL_main.h>
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>

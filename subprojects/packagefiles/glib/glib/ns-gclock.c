@@ -13,8 +13,13 @@
 
 #include "config.h"
 
+#ifdef NS_SDL2
+/* SDL2 under SDL3's names: the browser's src/plat/ns_sdl.h. */
+#include "ns_sdl.h"
+#else
 #include <SDL3/SDL_time.h>
 #include <SDL3/SDL_timer.h>
+#endif
 
 #include "gmain.h"
 

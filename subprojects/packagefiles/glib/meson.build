@@ -117,8 +117,13 @@ endforeach
 configure_file(output: 'config.h', configuration: conf)
 
 # Threads, locks and clocks come from SDL (glib/ns-gthread-sdl.c,
-# glib/ns-gclock.c), as everything else the browser asks a system for.
-sdl3_dep = dependency('sdl3')
+# glib/ns-gclock.c), as everything else the browser asks a system for:
+# SDL3, or in the browser's SDL2 build the SDL2 it gives as weststar-sdl,
+# with its header of SDL3's names over SDL2 (src/plat/ns_sdl.h).
+sdl_dep = dependency('weststar-sdl', required: false)
+if not sdl_dep.found()
+  sdl_dep = dependency('sdl3')
+endif
 libm = cc.find_library('m', required: false)
 
 # Third-party code: built without the project's warnings, and with its

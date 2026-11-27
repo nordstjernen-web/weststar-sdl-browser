@@ -197,7 +197,7 @@ glib_lib = static_library('glib-2.0',
     '-DGLIB_CHARSETALIAS_DIR="' + get_option('prefix') / get_option('libdir') + '"',
   ],
   include_directories: [root_inc, glib_inc],
-  dependencies: [threads_dep, libm, sdl3_dep] + glib_platform_deps,
+  dependencies: [threads_dep, libm, sdl_dep] + glib_platform_deps,
   pic: true,
   install: false,
 )

@@ -4,8 +4,10 @@ option('wasm', type: 'feature', value: 'auto',
        description: 'Build the WebAssembly JS API over the vendored WAMR interpreter (on by default on x86-64 and 64-bit Arm, the CPUs its call stubs cover; disable on platforms WAMR does not support, e.g. NetBSD).')
 option('avif', type: 'feature', value: 'auto',
        description: 'Decode AVIF images through libavif (on by default when libavif is present). AVIF is a rare format on the web and libavif pulls in a full AV1 decoder; disable to drop it.')
+option('sdl', type: 'combo', choices: ['sdl3', 'sdl2'], value: 'sdl3',
+       description: 'SDL version: SDL3 (default), or SDL2 for systems that have only SDL2 (Windows XP, the Amiga family): the same browser, with SDL2 under SDL3\'s names (src/plat/ns_sdl.h). Needs SDL 2.0.18 or later: the system\'s if installed, else the release pinned in subprojects/sdl2.wrap, built statically (force that with --force-fallback-for=sdl2).')
 option('audio', type: 'feature', value: 'auto',
-       description: 'Enable in-process audio playback (SDL3 output + minimp3/pl_mpeg decode). Disable to build without audio; SDL3 itself is always required for the window.')
+       description: 'Enable in-process audio playback (SDL output + minimp3/pl_mpeg decode). Disable to build without audio; SDL itself is always required for the window.')
 option('js_engine', type: 'combo', choices: ['quickjs-ng', 'quickjs'], value: 'quickjs-ng',
        description: 'JavaScript engine: quickjs-ng (default) or the original QuickJS by Fabrice Bellard, each built from its pinned subproject.')
 option('crypto', type: 'combo', choices: ['openssl', 'mbedtls'], value: 'openssl',

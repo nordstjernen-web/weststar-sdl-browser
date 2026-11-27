@@ -1,4 +1,4 @@
-/* Weststar SDL Browser — no-op audio backend for builds without SDL3.
+/* Weststar SDL Browser — no-op audio backend for builds without audio.
  * Every player reports NS_AUDIO_PLAYER_FAILED with NS_AUDIO_ERROR_NO_DEVICE.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

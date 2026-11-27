@@ -28,7 +28,7 @@
 #include "security.h"
 #include "version.h"
 
-#include <SDL3/SDL.h>
+#include "plat/ns_sdl.h"
 #include <locale.h>
 #include <math.h>
 #include <string.h>

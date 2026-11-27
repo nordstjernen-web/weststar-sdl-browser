@@ -141,10 +141,20 @@ ns_floors = {
   'fribidi': '>=1.0.6',
   'fontconfig': '>=2.15',
   'sdl3': '>=3.2.0',
+  'sdl2': '>=2.0.18',
   'libcurl': '>=8.5',
 }
+ns_sdl = get_option('sdl')
 ns_unmet_floors = []
 foreach name, floor : ns_floors
+  # Only the SDL that is asked for; SDL2 may come from the pinned
+  # subproject (subprojects/sdl2.wrap).
+  if name.startswith('sdl') and name != ns_sdl
+    continue
+  endif
+  if name == 'sdl2' and get_option('wrap_mode') != 'nofallback'
+    continue
+  endif
   # fontconfig is only required when asked for: without it the fonts are
   # found by nsfc, in the tree.
   if name == 'fontconfig' and not get_option('fontconfig').enabled()
@@ -167,6 +177,29 @@ if ns_unmet_floors.length() > 0
         'their distributions that ship all of them; see docs/building.md.')
 endif
 
+# SDL opens the window, takes input and plays audio: SDL3, or with
+# -Dsdl=sdl2 SDL2 under SDL3's names (src/plat/ns_sdl.h, ns_sdl2.c), for the
+# systems that have only SDL2. SDL2 is the system's if it is installed, else
+# the release pinned in subprojects/sdl2.wrap, built statically; force that
+# with --force-fallback-for=sdl2 (as for a system whose SDL2 is sdl2-compat,
+# SDL2's API over SDL3).
+if ns_sdl == 'sdl2'
+  sdl_dep = dependency('sdl2', version: ns_floors['sdl2'],
+                       fallback: ['sdl2', 'sdl2_dep'],
+                       default_options: ['default_library=static',
+                                         'test=false', 'werror=false',
+                                         'warning_level=0'])
+  add_project_arguments('-DNS_SDL2', language: 'c')
+  # The bundled GLib's threads and clocks are SDL's too (packagefiles/glib/).
+  meson.override_dependency('weststar-sdl', declare_dependency(
+    dependencies: sdl_dep,
+    compile_args: ['-DNS_SDL2'],
+    include_directories: include_directories('src/plat'),
+  ))
+else
+  sdl_dep = dependency('sdl3', version: ns_floors['sdl3'])
+endif
+
 # GLib and GObject: the system's, or with -Dglib=bundled the part of them
 # the browser uses, built statically from the pinned release
 # (subprojects/glib.wrap and packagefiles/glib/).
@@ -179,9 +212,7 @@ else
   gobject = dependency('gobject-2.0', version: ns_floors['gobject-2.0'])
 endif
 
-# SDL3 opens the window, takes input and plays audio. The chrome is drawn
-# with Nuklear, vendored in subprojects/nuklear.
-sdl3_dep = dependency('sdl3', version: ns_floors['sdl3'])
+# The chrome is drawn with Nuklear, vendored in subprojects/nuklear.
 libnuklear = dependency('nuklear', fallback: ['nuklear', 'nuklear_dep'])
 libcurl = dependency('libcurl', version: ns_floors['libcurl'])
 if libcurl.version().version_compare('<8.11')
@@ -347,7 +378,7 @@ if have_pdfjs and pdfjs_standard_fonts.length() == 0
 endif
 
 # vorbisfile and opusfile are the high-level decode APIs over libvorbis and
-# libopus + libogg, used by the in-process SDL3 audio mixer to decode
+# libopus + libogg, used by the in-process SDL audio mixer to decode
 # Ogg/Vorbis and Ogg/Opus natively.
 have_audio = get_option('audio').allowed()
 libvorbisfile = dependency('vorbisfile', required: false)
@@ -372,7 +403,7 @@ liblexbor = dependency('lexbor', version: '>=3.0.0',
 
 # Feature macros for the sources, each defined when its condition holds.
 # src/media_types.c may advertise an audio type only where the decoder that
-# plays it is built: the SDL3 in-process mixer.
+# plays it is built: the SDL in-process mixer.
 ns_feature_macros = {
   'NS_HAVE_FONTCONFIG=1': libfontconfig.found(),
   'NS_FC_INTREE=1': not have_system_fontconfig,
@@ -480,8 +511,8 @@ summary({
   'WebAssembly (WAMR)': have_wasm,
   'PDF viewer (PDF.js)': pdfjs_source,
   'AVIF images (libavif)': have_avif,
-  'Audio playback (SDL3)': have_audio,
-  'SDL': sdl3_dep.version(),
+  'Audio playback (SDL)': have_audio,
+  'SDL': ns_sdl + ' ' + sdl_dep.version(),
   'JavaScript engine': js_engine + ' ' + libquickjs.version(),
   'Crypto library': crypto_backend + ' ' + libcrypto.version(),
   'Built-in CA certificates': have_ca_bundle ? get_option('ca_bundle') : 'none',

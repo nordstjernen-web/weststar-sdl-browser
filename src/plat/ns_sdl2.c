@@ -3,8 +3,10 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * See ns_sdl.h. Compiled only with NS_SDL2: files and folders, calendar
- * time and a few small things, over POSIX or Win32. Paths are UTF-8, as
- * SDL3's are.
+ * time and a few small things, over POSIX or Win32; and for the shell,
+ * SDL2's events in SDL3's shape, the window's pixel density and scale,
+ * the save dialog, and SDL3's audio streams over SDL2's device. Paths are
+ * UTF-8, as SDL3's are.
  */
 
 #ifdef NS_SDL2
@@ -20,6 +22,8 @@
 
 #ifdef _WIN32
 #  include <windows.h>
+#  include <commdlg.h>
+#  include <SDL_syswm.h>
 #else
 #  include <dirent.h>
 #  include <sys/stat.h>
@@ -102,12 +106,74 @@ ns_sdl2_unsetenv(const char *name)
 #endif
 }
 
+#ifdef _WIN32
+/* Each name's value as last read; a value that changes is kept too, as a
+ * caller may still hold it. Few names are read, and they seldom change. */
+typedef struct EnvEntry {
+    struct EnvEntry *next;
+    char *name;
+    char *value;
+} EnvEntry;
+
+const char *
+ns_sdl2_getenv(const char *name)
+{
+    static SDL_SpinLock lock;
+    static EnvEntry *entries;
+    if (!name || !*name) return NULL;
+    int nlen = MultiByteToWideChar(CP_UTF8, 0, name, -1, NULL, 0);
+    if (nlen <= 0) return NULL;
+    wchar_t *wname = SDL_malloc((size_t)nlen * sizeof *wname);
+    if (!wname) return NULL;
+    MultiByteToWideChar(CP_UTF8, 0, name, -1, wname, nlen);
+    DWORD n = GetEnvironmentVariableW(wname, NULL, 0);
+    char *value = NULL;
+    if (n > 0) {
+        wchar_t *w = SDL_malloc((size_t)n * sizeof *w);
+        if (w && GetEnvironmentVariableW(wname, w, n) < n) {
+            int len = WideCharToMultiByte(CP_UTF8, 0, w, -1, NULL, 0, NULL, NULL);
+            value = len > 0 ? SDL_malloc((size_t)len) : NULL;
+            if (value)
+                WideCharToMultiByte(CP_UTF8, 0, w, -1, value, len, NULL, NULL);
+        }
+        SDL_free(w);
+    }
+    SDL_free(wname);
+    if (!value) return NULL;
+    SDL_AtomicLock(&lock);
+    const char *answer = NULL;
+    for (EnvEntry *e = entries; e; e = e->next)
+        if (strcmp(e->name, name) == 0 && strcmp(e->value, value) == 0) {
+            answer = e->value;
+            break;
+        }
+    if (!answer) {
+        EnvEntry *e = SDL_malloc(sizeof *e);
+        char *copy = SDL_strdup(name);
+        if (e && copy) {
+            e->name = copy;
+            e->value = value;
+            e->next = entries;
+            entries = e;
+            answer = value;
+            value = NULL;
+        } else {
+            SDL_free(e);
+            SDL_free(copy);
+        }
+    }
+    SDL_AtomicUnlock(&lock);
+    SDL_free(value);
+    return answer;
+}
+#endif
+
 /* ---- thread-local values and once-only initialisation ---- */
 
 void *
 ns_sdl2_GetTLS(NsSdl2TlsId *id)
 {
-    int key = SDL_AtomicGet(&id->key);
+    int key = SDL_AtomicGet(id);
     return key ? SDL_TLSGet((unsigned int)key) : NULL;
 }
 
@@ -115,14 +181,14 @@ bool
 ns_sdl2_SetTLS(NsSdl2TlsId *id, const void *value,
                SDL_TLSDestructorCallback destructor)
 {
-    int key = SDL_AtomicGet(&id->key);
+    int key = SDL_AtomicGet(id);
     if (!key) {
         /* SDL2's keys cannot be given back; a key lost to another thread
          * making one at the same moment stays unused. */
         int made = (int)SDL_TLSCreate();
         if (!made) return false;
-        SDL_AtomicCAS(&id->key, 0, made);
-        key = SDL_AtomicGet(&id->key);
+        SDL_AtomicCAS(id, 0, made);
+        key = SDL_AtomicGet(id);
     }
     return SDL_TLSSet((unsigned int)key, value, destructor) == 0;
 }
@@ -177,6 +243,52 @@ days_from_civil(int year, int month, int day)
     return era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468;
 }
 
+/* The date of a day counted from 1970-01-01. */
+static void
+civil_from_days(Sint64 z, int *year, int *month, int *day)
+{
+    z += 719468;
+    Sint64 era = (z >= 0 ? z : z - 146096) / 146097;
+    Sint64 doe = z - era * 146097;
+    Sint64 yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    Sint64 doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    Sint64 mp = (5 * doy + 2) / 153;
+    int m = (int)(mp < 10 ? mp + 3 : mp - 9);
+    *day = (int)(doy - (153 * mp + 2) / 5 + 1);
+    *month = m;
+    *year = (int)(yoe + era * 400 + (m <= 2));
+}
+
+/* Seconds east of UTC of the local zone at a time, from the C library;
+ * where it knows no such time (Windows, before 1970), the zone's offset
+ * at 1970. */
+static bool
+local_offset(Sint64 secs, int *offset)
+{
+    time_t t = (time_t)secs;
+    if ((Sint64)t != secs) return false;
+    struct tm tm;
+#ifdef _WIN32
+    struct tm *got = localtime(&t);
+    if (!got && secs < 0) {
+        t = 0;
+        got = localtime(&t);
+    }
+    if (!got) return false;
+    tm = *got;
+#else
+    if (!localtime_r(&t, &tm)) return false;
+#endif
+    /* The fields read as UTC, less the time they stand for. */
+    Sint64 as_utc = days_from_civil(tm.tm_year + 1900, tm.tm_mon + 1,
+                                    tm.tm_mday) * 86400 +
+                    tm.tm_hour * 3600 + tm.tm_min * 60 + tm.tm_sec;
+    *offset = (int)(as_utc - (Sint64)t);
+    return true;
+}
+
+/* Calendar arithmetic for the fields, which C libraries do not all do
+ * before 1970; the C library only for the local zone's offset. */
 bool
 ns_sdl2_TimeToDateTime(SDL_Time ticks, SDL_DateTime *dt, bool local)
 {
@@ -186,28 +298,18 @@ ns_sdl2_TimeToDateTime(SDL_Time ticks, SDL_DateTime *dt, bool local)
         ns += SDL_NS_PER_SECOND;
         secs--;
     }
-    time_t t = (time_t)secs;
-    if ((Sint64)t != secs) return false;
-    struct tm tm;
-#ifdef _WIN32
-    struct tm *got = local ? localtime(&t) : gmtime(&t);
-    if (!got) return false;
-    tm = *got;
-#else
-    if (!(local ? localtime_r(&t, &tm) : gmtime_r(&t, &tm))) return false;
-#endif
-    dt->year = tm.tm_year + 1900;
-    dt->month = tm.tm_mon + 1;
-    dt->day = tm.tm_mday;
-    dt->hour = tm.tm_hour;
-    dt->minute = tm.tm_min;
-    dt->second = tm.tm_sec;
+    int offset = 0;
+    if (local && !local_offset(secs, &offset)) return false;
+    Sint64 at = secs + offset;
+    Sint64 days = (at >= 0 ? at : at - 86399) / 86400;
+    Sint64 rest = at - days * 86400;
+    civil_from_days(days, &dt->year, &dt->month, &dt->day);
+    dt->hour = (int)(rest / 3600);
+    dt->minute = (int)(rest / 60 % 60);
+    dt->second = (int)(rest % 60);
     dt->nanosecond = (int)ns;
-    dt->day_of_week = tm.tm_wday;
-    /* The fields read as UTC, less the time they stand for. */
-    Sint64 as_utc = days_from_civil(dt->year, dt->month, dt->day) * 86400 +
-                    dt->hour * 3600 + dt->minute * 60 + dt->second;
-    dt->utc_offset = local ? (int)(as_utc - secs) : 0;
+    dt->day_of_week = (int)(((days % 7) + 11) % 7); /* 1970-01-01 was a Thursday */
+    dt->utc_offset = offset;
     return true;
 }
 
@@ -451,6 +553,585 @@ ns_sdl2_RenamePath(const char *oldpath, const char *newpath)
 }
 
 #endif
+
+/* ==== the shell: window, renderer, events, dialogs, audio ==== */
+
+/* SDL2's own functions and types of these names are used below. */
+#undef SDL_Init
+#undef SDL_CreateRenderer
+#undef SDL_SetTextureBlendMode
+#undef SDL_GetMouseState
+#undef SDL_SetWindowFullscreen
+#undef SDL_GetWindowSizeInPixels
+#undef SDL_RegisterEvents
+#undef SDL_PollEvent
+#undef SDL_WaitEventTimeout
+#undef SDL_PushEvent
+#undef SDL_Event
+#undef SDL_AudioSpec
+#undef SDL_ShowCursor
+
+#if !SDL_VERSION_ATLEAST(2, 0, 18)
+#  error "Weststar needs SDL 2.0.18 or later"
+#endif
+
+/* ---- start-up ---- */
+
+bool
+ns_sdl2_Init(Uint32 flags)
+{
+    /* Sharp on high-DPI Windows displays: the window is in pixels, and the
+     * UI is scaled by the display's DPI (ns_sdl2_GetWindowDisplayScale).
+     * SDL before 2.24 does not know the hint and leaves Windows to scale
+     * the window as a picture. */
+    SDL_SetHint("SDL_WINDOWS_DPI_AWARENESS", "permonitorv2");
+    /* As SDL3 does: a click that focuses the window is a click too. */
+    SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
+#ifdef _WIN32
+    /* Direct3D 11 where there is one, as SDL3 draws by default; SDL2's
+     * own first choice is Direct3D 9, which SDL2 still falls back to
+     * (Windows XP). Below a render_driver setting or SDL_RENDER_DRIVER. */
+    SDL_SetHintWithPriority(SDL_HINT_RENDER_DRIVER, "direct3d11",
+                            SDL_HINT_DEFAULT);
+#endif
+    return SDL_Init(flags) == 0;
+}
+
+/* ---- windows, displays and the renderer ---- */
+
+bool
+ns_sdl2_SetWindowFullscreen(SDL_Window *window, bool fullscreen)
+{
+    return SDL_SetWindowFullscreen(window, fullscreen
+                                   ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0) == 0;
+}
+
+bool
+ns_sdl2_GetWindowSizeInPixels(SDL_Window *window, int *w, int *h)
+{
+    SDL_Renderer *renderer = SDL_GetRenderer(window);
+    if (renderer && SDL_GetRendererOutputSize(renderer, w, h) == 0)
+        return true;
+#if SDL_VERSION_ATLEAST(2, 26, 0)
+    SDL_GetWindowSizeInPixels(window, w, h);
+#else
+    SDL_GetWindowSize(window, w, h);
+#endif
+    return true;
+}
+
+float
+ns_sdl2_GetWindowPixelDensity(SDL_Window *window)
+{
+    int w = 0, h = 0, pw = 0, ph = 0;
+    SDL_GetWindowSize(window, &w, &h);
+    ns_sdl2_GetWindowSizeInPixels(window, &pw, &ph);
+    return w > 0 && pw > 0 ? (float)pw / (float)w : 1.0f;
+}
+
+/* The UI's scale for a display: its DPI over 96 where SDL2 knows it
+ * truly (Windows, which answers 96 to a program it scales itself),
+ * else 1. SDL2 on X11 gives the screen's physical DPI, not the desktop's
+ * setting; NS_UI_SCALE sets the scale there. */
+static float
+display_dpi_scale(int index)
+{
+#ifdef _WIN32
+    float hdpi = 0;
+    if (index >= 0 && SDL_GetDisplayDPI(index, NULL, &hdpi, NULL) == 0 &&
+        hdpi > 0)
+        return hdpi / 96.0f;
+#else
+    (void)index;
+#endif
+    return 1.0f;
+}
+
+float
+ns_sdl2_GetWindowDisplayScale(SDL_Window *window)
+{
+    /* Where SDL2 makes the pixels finer than the window (macOS, Wayland),
+     * that is the scale, as in SDL3. */
+    float density = ns_sdl2_GetWindowPixelDensity(window);
+    if (density > 1.0f)
+        return density;
+    return display_dpi_scale(SDL_GetWindowDisplayIndex(window));
+}
+
+float
+ns_sdl2_GetDisplayContentScale(SDL_DisplayID id)
+{
+    return display_dpi_scale((int)id - 1);
+}
+
+SDL_SystemTheme
+ns_sdl2_GetSystemTheme(void)
+{
+#ifdef _WIN32
+    /* Windows 10 and later; XP has no such setting. */
+    HKEY key;
+    DWORD value = 1, size = sizeof value;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER,
+                      L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                      0, KEY_READ, &key) != ERROR_SUCCESS)
+        return SDL_SYSTEM_THEME_UNKNOWN;
+    LONG r = RegQueryValueExW(key, L"AppsUseLightTheme", NULL, NULL,
+                              (LPBYTE)&value, &size);
+    RegCloseKey(key);
+    if (r != ERROR_SUCCESS)
+        return SDL_SYSTEM_THEME_UNKNOWN;
+    return value ? SDL_SYSTEM_THEME_LIGHT : SDL_SYSTEM_THEME_DARK;
+#else
+    return SDL_SYSTEM_THEME_UNKNOWN;
+#endif
+}
+
+SDL_Renderer *
+ns_sdl2_CreateRenderer(SDL_Window *window, const char *name)
+{
+    int index = -1;
+    for (int i = 0; name && i < SDL_GetNumRenderDrivers(); i++) {
+        SDL_RendererInfo info;
+        if (SDL_GetRenderDriverInfo(i, &info) == 0 &&
+            SDL_strcasecmp(info.name, name) == 0)
+            index = i;
+    }
+    return SDL_CreateRenderer(window, index, 0);
+}
+
+bool
+ns_sdl2_RenderTexture(SDL_Renderer *renderer, SDL_Texture *texture,
+                      const SDL_FRect *src, const SDL_FRect *dst)
+{
+    SDL_Rect s;
+    if (src) {
+        s.x = (int)src->x;
+        s.y = (int)src->y;
+        s.w = (int)src->w;
+        s.h = (int)src->h;
+    }
+    return SDL_RenderCopyF(renderer, texture, src ? &s : NULL, dst) == 0;
+}
+
+bool
+ns_sdl2_SetTextureBlendMode(SDL_Texture *texture, SDL_BlendMode mode)
+{
+    if (SDL_SetTextureBlendMode(texture, mode) == 0)
+        return true;
+    /* A custom mode the renderer cannot do. */
+    return SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND) == 0;
+}
+
+/* ---- input ---- */
+
+Uint32
+ns_sdl2_GetMouseState(float *x, float *y)
+{
+    int ix = 0, iy = 0;
+    Uint32 buttons = SDL_GetMouseState(&ix, &iy);
+    if (x) *x = (float)ix;
+    if (y) *y = (float)iy;
+    return buttons;
+}
+
+bool
+ns_sdl2_ShowCursor(bool show)
+{
+    return SDL_ShowCursor(show ? SDL_ENABLE : SDL_DISABLE) >= 0;
+}
+
+/* ---- events ---- */
+
+Uint32
+ns_sdl2_RegisterEvents(int numevents)
+{
+    Uint32 first = SDL_RegisterEvents(numevents);
+    return first == (Uint32)-1 ? 0 : first;
+}
+
+/* The file of the last drop event, which SDL2 hands over to be freed. */
+static char *g_drop_data;
+
+static Uint32
+window_event_type(Uint8 event)
+{
+    switch (event) {
+    case SDL_WINDOWEVENT_SHOWN:           return SDL_EVENT_WINDOW_SHOWN;
+    case SDL_WINDOWEVENT_HIDDEN:          return SDL_EVENT_WINDOW_HIDDEN;
+    case SDL_WINDOWEVENT_EXPOSED:         return SDL_EVENT_WINDOW_EXPOSED;
+    case SDL_WINDOWEVENT_MOVED:           return SDL_EVENT_WINDOW_MOVED;
+    case SDL_WINDOWEVENT_RESIZED:         return SDL_EVENT_WINDOW_RESIZED;
+    case SDL_WINDOWEVENT_SIZE_CHANGED:    return SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED;
+    case SDL_WINDOWEVENT_MINIMIZED:       return SDL_EVENT_WINDOW_MINIMIZED;
+    case SDL_WINDOWEVENT_MAXIMIZED:       return SDL_EVENT_WINDOW_MAXIMIZED;
+    case SDL_WINDOWEVENT_RESTORED:        return SDL_EVENT_WINDOW_RESTORED;
+    case SDL_WINDOWEVENT_ENTER:           return SDL_EVENT_WINDOW_MOUSE_ENTER;
+    case SDL_WINDOWEVENT_LEAVE:           return SDL_EVENT_WINDOW_MOUSE_LEAVE;
+    case SDL_WINDOWEVENT_FOCUS_GAINED:    return SDL_EVENT_WINDOW_FOCUS_GAINED;
+    case SDL_WINDOWEVENT_FOCUS_LOST:      return SDL_EVENT_WINDOW_FOCUS_LOST;
+    case SDL_WINDOWEVENT_CLOSE:           return SDL_EVENT_WINDOW_CLOSE_REQUESTED;
+    case SDL_WINDOWEVENT_DISPLAY_CHANGED: return SDL_EVENT_WINDOW_DISPLAY_CHANGED;
+    default:                              return 0;
+    }
+}
+
+/* Where the pointer is over a window, for the events SDL2 gives no
+ * position. */
+static void
+pointer_in_window(Uint32 window_id, float *x, float *y)
+{
+    int gx = 0, gy = 0, wx = 0, wy = 0;
+    SDL_Window *window = SDL_GetWindowFromID(window_id);
+    SDL_GetGlobalMouseState(&gx, &gy);
+    if (window)
+        SDL_GetWindowPosition(window, &wx, &wy);
+    *x = (float)(gx - wx);
+    *y = (float)(gy - wy);
+}
+
+static void
+translate(const SDL_Event *in, NsSdl2Event *out)
+{
+    SDL_zerop(out);
+    out->type = in->type;
+    switch (in->type) {
+    case SDL_WINDOWEVENT:
+        out->type = window_event_type(in->window.event);
+        out->window.windowID = in->window.windowID;
+        out->window.data1 = in->window.data1;
+        out->window.data2 = in->window.data2;
+        break;
+    case SDL_KEYDOWN:
+    case SDL_KEYUP:
+        out->key.windowID = in->key.windowID;
+        out->key.scancode = in->key.keysym.scancode;
+        out->key.key = in->key.keysym.sym;
+        out->key.mod = (SDL_Keymod)in->key.keysym.mod;
+        out->key.down = in->key.state == SDL_PRESSED;
+        out->key.repeat = in->key.repeat != 0;
+        break;
+    case SDL_TEXTINPUT:
+        out->text.windowID = in->text.windowID;
+        SDL_strlcpy(out->text.text, in->text.text, sizeof out->text.text);
+        break;
+    case SDL_MOUSEMOTION:
+        out->motion.windowID = in->motion.windowID;
+        out->motion.state = in->motion.state;
+        out->motion.x = (float)in->motion.x;
+        out->motion.y = (float)in->motion.y;
+        out->motion.xrel = (float)in->motion.xrel;
+        out->motion.yrel = (float)in->motion.yrel;
+        break;
+    case SDL_MOUSEBUTTONDOWN:
+    case SDL_MOUSEBUTTONUP:
+        out->button.windowID = in->button.windowID;
+        out->button.button = in->button.button;
+        out->button.down = in->button.state == SDL_PRESSED;
+        out->button.clicks = in->button.clicks;
+        out->button.x = (float)in->button.x;
+        out->button.y = (float)in->button.y;
+        break;
+    case SDL_MOUSEWHEEL:
+        out->wheel.windowID = in->wheel.windowID;
+        out->wheel.x = in->wheel.preciseX;
+        out->wheel.y = in->wheel.preciseY;
+        out->wheel.direction = (SDL_MouseWheelDirection)in->wheel.direction;
+#if SDL_VERSION_ATLEAST(2, 26, 0)
+        out->wheel.mouse_x = (float)in->wheel.mouseX;
+        out->wheel.mouse_y = (float)in->wheel.mouseY;
+#else
+        ns_sdl2_GetMouseState(&out->wheel.mouse_x, &out->wheel.mouse_y);
+#endif
+        break;
+    case SDL_DROPBEGIN:
+    case SDL_DROPFILE:
+    case SDL_DROPTEXT:
+    case SDL_DROPCOMPLETE:
+        out->drop.windowID = in->drop.windowID;
+        pointer_in_window(in->drop.windowID, &out->drop.x, &out->drop.y);
+        g_drop_data = in->drop.file;
+        out->drop.data = g_drop_data;
+        break;
+    default:
+        if (in->type >= SDL_USEREVENT) {
+            out->user.windowID = in->user.windowID;
+            out->user.code = in->user.code;
+            out->user.data1 = in->user.data1;
+            out->user.data2 = in->user.data2;
+        }
+        break;
+    }
+}
+
+/* Events are taken on the main thread only, as in SDL3. */
+static void
+release_last(void)
+{
+    SDL_free(g_drop_data);
+    g_drop_data = NULL;
+}
+
+bool
+ns_sdl2_PollEvent(NsSdl2Event *event)
+{
+    SDL_Event in;
+    release_last();
+    if (!SDL_PollEvent(&in))
+        return false;
+    translate(&in, event);
+    return true;
+}
+
+bool
+ns_sdl2_WaitEventTimeout(NsSdl2Event *event, Sint32 timeout_ms)
+{
+    SDL_Event in;
+    release_last();
+    if (!SDL_WaitEventTimeout(&in, (int)timeout_ms))
+        return false;
+    translate(&in, event);
+    return true;
+}
+
+/* For the events the browser sends itself: SDL_EVENT_QUIT and its own. */
+bool
+ns_sdl2_PushEvent(NsSdl2Event *event)
+{
+    SDL_Event out;
+    SDL_zero(out);
+    out.type = event->type;
+    if (event->type >= SDL_USEREVENT) {
+        out.user.windowID = event->user.windowID;
+        out.user.code = event->user.code;
+        out.user.data1 = event->user.data1;
+        out.user.data2 = event->user.data2;
+    }
+    return SDL_PushEvent(&out) == 1;
+}
+
+SDL_Window *
+ns_sdl2_GetWindowFromEvent(const NsSdl2Event *event)
+{
+    switch (event->type) {
+    case SDL_QUIT:
+    case SDL_RENDER_TARGETS_RESET:
+    case SDL_RENDER_DEVICE_RESET:
+        return NULL;
+    default:
+        return event->common.windowID
+                   ? SDL_GetWindowFromID(event->common.windowID) : NULL;
+    }
+}
+
+/* ---- the save dialog ---- */
+
+#ifdef _WIN32
+
+/* "Name\0*.a;*.b\0...\0", from SDL3's filters. */
+static wchar_t *
+dialog_filters(const SDL_DialogFileFilter *filters, int nfilters)
+{
+    size_t cap = 1;
+    for (int i = 0; i < nfilters; i++)
+        cap += strlen(filters[i].name) + 1 + 3 * strlen(filters[i].pattern) + 3;
+    char *text = SDL_malloc(cap), *p = text;
+    if (!text) return NULL;
+    for (int i = 0; i < nfilters; i++) {
+        p += SDL_snprintf(p, cap - (size_t)(p - text), "%s", filters[i].name) + 1;
+        const char *ext = filters[i].pattern;
+        while (*ext) {
+            size_t n = strcspn(ext, ";");
+            p += SDL_snprintf(p, cap - (size_t)(p - text), "%s*.%.*s",
+                              ext == filters[i].pattern ? "" : ";", (int)n, ext);
+            ext += n + (ext[n] == ';');
+        }
+        p++;
+    }
+    *p++ = 0;
+    int n = MultiByteToWideChar(CP_UTF8, 0, text, (int)(p - text), NULL, 0);
+    wchar_t *w = n > 0 ? SDL_malloc((size_t)n * sizeof *w) : NULL;
+    if (w) MultiByteToWideChar(CP_UTF8, 0, text, (int)(p - text), w, n);
+    SDL_free(text);
+    return w;
+}
+
+void
+ns_sdl2_ShowSaveFileDialog(SDL_DialogFileCallback callback, void *userdata,
+                           SDL_Window *window,
+                           const SDL_DialogFileFilter *filters, int nfilters,
+                           const char *default_location)
+{
+    wchar_t file[MAX_PATH * 4] = { 0 };
+    if (default_location) {
+        wchar_t *w = wide(default_location);
+        if (w) {
+            wcsncpy(file, w, SDL_arraysize(file) - 1);
+            SDL_free(w);
+        }
+    }
+    wchar_t *filter = nfilters > 0 ? dialog_filters(filters, nfilters) : NULL;
+    wchar_t *ext = nfilters > 0 ? wide(filters[0].pattern) : NULL;
+    if (ext) ext[wcscspn(ext, L";")] = 0;
+    OPENFILENAMEW ofn;
+    SDL_zero(ofn);
+    ofn.lStructSize = sizeof ofn;
+    SDL_SysWMinfo info;
+    SDL_VERSION(&info.version);
+    if (window && SDL_GetWindowWMInfo(window, &info) &&
+        info.subsystem == SDL_SYSWM_WINDOWS)
+        ofn.hwndOwner = info.info.win.window;
+    ofn.lpstrFilter = filter;
+    ofn.lpstrFile = file;
+    ofn.nMaxFile = (DWORD)SDL_arraysize(file);
+    ofn.lpstrDefExt = ext;
+    ofn.Flags = OFN_EXPLORER | OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST |
+                OFN_NOCHANGEDIR | OFN_HIDEREADONLY;
+    char chosen[MAX_PATH * 4 * 3];
+    const char *list[2] = { NULL, NULL };
+    if (GetSaveFileNameW(&ofn) &&
+        WideCharToMultiByte(CP_UTF8, 0, file, -1, chosen, (int)sizeof chosen,
+                            NULL, NULL) > 0)
+        list[0] = chosen;
+    SDL_free(filter);
+    SDL_free(ext);
+    callback(userdata, CommDlgExtendedError() ? NULL : list,
+             list[0] ? 0 : -1);
+}
+
+#else
+
+/* No dialog: the file goes where it was offered, under a name not taken
+ * yet ("page (2).html"). */
+void
+ns_sdl2_ShowSaveFileDialog(SDL_DialogFileCallback callback, void *userdata,
+                           SDL_Window *window,
+                           const SDL_DialogFileFilter *filters, int nfilters,
+                           const char *default_location)
+{
+    (void)window;
+    (void)filters;
+    (void)nfilters;
+    const char *list[2] = { NULL, NULL };
+    char *path = default_location ? SDL_strdup(default_location) : NULL;
+    if (path) {
+        const char *slash = strrchr(default_location, '/');
+        const char *dot = strrchr(default_location, '.');
+        size_t stem = dot && (!slash || dot > slash + 1)
+                          ? (size_t)(dot - default_location)
+                          : strlen(default_location);
+        for (int n = 2; path && ns_sdl2_GetPathInfo(path, NULL) && n < 1000; n++) {
+            SDL_free(path);
+            path = NULL;
+            if (SDL_asprintf(&path, "%.*s (%d)%s", (int)stem, default_location,
+                             n, default_location + stem) < 0)
+                path = NULL;
+        }
+        list[0] = path;
+    }
+    callback(userdata, list, list[0] ? 0 : -1);
+    SDL_free(path);
+}
+
+#endif
+
+/* ---- audio ---- */
+
+SDL_AudioStream *
+ns_sdl2_CreateAudioStream(const NsSdl2AudioSpec *src, const NsSdl2AudioSpec *dst)
+{
+    return SDL_NewAudioStream(src->format, (Uint8)src->channels, src->freq,
+                              dst->format, (Uint8)dst->channels, dst->freq);
+}
+
+/* The one device stream: the device and what the browser fills. */
+static SDL_AudioDeviceID g_audio_device;
+static SDL_AudioStream *g_audio_stream;
+static SDL_AudioStreamCallback g_audio_callback;
+static void *g_audio_userdata;
+
+/* SDL2 asks for bytes; the browser's callback puts them into the stream,
+ * from which SDL2 takes them. */
+static void SDLCALL
+audio_device_callback(void *userdata, Uint8 *buf, int len)
+{
+    (void)userdata;
+    int have = SDL_AudioStreamAvailable(g_audio_stream);
+    if (have < len)
+        g_audio_callback(g_audio_userdata, g_audio_stream, len - have, len);
+    int got = SDL_AudioStreamGet(g_audio_stream, buf, len);
+    if (got < 0) got = 0;
+    if (got < len)
+        memset(buf + got, 0, (size_t)(len - got));
+}
+
+SDL_AudioStream *
+ns_sdl2_OpenAudioDeviceStream(SDL_AudioDeviceID devid,
+                              const NsSdl2AudioSpec *spec,
+                              SDL_AudioStreamCallback callback,
+                              void *userdata)
+{
+    (void)devid;
+    if (g_audio_device) {
+        ns_sdl2_SetError("an audio device stream is already open");
+        return NULL;
+    }
+    g_audio_stream = ns_sdl2_CreateAudioStream(spec, spec);
+    if (!g_audio_stream) return NULL;
+    g_audio_callback = callback;
+    g_audio_userdata = userdata;
+    SDL_AudioSpec want, have;
+    SDL_zero(want);
+    want.freq = spec->freq;
+    want.format = spec->format;
+    want.channels = (Uint8)spec->channels;
+    want.samples = 1024;
+    want.callback = audio_device_callback;
+    /* No changes allowed: SDL2 converts to what the device plays. The
+     * device starts paused, as SDL3's does. */
+    g_audio_device = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
+    if (!g_audio_device) {
+        SDL_FreeAudioStream(g_audio_stream);
+        g_audio_stream = NULL;
+        return NULL;
+    }
+    return g_audio_stream;
+}
+
+void
+ns_sdl2_DestroyAudioStream(SDL_AudioStream *stream)
+{
+    if (!stream) return;
+    if (stream == g_audio_stream && g_audio_device) {
+        SDL_CloseAudioDevice(g_audio_device);
+        g_audio_device = 0;
+        g_audio_stream = NULL;
+    }
+    SDL_FreeAudioStream(stream);
+}
+
+bool
+ns_sdl2_LockAudioStream(SDL_AudioStream *stream)
+{
+    if (stream != g_audio_stream || !g_audio_device) return false;
+    SDL_LockAudioDevice(g_audio_device);
+    return true;
+}
+
+bool
+ns_sdl2_UnlockAudioStream(SDL_AudioStream *stream)
+{
+    if (stream != g_audio_stream || !g_audio_device) return false;
+    SDL_UnlockAudioDevice(g_audio_device);
+    return true;
+}
+
+bool
+ns_sdl2_ResumeAudioStreamDevice(SDL_AudioStream *stream)
+{
+    if (stream != g_audio_stream || !g_audio_device) return false;
+    SDL_PauseAudioDevice(g_audio_device, 0);
+    return true;
+}
 
 #else /* SDL3 */
 

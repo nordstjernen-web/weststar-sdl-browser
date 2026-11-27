@@ -5,7 +5,7 @@
 
 #include "cancellable.h"
 
-#include <SDL3/SDL_atomic.h>
+#include "plat/ns_sdl.h"
 
 struct NsCancellable {
     SDL_AtomicInt ref;
