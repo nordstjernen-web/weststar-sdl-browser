@@ -120,17 +120,21 @@ So the shell goes first, and Cairo after it:
       call sites, and the Pango fork's type system) come from a trimmed
       GLib built statically, its few OS calls redirected to the SDL
       layer — rather than rewriting the call sites. Started: with
-      `-Dglib=bundled` the browser builds the 72 source files of GLib
+      `-Dglib=bundled` the browser builds the source files of GLib
       2.80 and GObject that those functions live in, from the release
       pinned in `subprojects/glib.wrap`, with a build of its own
       (`subprojects/packagefiles/glib/`) in place of GLib's, and links
       them statically; with unused sections dropped that is about 1 MB.
       GIO, GModule, PCRE2, libffi and libintl are not built or needed.
-      It is set up for Linux and the BSDs so far. Next: Windows, and
-      then the OS calls inside those files (threads for `g_once` and
-      GObject's locks, the clock, the environment, the locale's
-      character set) on the SDL layer, which is what a platform without
-      a GLib port needs.
+      It is set up for Linux and the BSDs so far. Its OS calls are
+      moving to SDL: GLib's mutexes, condition variables, read-write
+      locks, thread-local values and threads are SDL's
+      (`glib/ns-gthread-sdl.c` in place of `gthread-posix.c`, so `g_once`
+      and GObject's type system lock with SDL too), and its two clocks
+      are SDL's (`glib/ns-gclock.c`), which lets GLib's main loop and its
+      pipe, poll and wake-up helpers go: 68 files of GLib's own remain.
+      Next: the environment, the locale's character set and the file
+      functions inside those files, and Windows.
    6. *SDL2 as well as SDL3* in the shell, since the Amiga-family ports
       and XP-capable builds are SDL2.
    7. *Toolchains and targets*: the code kept to C11 (C23 `#embed`

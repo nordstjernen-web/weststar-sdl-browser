@@ -9,7 +9,9 @@
 # dropped, that is about 0.7 MB. The file lists in glib/ and gobject/ are
 # the sources those functions and what they call live in; the linker
 # discards the rest of each file, so the lists name whole files that are
-# only partly used (gmain.c for g_get_monotonic_time, for instance).
+# only partly used. Files named ns-*.c are Weststar's, in place of GLib's:
+# threads and clocks on SDL, gettext without translation, and the names
+# of what is left out.
 #
 # This build is for Unix-like systems so far. What it configures is what
 # those files consult: about sixty of GLib's two hundred configuration
@@ -97,6 +99,9 @@ endforeach
 configure_file(output: 'config.h', configuration: conf)
 
 threads_dep = dependency('threads')
+# Threads, locks and clocks come from SDL (glib/ns-gthread-sdl.c,
+# glib/ns-gclock.c), as everything else the browser asks a system for.
+sdl3_dep = dependency('sdl3')
 libm = cc.find_library('m', required: false)
 
 # Third-party code: built without the project's warnings, and with its
