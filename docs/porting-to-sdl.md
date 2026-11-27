@@ -73,7 +73,10 @@ So the shell goes first, and Cairo after it:
    4. *A portable build profile*: fontconfig optional (fonts found in the
       platform's font folders, with a small bundled fallback set), TLS and
       Web Crypto through mbedTLS instead of OpenSSL, and a bundled CA
-      certificate set for systems whose root store is too old. Crypto is
+      certificate set for systems whose root store is too old. Fonts are
+      done but for the bundled set: with `-Dfontconfig=disabled`, or
+      where fontconfig is not installed, they are found by nsfc (see
+      Fonts below). Crypto is
       done: Web Crypto, random numbers and Safe Browsing go through
       `src/plat/ns_crypto.h`, with OpenSSL (the default) or Mbed TLS
       (`-Dcrypto=mbedtls`, fetched as a subproject) behind it; the
@@ -190,6 +193,62 @@ web-text-lib's `NsPangoFcFontMap` and `NsPangoFcFont`) and a renderer.
   `strokeText`.
 - Grayscale antialiasing is the only mode; fontconfig's hinting settings
   are honoured as cairo-ft honoured them.
+
+## Fonts: nsfc
+
+web-text-lib's font map (`pangofc-fontmap.c`, 3,700 lines) and the engine
+find fonts by calling fontconfig: about 85 of its functions. fontconfig
+is a library of the Unix desktop, configured by a tree of XML files;
+Windows needs its configuration bundled beside the executable, and the
+Amiga family has no port to speak of. Rather than rewrite the font map,
+`src/fc/` (nsfc) implements those functions, under fontconfig's own names
+and in headers that take the place of `<fontconfig/fontconfig.h>`, so
+the callers are unchanged and either can be chosen at build time
+(`-Dfontconfig`; the system's when it is installed).
+
+- **Finding** (`nsfc-scan.c`): the `.ttf`, `.otf`, `.ttc` and `.otc`
+  files under the platform's font folders (listed in
+  [building.md](building.md)), a `fonts` folder beside the executable and
+  the folders in `NS_FONT_PATH`. Each face is opened with FreeType, once:
+  its family names (every one in its name table, so that a page can ask
+  for a font by its Japanese name), style, weight, width, slant, whether
+  it is fixed-width or has colour glyphs, the range of a variable font's
+  weight axis, and the set of characters it has. That is kept in
+  `fonts.cache` in the browser's cache folder, keyed by each file's path,
+  size and modification time, so a later start only lists the folders:
+  111 faces take 0.03 s from the cache. A damaged cache file is
+  discarded and written again.
+- **Rules** (`nsfc-match.c`): where fontconfig has XML, nsfc has two
+  tables. One says what the generic families stand for (`sans-serif`:
+  DejaVu Sans, Arial, Liberation Sans, Helvetica, Noto Sans, Segoe UI,
+  …; likewise `serif`, `monospace`, `system-ui`, `cursive`, `fantasy`,
+  `emoji`, `math`, `fangsong`), the other which families have the same
+  metrics and can stand in for one another (Arial, Helvetica, Liberation
+  Sans, Arimo, …). A family that is not installed and has no stand-in
+  gets the fonts of its kind, told by its name (`…Mono`, `…Serif`).
+- **Order**: a request's sorted list has the families the page named
+  first, then the stand-ins, then the fonts for the text's language (told
+  by one letter per language: a font for Japanese has あ), proportional
+  before fixed-width, and within each the nearest slant, weight and
+  width. Trimmed, as the font map asks for it, the list keeps only fonts
+  that add characters, which is what makes it a fallback chain.
+  fontconfig puts the language before the stand-ins, so that Latin text
+  on a Japanese page comes out in the Japanese font's Latin letters; nsfc
+  keeps the page's family for every character it has.
+- **Faces a family lacks**: a variable font is set to the requested
+  weight through its `wght` axis; otherwise a bold that is missing is
+  emboldened and an italic that is missing slanted, as fontconfig's
+  rules do.
+
+Not in nsfc: bitmap-only fonts other than colour emoji, the languages a
+font declares (the font map then asks nothing of them), and any
+configuration by the user beyond `NS_FONT_PATH`.
+
+`meson test -C builddir --suite nsfc` checks patterns, character sets,
+the rules and the order with a handful of made-up fonts, in both CI
+workflows; the Linux `portable` job builds the browser with
+`-Dfontconfig=disabled -Dcrypto=mbedtls` on a machine without
+fontconfig's headers and checks that text is drawn.
 
 ## The chrome: Nuklear
 

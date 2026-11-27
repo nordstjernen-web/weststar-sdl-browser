@@ -200,6 +200,11 @@ endif
 
 northstar_engine_sources += files('plat/ns_crypto_' + crypto_backend + '.c')
 
+# nsfc, the in-tree font finder, where the system's fontconfig is not used.
+if not have_system_fontconfig
+  northstar_engine_sources += nsfc_sources
+endif
+
 northstar_win_resources = []
 if host_system == 'windows'
   windows = import('windows')

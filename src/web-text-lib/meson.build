@@ -62,9 +62,11 @@ if wtl_thai_dep.found()
   endif
 endif
 
-wtl_fontconfig_dep = dependency('fontconfig', version: ns_floors['fontconfig'])
+# fontconfig, or nsfc's headers in its place (see the top-level meson.build).
+wtl_fontconfig_dep = libfontconfig
 wtl_deps += wtl_fontconfig_dep
 wtl_conf.set('HAVE_FC_CONFIG_SET_DEFAULT_SUBSTITUTE',
+             have_system_fontconfig and
              cc.has_function('FcConfigSetDefaultSubstitute',
                              dependencies: wtl_fontconfig_dep,
                              prefix: '#include <fontconfig/fontconfig.h>'))

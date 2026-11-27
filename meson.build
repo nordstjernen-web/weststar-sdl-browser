@@ -146,6 +146,11 @@ ns_floors = {
 }
 ns_unmet_floors = []
 foreach name, floor : ns_floors
+  # fontconfig is only required when asked for: without it the fonts are
+  # found by nsfc, in the tree.
+  if name == 'fontconfig' and not get_option('fontconfig').enabled()
+    continue
+  endif
   if not dependency(name, version: floor, required: false).found()
     installed = dependency(name, required: false)
     ns_unmet_floors += '  @0@ @1@ (@2@)'.format(name, floor,
@@ -188,7 +193,19 @@ libpsl = dependency('libpsl')
 
 sqlite3 = dependency('sqlite3')
 
-libfontconfig = dependency('fontconfig', version: ns_floors['fontconfig'])
+# Fonts are found through fontconfig where it is installed, and otherwise
+# (or with -Dfontconfig=disabled) by nsfc, src/fc/: the part of fontconfig's
+# API the text stack calls, over the platform's font folders. Its headers
+# take the place of fontconfig's, and its sources are built into the
+# browser (src/meson.build).
+libfontconfig = dependency('fontconfig', version: ns_floors['fontconfig'],
+                           required: get_option('fontconfig'))
+have_system_fontconfig = libfontconfig.found()
+if not have_system_fontconfig
+  libfontconfig = declare_dependency(
+    include_directories: include_directories('src/fc'),
+  )
+endif
 libfreetype = dependency('freetype2')
 
 libavif = dependency('libavif', required: get_option('avif'))
@@ -337,6 +354,7 @@ liblexbor = dependency('lexbor', version: '>=3.0.0',
 # plays it is built: the SDL3 in-process mixer.
 ns_feature_macros = {
   'NS_HAVE_FONTCONFIG=1': libfontconfig.found(),
+  'NS_FC_INTREE=1': not have_system_fontconfig,
   'NS_HAVE_FREETYPE=1': libfreetype.found(),
   'NS_HAVE_AVIF=1': have_avif,
   'NS_HAVE_PDFJS=1': have_pdfjs,
@@ -444,6 +462,7 @@ summary({
   'SDL': sdl3_dep.version(),
   'JavaScript engine': js_engine + ' ' + libquickjs.version(),
   'Crypto library': crypto_backend + ' ' + libcrypto.version(),
+  'Fonts found by': have_system_fontconfig ? 'fontconfig ' + libfontconfig.version() : 'nsfc (in tree)',
 }, section: 'Features')
 
 # Text is shaped through web-text-lib (src/web-text-lib/), the in-tree Pango
@@ -452,6 +471,7 @@ summary({
 # declares targets, so it comes after the last project argument. It draws
 # with gfx (src/gfx/), the browser's rasterizer, which comes first.
 subdir('src/gfx')
+subdir('src/fc')
 subdir('src/web-text-lib')
 pango       = web_text_dep
 pangogfx    = web_text_gfx_dep

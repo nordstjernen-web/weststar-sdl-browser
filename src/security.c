@@ -664,6 +664,20 @@ ns_security_sandbox_init(const char *self_exe)
         g_autofree char *p = g_build_filename(home, home_ro_subdirs[i], NULL);
         add_path_rw(rfd, fs_read, p);
     }
+#ifdef NS_FC_INTREE
+    /* nsfc, the in-tree font finder, also reads the font folders the user
+     * named in NS_FONT_PATH. */
+    {
+        const char *font_path = ns_getenv("NS_FONT_PATH");
+        char **font_dirs = font_path
+            ? g_strsplit(font_path, G_SEARCHPATH_SEPARATOR_S, -1) : NULL;
+        for (gsize i = 0; font_dirs && font_dirs[i]; i++) {
+            if (ns_fs_test(font_dirs[i], NS_FS_TEST_IS_DIR))
+                add_path_rw(rfd, fs_read, font_dirs[i]);
+        }
+        g_strfreev(font_dirs);
+    }
+#endif
 
     if (self_exe) {
         g_autofree char *exe_dir = g_path_get_dirname(self_exe);

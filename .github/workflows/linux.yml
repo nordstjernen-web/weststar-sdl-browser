@@ -45,7 +45,7 @@ jobs:
             libharfbuzz-dev libfribidi-dev libfontconfig-dev \
             libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev \
             libglib2.0-dev zlib1g-dev libbrotli-dev libzstd-dev \
-            libopusfile-dev libvorbis-dev xvfb xauth
+            libopusfile-dev libvorbis-dev xvfb xauth fonts-dejavu-core
 
       - name: Configure and build
         run: |
@@ -68,6 +68,13 @@ jobs:
           name: gfx-test-linux
           path: gfx-test-out
           retention-days: 7
+
+      - name: nsfc test
+        # The in-tree font finder, built and tested here although this
+        # build finds its fonts through fontconfig.
+        run: |
+          NSFC_TEST_FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf \
+            meson test -C builddir --suite nsfc --print-errorlogs
 
       - name: No GTK or Cairo in the binary
         run: |
@@ -129,11 +136,12 @@ jobs:
           cat gui.log
           test "$(cat gui.status)" = 124
 
-  mbedtls:
-    # The portable build profile's crypto: mbedTLS (fetched as a meson
-    # subproject) instead of OpenSSL. Algorithms mbedTLS lacks (EdDSA) must
-    # report NotSupportedError (SKIP), never fail.
-    name: gcc on ubuntu-26.04, -Dcrypto=mbedtls
+  portable:
+    # The portable build profile: mbedTLS (fetched as a meson subproject)
+    # instead of OpenSSL, and nsfc, the in-tree font finder, instead of
+    # fontconfig, which is not even installed. Algorithms mbedTLS lacks
+    # (EdDSA) must report NotSupportedError (SKIP), never fail.
+    name: gcc on ubuntu-26.04, -Dcrypto=mbedtls -Dfontconfig=disabled
     runs-on: ubuntu-26.04
     timeout-minutes: 40
     env:
@@ -151,20 +159,47 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config meson ninja-build git \
             libsdl3-dev libcurl4-openssl-dev \
-            libharfbuzz-dev libfribidi-dev libfontconfig-dev \
+            libharfbuzz-dev libfribidi-dev \
             libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev \
-            libglib2.0-dev zlib1g-dev libbrotli-dev libzstd-dev
+            libglib2.0-dev zlib1g-dev libbrotli-dev libzstd-dev \
+            fonts-dejavu-core
 
       - name: Configure and build
         run: |
-          meson setup builddir --werror -Db_lto=false -Dpdfjs=disabled -Dcrypto=mbedtls
+          meson setup builddir --werror -Db_lto=false -Dpdfjs=disabled \
+            -Dcrypto=mbedtls -Dfontconfig=disabled
           meson compile -C builddir
 
-      - name: No libcrypto in the binary
+      - name: No libcrypto and no fontconfig in the binary
         run: |
           # curl may bring its own TLS library; Weststar itself must not
-          # link OpenSSL's libcrypto.
-          ! objdump -p builddir/src/sdl/weststar | grep -E 'NEEDED +libcrypto'
+          # link OpenSSL's libcrypto, nor fontconfig.
+          ! objdump -p builddir/src/sdl/weststar | grep -E 'NEEDED +(libcrypto|libfontconfig)'
+
+      - name: nsfc test
+        run: |
+          NSFC_TEST_FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf \
+            meson test -C builddir --suite nsfc --print-errorlogs
+
+      - name: Headless smoke (about:start)
+        run: |
+          set -o pipefail
+          ./builddir/src/sdl/weststar --headless --dump=text about:start > about.txt
+          grep -q 'Search duckduckgo.com' about.txt
+
+      - name: Text is drawn with the fonts nsfc found
+        run: |
+          # A canvas with a word on it has ink, and the word a width, only
+          # if a font was found and its glyphs rasterized. The second run
+          # reads the font list from the cache the first one wrote.
+          for run in first second; do
+            ./builddir/src/sdl/weststar --headless --dump=text --settle-ms=300 \
+              'data:text/html,<canvas id="c" width="200" height="50"></canvas><p id="o"></p><script>var c=document.getElementById("c"),x=c.getContext("2d");x.font="30px sans-serif";x.fillText("Weststar",5,35);var d=x.getImageData(0,0,200,50).data,n=0;for(var i=3;i<d.length;i+=4)if(d[i])n++;document.getElementById("o").textContent="ink="+(n>300?"ok":"none:"+n)+" width="+(x.measureText("Weststar").width>50?"ok":"bad");</script>' \
+              > text.txt
+            cat text.txt
+            grep -q 'ink=ok width=ok' text.txt
+            test -s "$HOME/.cache/weststar/fonts.cache"
+          done
 
       - name: Web Crypto checks
         run: |

@@ -10,6 +10,8 @@ option('js_engine', type: 'combo', choices: ['quickjs-ng', 'quickjs'], value: 'q
        description: 'JavaScript engine: quickjs-ng (default) or the original QuickJS by Fabrice Bellard, each built from its pinned subproject.')
 option('crypto', type: 'combo', choices: ['openssl', 'mbedtls'], value: 'openssl',
        description: 'Library behind Web Crypto, random numbers and hashing: OpenSSL libcrypto (default), or Mbed TLS 3.6 for portable builds without OpenSSL (the system copy if installed, else the release pinned in subprojects/mbedtls.wrap, built statically). The mbedtls build lacks Ed25519 and Ed448, which Web Crypto then refuses with NotSupportedError. HTTPS is unaffected: it goes through libcurl and its own TLS library.')
+option('fontconfig', type: 'feature', value: 'auto',
+       description: 'Find fonts through the system fontconfig library (auto: when it is installed). Disabled, or where fontconfig is missing, fonts are found by nsfc (src/fc/), built into the browser: it reads the font folders of the platform itself, with FreeType, and needs no configuration files. For portable builds, and platforms without fontconfig.')
 option('pdfjs', type: 'feature', value: 'auto',
        description: 'Show PDF documents in a viewer built on PDF.js, run as sandboxed script inside the engine and embedded at build time. Auto: built when PDF.js is available. Enabled: required, the build fails without it. Disabled: left out, and a PDF shows a notice with a link to the file. PDF.js comes from pdfjs_dir when that is set, else from the release pinned in subprojects/pdfjs-dist.wrap, which is fetched and never committed.')
 option('pdfjs_dir', type: 'string', value: '',

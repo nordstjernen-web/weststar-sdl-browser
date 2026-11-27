@@ -135,6 +135,13 @@ jobs:
           mkdir -p gfx-test-out
           GFX_TEST_OUT="$(cygpath -m "$PWD/gfx-test-out")" meson test -C builddir --suite gfx --print-errorlogs
 
+      - name: nsfc test
+        # The in-tree font finder (this build finds its fonts through
+        # fontconfig), with one of Windows' own fonts to scan.
+        run: |
+          NSFC_TEST_FONT="C:/Windows/Fonts/arial.ttf" \
+            meson test -C builddir --suite nsfc --print-errorlogs
+
       - name: Upload the gfx test images
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

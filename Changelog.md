@@ -16,6 +16,11 @@ The first Weststar release: Northstar 1.0.27 ported from GTK 4 to SDL3.
   on text are placed in canvas space.
 * Builds and runs on Windows (MSYS2 UCRT64), with CI for Windows and
   Linux.
+* fontconfig is optional: with `-Dfontconfig=disabled`, or where it is
+  not installed, the browser finds the fonts in the platform's font
+  folders itself (`src/fc/`), for platforms that have no fontconfig.
+* Colour emoji are drawn at the size of the text; with fontconfig they
+  were drawn at the size of the font's bitmaps, 109 pixels tall.
 * Removed: WebGL, `<video>`, Media Source Extensions, camera capture,
   Northstar's packaging, and, for now, printing and PDF export
   (`--export=pdf:`).

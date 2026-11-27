@@ -30,6 +30,7 @@ sudo dnf install gcc git pkgconf meson ninja-build SDL3-devel \
 
 The text stack has version floors set by web-text-lib: GLib ≥ 2.80,
 HarfBuzz ≥ 8.3, fontconfig ≥ 2.15 and FriBidi ≥ 1.0.6, with FreeType;
+fontconfig is optional (see `fontconfig` under Build options);
 SDL3 must be ≥ 3.2 and libcurl ≥ 8.5. `meson setup` checks every floor
 and lists each library that is missing or too old in a single error.
 With a libcurl older than 8.11 the build warns that WebSocket is
@@ -266,6 +267,7 @@ once (`apt install ccache` / `dnf install ccache`). Optionally use the
 | `js_engine` | `quickjs-ng` | JavaScript engine: `quickjs-ng`, or `quickjs` for Fabrice Bellard's original QuickJS. See [quickjs.md](quickjs.md). |
 | `audio` | `auto` | Enable in-process audio playback (needs SDL3 3.2 or newer). |
 | `crypto` | `openssl` | The crypto library behind Web Crypto, random numbers and Safe Browsing hashes: `openssl` (OpenSSL's libcrypto from the system), or `mbedtls` for the portable build profile, Mbed TLS 3.6 from the system or else fetched and built as a subproject (`subprojects/mbedtls.wrap`). The `mbedtls` build lacks Ed25519 and Ed448, which Web Crypto then reports as not supported. HTTPS is libcurl's either way. |
+| `fontconfig` | `auto` | Find fonts through the system's fontconfig. `auto` uses it when it is installed (2.15 or newer); `disabled`, or a system without it, builds nsfc instead (`src/fc/`), which reads the platform's font folders itself with FreeType: `/usr/share/fonts`, `/usr/local/share/fonts`, the `fonts` folder of each `XDG_DATA_DIRS` entry, `~/.local/share/fonts` and `~/.fonts`; `%WINDIR%\Fonts` and the per-user font folder on Windows; the three `Library/Fonts` folders on macOS; then a `fonts` folder beside the executable and the folders named in `NS_FONT_PATH`. It needs no configuration files, and keeps what it found in `fonts.cache` in the browser's cache folder. `enabled` makes fontconfig required. See [porting-to-sdl.md](porting-to-sdl.md). |
 | `avif` | `auto` | Decode AVIF through libavif. Disabling drops a full AV1 decoder; AVIF images then fail to decode. |
 | `pdfjs` | `auto` | The PDF viewer, built on PDF.js and embedded at build time. `auto` builds it when PDF.js is available; `enabled` makes PDF.js a required dependency, so the build fails without it; `disabled` leaves the viewer out, and a PDF shows a link to the file. |
 | `pdfjs_dir` | *(empty)* | Directory of an installed PDF.js to use instead of the pinned release, such as Arch's `/usr/share/pdf.js`. See below. |
