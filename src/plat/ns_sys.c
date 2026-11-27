@@ -62,6 +62,7 @@ list_finish(StrList *list)
 
 /* ---- the system's name ---- */
 
+#if !defined(_WIN32) && !defined(__APPLE__)
 /* The value of KEY=value or KEY="value" in an os-release file. */
 static char *
 os_release_value(const char *contents, const char *key)
@@ -84,6 +85,7 @@ os_release_value(const char *contents, const char *key)
     }
     return NULL;
 }
+#endif
 
 const char *
 ns_sys_os_name(void)
