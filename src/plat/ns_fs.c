@@ -40,6 +40,18 @@
 #  define NS_FS_XDG 1
 #endif
 
+/* Whether c separates path components: '/' everywhere, and '\' on
+ * Windows too. */
+static inline bool
+ns_fs_is_sep(char c)
+{
+#ifdef NS_FS_WINDOWS
+    return c == '/' || c == '\\';
+#else
+    return c == '/';
+#endif
+}
+
 const char *
 ns_fs_last_error(void)
 {
@@ -99,7 +111,7 @@ static char *
 ns_fs_join(const char *dir, const char *sub)
 {
     size_t n = strlen(dir);
-    bool sep = n > 0 && (dir[n - 1] == '/' || dir[n - 1] == NS_FS_SEP);
+    bool sep = n > 0 && ns_fs_is_sep(dir[n - 1]);
     const char sepstr[2] = { sep ? '\0' : NS_FS_SEP, '\0' };
     char *out = NULL;
     if (SDL_asprintf(&out, "%s%s%s", dir, sepstr, sub) < 0)
@@ -128,7 +140,7 @@ ns_fs_find_home(void)
     char *home = SDL_strdup(h && *h ? h : "/");
 #endif
     size_t n = strlen(home);
-    while (n > 1 && (home[n - 1] == '/' || home[n - 1] == NS_FS_SEP) &&
+    while (n > 1 && ns_fs_is_sep(home[n - 1]) &&
            !(n == 3 && home[1] == ':'))
         home[--n] = '\0';
     return home;
@@ -233,20 +245,58 @@ ns_fs_fopen(const char *path, const char *mode)
 /* The file being read whole: an SDL stream, except on Windows, where SDL
  * opens files without FILE_SHARE_WRITE and so cannot read one that another
  * handle has open for writing (a log, a file a library keeps open), which
- * GLib's reads could; there it is a C stream from _wfopen, which shares. */
+ * GLib's reads could. There it is a Win32 handle opened with full sharing,
+ * read with ReadFile. (Not stdio: with _FORTIFY_SOURCE and LTO, mingw's
+ * checked fread leaves a call to __chk_fail, which it marks as a warning,
+ * and the build treats warnings as errors.) */
 #ifdef NS_FS_WINDOWS
-typedef FILE NsFsReader;
+typedef struct { HANDLE h; } NsFsReader;
 
-static NsFsReader *ns_fs_reader_open(const char *path) { return ns_fs_fopen(path, "rb"); }
-static Sint64 ns_fs_reader_size(NsFsReader *r) { return _filelengthi64(_fileno(r)); }
-static void ns_fs_reader_close(NsFsReader *r) { fclose(r); }
+static NsFsReader *
+ns_fs_reader_open(const char *path)
+{
+    wchar_t *w = ns_fs_wide(path);
+    if (!w) return NULL;
+    HANDLE h = CreateFileW(w, GENERIC_READ,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    SDL_free(w);
+    if (h == INVALID_HANDLE_VALUE) {
+        SDL_SetError("could not open %s", path);
+        return NULL;
+    }
+    NsFsReader *r = SDL_malloc(sizeof *r);
+    if (!r) {
+        CloseHandle(h);
+        return NULL;
+    }
+    r->h = h;
+    return r;
+}
+
+static Sint64
+ns_fs_reader_size(NsFsReader *r)
+{
+    LARGE_INTEGER size;
+    return GetFileSizeEx(r->h, &size) ? (Sint64)size.QuadPart : -1;
+}
+
+static void
+ns_fs_reader_close(NsFsReader *r)
+{
+    CloseHandle(r->h);
+    SDL_free(r);
+}
 
 /* Up to n bytes; 0 at the end, or on an error, which sets *failed. */
 static size_t
 ns_fs_reader_read(NsFsReader *r, char *buf, size_t n, bool *failed)
 {
-    size_t got = fread(buf, 1, n, r);
-    if (got == 0 && ferror(r)) *failed = !SDL_SetError("could not read the file");
+    DWORD want = n > 0x40000000u ? 0x40000000u : (DWORD)n, got = 0;
+    if (!ReadFile(r->h, buf, want, &got, NULL)) {
+        *failed = !SDL_SetError("could not read the file");
+        return 0;
+    }
     return got;
 }
 #else
