@@ -22,6 +22,9 @@ The first Weststar release: Northstar 1.0.27 ported from GTK 4 to SDL3.
 * GIO is no longer needed, and GLib's main loop is not used: the
   watchdog starts and watches the browser through SDL. A local file
   without a telling name (`README`) is shown by what it contains.
+* A `pattern` attribute whose regular expression backtracks without
+  end no longer hangs the page: the match is given up on after a
+  quarter of a second.
 * Scrolling moves the page's texture with SDL's renderer; only the strip
   that came into view, and fixed boxes, are painted and uploaded.
 * `-Dca_bundle=<file>` compiles a set of CA certificates into the

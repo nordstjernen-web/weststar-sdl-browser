@@ -108,10 +108,14 @@ So the shell goes first, and Cairo after it:
       local time zone's name, the user's languages, the processor count,
       the system's name, the data folders, the Downloads folder, reading
       a link, a file written for its owner alone, random UUIDs. What the
-      browser still takes from GLib is data structures, Unicode tables,
-      string and URI functions, logging, `GRegex` (the `pattern`
-      attribute and extension rules; it brings PCRE2) and GObject for the
-      text library: 321 functions, from 370.
+      Regular expressions outside of scripts (the `pattern` attribute,
+      the filters of extensions' request rules) are JavaScript's by
+      definition and now run on the JavaScript engine (`src/regex.c`: a
+      small runtime of its own behind a lock, with a time budget per
+      match), so `GRegex` and the PCRE2 under it are not needed. What
+      the browser still takes from GLib is data structures, Unicode
+      tables, string and URI functions, logging, and GObject for the
+      text library: 318 functions, from 370.
    5. *GLib's data structures and GObject* (about 500 functions at 21,000
       call sites, and the Pango fork's type system) come from a trimmed
       GLib vendored in the tree and built statically, its few OS calls

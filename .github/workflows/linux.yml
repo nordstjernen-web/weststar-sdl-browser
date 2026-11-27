@@ -108,6 +108,15 @@ jobs:
           grep -q 'PASS toDataURL' canvas.txt
           ! grep -q '^FAIL' canvas.txt
 
+      - name: Pattern attribute checks
+        run: |
+          set -o pipefail
+          ./builddir/src/sdl/weststar --headless --dump=text --settle-ms=1000 \
+            "file://$PWD/data/fixtures/pattern.html" > pattern.txt
+          grep -E '^(PASS|FAIL)' pattern.txt
+          grep -q 'PASS checkValidity' pattern.txt
+          ! grep -q '^FAIL' pattern.txt
+
       - name: Web Crypto checks
         run: |
           set -o pipefail

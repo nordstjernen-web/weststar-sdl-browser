@@ -5,6 +5,7 @@
  */
 
 #include "ext.h"
+#include "regex.h"
 #include "plat/ns_sys.h"
 #include "plat/ns_fs.h"
 #include "plat/ns_plat.h"
@@ -37,7 +38,7 @@ typedef struct {
     int        action;
     int        third_party;
     char      *url_filter;
-    GRegex    *regex;
+    NsRegex   *regex;
     gboolean   case_sensitive;
     GPtrArray *request_domains;
     GPtrArray *excluded_request_domains;
@@ -574,7 +575,7 @@ ns_dnr_rule_free(gpointer p)
 {
     ns_dnr_rule *r = p;
     g_free(r->url_filter);
-    if (r->regex) g_regex_unref(r->regex);
+    ns_regex_free(r->regex);
     if (r->request_domains) g_ptr_array_free(r->request_domains, TRUE);
     if (r->excluded_request_domains)
         g_ptr_array_free(r->excluded_request_domains, TRUE);
@@ -640,8 +641,7 @@ ns_dnr_parse_rule(JSContext *ctx, JSValueConst r)
         JS_FreeValue(ctx, csv);
         g_autofree char *rx = ns_js_get_string_prop(ctx, cond, "regexFilter");
         if (rx)
-            rule->regex = g_regex_new(rx,
-                rule->case_sensitive ? 0 : G_REGEX_CASELESS, 0, NULL);
+            rule->regex = ns_regex_new(rx, rule->case_sensitive ? "" : "i");
         rule->request_domains = ns_dnr_domains(ctx, cond, "requestDomains");
         rule->excluded_request_domains =
             ns_dnr_domains(ctx, cond, "excludedRequestDomains");
@@ -832,7 +832,7 @@ ns_abp_parse_network(ns_ext *e, const char *line)
                          strlen(pattern) > 1);
     if (is_regex) {
         g_autofree char *rx = g_strndup(pattern + 1, strlen(pattern) - 2);
-        rule->regex = g_regex_new(rx, G_REGEX_CASELESS, 0, NULL);
+        rule->regex = ns_regex_new(rx, "i");
         if (!rule->regex) { ns_dnr_rule_free(rule); return; }
     } else {
         rule->url_filter = g_strdup(pattern);
@@ -1639,7 +1639,7 @@ ns_dnr_rule_matches(const ns_dnr_rule *r, const char *url,
     if (r->url_filter &&
         !ns_dnr_urlfilter_match(r->url_filter, url, r->case_sensitive))
         return FALSE;
-    if (r->regex && !g_regex_match(r->regex, url, 0, NULL))
+    if (r->regex && ns_regex_test(r->regex, url) != 1)
         return FALSE;
     if (r->resource_types || r->excluded_resource_types) {
         const char *t = ns_dnr_infer_type(url);

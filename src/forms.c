@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "forms.h"
+#include "regex.h"
 #include "dom.h"
 #include "net.h"
 
@@ -184,14 +185,7 @@ ns_value_matches_pattern(const char *value, const char *pattern)
     if (!pattern || !*pattern) return TRUE;
     if (strlen(pattern) > NS_PATTERN_MAX_LEN) return FALSE;
     if (value && strlen(value) > NS_PATTERN_VALUE_MAX_LEN) return FALSE;
-    char *anchored = g_strdup_printf("^(?:%s)$", pattern);
-    GError *err = NULL;
-    GRegex *re = g_regex_new(anchored, 0, 0, &err);
-    g_free(anchored);
-    if (!re) { g_clear_error(&err); return TRUE; }
-    gboolean ok = g_regex_match(re, value ? value : "", 0, NULL);
-    g_regex_unref(re);
-    return ok;
+    return ns_regex_pattern_attribute_matches(value, pattern);
 }
 
 /* typeMismatch/badInput check for email, url and numeric input types. */

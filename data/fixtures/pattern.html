@@ -1,0 +1,45 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>The pattern attribute</title>
+<!-- Checks of <input pattern>: a JavaScript regular expression with the v
+     flag that the whole value must match. The browser runs it on the
+     JavaScript engine's regular expression code outside of the page's own
+     scripts, with a time budget. Prints one PASS or FAIL line per check. -->
+<form id="f">
+<input id="whole"    pattern="[a-z]{3}" value="abc">
+<input id="toolong"  pattern="[a-z]{3}" value="abcd">
+<input id="part"     pattern="ab" value="xabx">
+<input id="case"     pattern="A" value="a">
+<input id="invalid"  pattern="a)(b" value="zzz">
+<input id="letters"  pattern="\p{L}+" value="blåbær">
+<input id="digit"    pattern="\p{L}+" value="blå1">
+<input id="setsok"   pattern="[\d--[0-4]]+" value="5678">
+<input id="setsbad"  pattern="[\d--[0-4]]+" value="1234">
+<input id="empty"    pattern="[a-z]+" value="">
+<input id="endless"  pattern="(a+)+" value="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!">
+</form>
+<pre id="out"></pre>
+<script>
+var out = document.getElementById("out");
+function check(name, ok) { out.textContent += (ok ? "PASS " : "FAIL ") + name + "\n"; }
+function mismatch(id) {
+  var el = document.getElementById(id);
+  // The script's view and the style's (:invalid) must agree.
+  if (el.validity.patternMismatch !== el.matches(":invalid")) return "disagree";
+  return el.validity.patternMismatch;
+}
+var started = Date.now();
+check("the whole value matches", mismatch("whole") === false);
+check("a longer value does not", mismatch("toolong") === true);
+check("a match of a part is not enough", mismatch("part") === true);
+check("case matters", mismatch("case") === true);
+check("an invalid pattern holds nothing back", mismatch("invalid") === false);
+check("Unicode properties", mismatch("letters") === false);
+check("Unicode properties, mismatch", mismatch("digit") === true);
+check("v-flag set difference", mismatch("setsok") === false);
+check("v-flag set difference, mismatch", mismatch("setsbad") === true);
+check("an empty value is not checked", mismatch("empty") === false);
+check("a pattern that backtracks without end is given up on", mismatch("endless") === false);
+check("and does not hold the page", Date.now() - started < 5000);
+check("checkValidity sees the mismatches", document.getElementById("f").checkValidity() === false);
+</script>

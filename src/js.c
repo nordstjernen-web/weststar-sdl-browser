@@ -5,6 +5,7 @@
  */
 
 #include "js.h"
+#include "regex.h"
 #include "plat/ns_sys.h"
 #include "plat/ns_fs.h"
 #include "plat/ns_plat.h"
@@ -36545,61 +36546,9 @@ ns_js_value_matches_pattern(const char *v, const char *pat)
     if (!pat || !*pat) return TRUE;
     if (strlen(pat) > NS_JS_PATTERN_MAX_LEN) return FALSE;
     if (v && strlen(v) > NS_JS_PATTERN_VALUE_MAX_LEN) return FALSE;
-    ns_js *js = ns_active_js();
-    JSContext *ctx = js ? (js->main_realm_ctx ? js->main_realm_ctx : js->ctx)
-                        : NULL;
-    if (ctx) {
-        JSValue global = JS_GetGlobalObject(ctx);
-        JSValue ctor = JS_GetPropertyStr(ctx, global, "RegExp");
-        JS_FreeValue(ctx, global);
-        if (JS_IsFunction(ctx, ctor)) {
-            JSValue src = JS_NewString(ctx, pat);
-            JSValue flags = JS_NewString(ctx, "v");
-            JSValue bare = JS_CallConstructor(ctx, ctor, 2,
-                                              (JSValueConst[]){ src, flags });
-            JS_FreeValue(ctx, src);
-            if (JS_IsException(bare)) {
-                JS_FreeValue(ctx, JS_GetException(ctx));
-                JS_FreeValue(ctx, flags);
-                JS_FreeValue(ctx, ctor);
-                return TRUE;
-            }
-            JS_FreeValue(ctx, bare);
-            g_autofree char *anchored = g_strdup_printf("^(?:%s)$", pat);
-            JSValue asrc = JS_NewString(ctx, anchored);
-            JSValue re = JS_CallConstructor(ctx, ctor, 2,
-                                            (JSValueConst[]){ asrc, flags });
-            JS_FreeValue(ctx, asrc);
-            JS_FreeValue(ctx, flags);
-            JS_FreeValue(ctx, ctor);
-            if (JS_IsException(re)) {
-                JS_FreeValue(ctx, JS_GetException(ctx));
-                return TRUE;
-            }
-            JSValue test = JS_GetPropertyStr(ctx, re, "test");
-            JSValue sv = JS_NewString(ctx, v ? v : "");
-            JSValue r = JS_Call(ctx, test, re, 1, (JSValueConst[]){ sv });
-            JS_FreeValue(ctx, sv);
-            JS_FreeValue(ctx, test);
-            JS_FreeValue(ctx, re);
-            if (JS_IsException(r)) {
-                JS_FreeValue(ctx, JS_GetException(ctx));
-                return TRUE;
-            }
-            int ok = JS_ToBool(ctx, r);
-            JS_FreeValue(ctx, r);
-            return ok > 0;
-        }
-        JS_FreeValue(ctx, ctor);
-    }
-    char *a = g_strdup_printf("^(?:%s)$", pat);
-    GError *err = NULL;
-    GRegex *re = g_regex_new(a, 0, 0, &err);
-    g_free(a);
-    if (!re) { g_clear_error(&err); return TRUE; }
-    gboolean ok = g_regex_match(re, v ? v : "", 0, NULL);
-    g_regex_unref(re);
-    return ok;
+    /* Not with the page's own RegExp: a pattern that backtracks without
+     * end would hold the page's thread; ns_regex gives up on it. */
+    return ns_regex_pattern_attribute_matches(v, pat);
 }
 
 /* Whether n is an input of type radio. */
