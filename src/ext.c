@@ -5,6 +5,10 @@
  */
 
 #include "ext.h"
+#include "plat/ns_sys.h"
+#include "plat/ns_fs.h"
+#include "plat/ns_plat.h"
+#include "security.h"
 #include "plat/ns_plat.h"
 #include "plat/ns_env.h"
 #include "plat/ns_fs.h"
@@ -379,7 +383,7 @@ ns_ext_js_uilang(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv)
 {
     (void)this_val; (void)argc; (void)argv;
-    const char * const *names = g_get_language_names();
+    const char * const *names = ns_sys_language_names();
     const char *src = names && names[0] ? names[0] : "en";
     GString *out = g_string_new(NULL);
     for (const char *p = src; *p && *p != '.' && *p != '@'; p++)
@@ -1062,7 +1066,7 @@ ns_ext_load_one(const char *dir, JSContext *ctx)
         ns_ext_free(e);
         return;
     }
-    e->url_id = g_uuid_string_random();
+    e->url_id = ns_uuid_string_random();
     e->content_scripts = g_ptr_array_new_with_free_func(ns_ext_cs_free);
     e->dnr_rules = g_ptr_array_new_with_free_func(ns_dnr_rule_free);
     e->cosmetic_rules = g_ptr_array_new_with_free_func(ns_cosmetic_rule_free);

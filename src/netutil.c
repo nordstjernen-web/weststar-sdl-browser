@@ -5,6 +5,10 @@
  */
 
 #include "net.h"
+#include "plat/ns_sys.h"
+#include "plat/ns_fs.h"
+#include "plat/ns_plat.h"
+#include "security.h"
 #include "plat/ns_fs.h"
 #include "config.h"
 
@@ -50,7 +54,7 @@ ns_executable_dir(void)
     g_free(raw);
     return dir;
 #elif defined(__linux__)
-    char *exe = g_file_read_link("/proc/self/exe", NULL);
+    char *exe = ns_fs_read_link("/proc/self/exe");
     if (!exe) return NULL;
     char *dir = g_path_get_dirname(exe);
     g_free(exe);
@@ -95,7 +99,7 @@ build_accept_language_from_locales(void)
         g_free(locale);
     }
 #endif
-    const char *const *langs = g_get_language_names();
+    const char *const *langs = ns_sys_language_names();
     if (!langs || !langs[0]) return NULL;
     GString *out = g_string_new(NULL);
     GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal,

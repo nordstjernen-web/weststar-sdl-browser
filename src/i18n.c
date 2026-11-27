@@ -6,6 +6,10 @@
  */
 
 #include "i18n.h"
+#include "plat/ns_sys.h"
+#include "plat/ns_fs.h"
+#include "plat/ns_plat.h"
+#include "security.h"
 #include "plat/ns_env.h"
 #include "plat/ns_fs.h"
 #include "html.h"
@@ -110,7 +114,7 @@ ns_i18n_init(const char *self_exe)
     g_catalogues = g_ptr_array_new_with_free_func(
         (GDestroyNotify)g_hash_table_destroy);
     GHashTable *seen = g_hash_table_new(g_str_hash, g_str_equal);
-    const gchar *const *names = g_get_language_names();
+    const gchar *const *names = ns_sys_language_names();
     for (int i = 0; names && names[i]; i++) {
         const char *lang = names[i];
         if (strcmp(lang, "C") == 0 || strcmp(lang, "POSIX") == 0)

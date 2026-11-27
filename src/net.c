@@ -5,6 +5,10 @@
  */
 
 #include "net.h"
+#include "plat/ns_sys.h"
+#include "plat/ns_fs.h"
+#include "plat/ns_plat.h"
+#include "security.h"
 #include "mime_guess.h"
 #include "plat/ns_plat.h"
 #include "plat/ns_env.h"
@@ -456,8 +460,9 @@ ns_hsts_parse_expiry(const char *stamp)
     int y, mo, d, h, mi, sec;
     if (sscanf(stamp, "%4d%2d%2d %2d:%2d:%2d", &y, &mo, &d, &h, &mi, &sec) != 6)
         return G_MAXINT64;
-    g_autoptr(GDateTime) when = g_date_time_new_utc(y, mo, d, h, mi, sec);
-    return when ? g_date_time_to_unix(when) : G_MAXINT64;
+    Sint64 when;
+    return ns_time_from_utc(y, mo, d, h, mi, (int)sec, &when) ? when
+                                                             : G_MAXINT64;
 }
 
 /* Reloads the HSTS host cache from curl's file, skipping expired entries;
@@ -1314,9 +1319,12 @@ ns_hsts_snapshot(const char *path)
     g_hash_table_iter_init(&it, g_hsts_cache);
     while (g_hash_table_iter_next(&it, &host, &value)) {
         const ns_hsts_entry *e = value;
-        g_autoptr(GDateTime) when = g_date_time_new_from_unix_utc(e->expires);
-        g_autofree char *stamp = when
-            ? g_date_time_format(when, "%Y%m%d %H:%M:%S") : NULL;
+        NsDateTime when;
+        g_autofree char *stamp = ns_time_to_fields(e->expires, false, &when)
+            ? g_strdup_printf("%04d%02d%02d %02d:%02d:%02d", when.year,
+                              when.month, when.day, when.hour, when.minute,
+                              when.second)
+            : NULL;
         ns_hsts_feed_item *item = g_new0(ns_hsts_feed_item, 1);
         item->host = g_strdup(host);
         item->subdomains = e->subdomains;
@@ -3066,7 +3074,7 @@ about_read_first(const char *const *rel_paths, gsize *out_len)
     const char *exe = ns_app_self_exe();
     char *exe_dir = exe ? g_path_get_dirname(exe) : g_strdup(".");
     const char *user_data_dir = ns_fs_user_data_dir();
-    const char *const *system_data_dirs = g_get_system_data_dirs();
+    const char *const *system_data_dirs = ns_sys_data_dirs();
     char *contents = NULL;
     gsize len = 0;
     for (int i = 0; rel_paths[i]; i++) {
@@ -3305,12 +3313,10 @@ about_diagnostics_html(void)
     GString *s = g_string_new(NULL);
 
     diag_heading(s, "System");
-    char *os = g_get_os_info(G_OS_INFO_KEY_PRETTY_NAME);
-    if (!os) os = g_get_os_info(G_OS_INFO_KEY_NAME);
-    diag_kv(s, "Operating system", os ? os : platform);
-    g_free(os);
+    const char *os = ns_sys_os_name();
+    diag_kv(s, "Operating system", os && *os ? os : platform);
     diag_kv(s, "Architecture", arch);
-    char *cores = g_strdup_printf("%u", g_get_num_processors());
+    char *cores = g_strdup_printf("%d", ns_sys_num_processors());
     diag_kv(s, "Logical CPUs", cores);
     g_free(cores);
 
@@ -3492,7 +3498,7 @@ file_url_blocked_by_sandbox(const char *url)
 #ifdef __linux__
     if (!ns_security_sandbox_limits_reads()) return FALSE;
     char *path = g_filename_from_uri(url, NULL, NULL);
-    gboolean blocked = path && g_access(path, R_OK) == 0;
+    gboolean blocked = path && access(path, R_OK) == 0;
     g_free(path);
     return blocked;
 #else
@@ -4175,11 +4181,10 @@ static char *
 file_mtime_label(gint64 mtime)
 {
     if (mtime <= 0) return g_strdup("");
-    GDateTime *dt = g_date_time_new_from_unix_local(mtime);
-    if (!dt) return g_strdup("");
-    char *out = g_date_time_format(dt, "%Y-%m-%d %H:%M");
-    g_date_time_unref(dt);
-    return out ? out : g_strdup("");
+    NsDateTime dt;
+    if (!ns_time_to_fields(mtime, true, &dt)) return g_strdup("");
+    return g_strdup_printf("%04d-%02d-%02d %02d:%02d", dt.year, dt.month,
+                           dt.day, dt.hour, dt.minute);
 }
 
 /* file:// URI of a path's parent directory, or NULL at the root. */
@@ -7547,8 +7552,8 @@ ns_multipart_boundary(void)
 {
     guint32 r[4];
     if (!ns_security_csprng_fill(r, sizeof r)) {
-        r[0] = g_random_int(); r[1] = g_random_int();
-        r[2] = g_random_int(); r[3] = g_random_int();
+        for (int i = 0; i < 4; i++)
+            r[i] = SDL_rand_bits();
     }
     return g_strdup_printf("----WeststarFormBoundary%08x%08x%08x%08x",
                            r[0], r[1], r[2], r[3]);

@@ -45,6 +45,8 @@ void ns_security_deny_exec_memory(gboolean whole_process, gboolean gpu_driver);
 void ns_security_win32_mitigations_init(gboolean interactive);
 
 gboolean ns_security_csprng_fill(void *buf, gsize len);
+/* A random (version 4) UUID as text, to free with g_free(). */
+char *ns_uuid_string_random(void);
 
 gboolean ns_digest_b64_matches(GChecksumType type, const char *want_b64,
                                gsize want_len, const void *body,

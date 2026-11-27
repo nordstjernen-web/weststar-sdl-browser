@@ -8,6 +8,10 @@
 #define _GNU_SOURCE
 #endif
 #include "security.h"
+#include "plat/ns_sys.h"
+#include "plat/ns_fs.h"
+#include "plat/ns_plat.h"
+#include "security.h"
 #include "plat/ns_plat.h"
 #include "plat/ns_env.h"
 #include "plat/ns_fs.h"
@@ -57,13 +61,13 @@ ns_security_downloads_dir(void)
     if (dir) return dir;
 #ifdef G_OS_UNIX
     char *home_real = ns_fs_home_dir() ? realpath(ns_fs_home_dir(), NULL) : NULL;
-    const char *dl_raw = g_get_user_special_dir(G_USER_DIRECTORY_DOWNLOAD);
+    const char *dl_raw = ns_fs_user_download_dir();
     char *dl_real = dl_raw && *dl_raw ? realpath(dl_raw, NULL) : NULL;
     const char *home = home_real ? home_real : ns_fs_home_dir();
     const char *dl = dl_real ? dl_real : dl_raw;
 #else
     const char *home = ns_fs_home_dir();
-    const char *dl = g_get_user_special_dir(G_USER_DIRECTORY_DOWNLOAD);
+    const char *dl = ns_fs_user_download_dir();
 #endif
     gsize home_len = home ? strlen(home) : 0;
     while (home_len > 1 && home[home_len - 1] == G_DIR_SEPARATOR)
@@ -1432,4 +1436,23 @@ ns_security_harden_allocator(void)
 #ifdef __GLIBC__
     mallopt(M_PERTURB, 0xAA);
 #endif
+}
+
+/* A random (version 4, variant 1) UUID in its usual text form. The bits
+ * come from the system's random source; SDL's generator stands in only
+ * where that fails. */
+char *
+ns_uuid_string_random(void)
+{
+    guint8 b[16];
+    if (!ns_security_csprng_fill(b, sizeof b)) {
+        for (gsize i = 0; i < sizeof b; i++)
+            b[i] = (guint8)SDL_rand_bits();
+    }
+    b[6] = (guint8)((b[6] & 0x0f) | 0x40);
+    b[8] = (guint8)((b[8] & 0x3f) | 0x80);
+    return g_strdup_printf(
+        "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10],
+        b[11], b[12], b[13], b[14], b[15]);
 }

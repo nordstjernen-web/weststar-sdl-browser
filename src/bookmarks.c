@@ -5,6 +5,10 @@
  */
 
 #include "bookmarks.h"
+#include "plat/ns_sys.h"
+#include "plat/ns_fs.h"
+#include "plat/ns_plat.h"
+#include "security.h"
 #include "plat/ns_fs.h"
 #include "config.h"
 
@@ -100,12 +104,10 @@ ns_bookmarks_save(ns_bookmarks *bm)
         bookmark_append_sanitized(out, b->title);
         g_string_append_c(out, '\n');
     }
-    GError *err = NULL;
-    if (!g_file_set_contents_full(bm->path, out->str, (gssize)out->len,
-                                  G_FILE_SET_CONTENTS_CONSISTENT,
-                                  0600, &err)) {
-        g_warning("bookmarks: failed to write %s: %s", bm->path, err->message);
-        g_clear_error(&err);
+    if (!ns_fs_set_contents_mode(bm->path, out->str, (gssize)out->len,
+                                 0600)) {
+        g_warning("bookmarks: failed to write %s: %s", bm->path,
+                  ns_fs_last_error());
     }
     g_string_free(out, TRUE);
 }

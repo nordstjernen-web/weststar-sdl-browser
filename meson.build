@@ -481,6 +481,7 @@ summary({
 # declares targets, so it comes after the last project argument. It draws
 # with gfx (src/gfx/), the browser's rasterizer, which comes first.
 subdir('src/gfx')
+subdir('src/plat')
 subdir('src/fc')
 subdir('src/web-text-lib')
 pango       = web_text_dep

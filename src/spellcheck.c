@@ -5,6 +5,10 @@
  */
 
 #include "spellcheck.h"
+#include "plat/ns_sys.h"
+#include "plat/ns_fs.h"
+#include "plat/ns_plat.h"
+#include "security.h"
 
 #include <string.h>
 
@@ -55,7 +59,7 @@ ns_spell_init(void)
     g_dicts = g_ptr_array_new();
     g_dict_tags = g_ptr_array_new_with_free_func(g_free);
 
-    const char *const *names = g_get_language_names();
+    const char *const *names = ns_sys_language_names();
     for (int i = 0; names && names[i]; i++) {
         char *t = normalize_lang(names[i]);
         if (t) { try_load(t); g_free(t); }

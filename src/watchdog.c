@@ -5,6 +5,10 @@
  */
 
 #include "watchdog.h"
+#include "plat/ns_sys.h"
+#include "plat/ns_fs.h"
+#include "plat/ns_plat.h"
+#include "security.h"
 #include "plat/ns_loop.h"
 #include "plat/ns_plat.h"
 #include "plat/ns_env.h"
@@ -432,7 +436,7 @@ ns_watchdog_run_supervisor(const char *self_exe, int argc, char **argv)
 {
     ns_watchdog wd = { 0 };
 
-    char *uuid = g_uuid_string_random();
+    char *uuid = ns_uuid_string_random();
     char *name = g_strconcat("weststar-watchdog-", uuid, ".session", NULL);
     wd.session_path = g_build_filename(ns_fs_user_runtime_dir(), name, NULL);
     g_free(name);

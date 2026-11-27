@@ -69,12 +69,12 @@ jobs:
           path: gfx-test-out
           retention-days: 7
 
-      - name: nsfc test
+      - name: nsfc and SDL layer tests
         # The in-tree font finder, built and tested here although this
         # build finds its fonts through fontconfig.
         run: |
           NSFC_TEST_FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf \
-            meson test -C builddir --suite nsfc --print-errorlogs
+            meson test -C builddir --suite nsfc --suite plat --print-errorlogs
 
       - name: No GTK, Cairo or GIO in the binary
         run: |
@@ -179,10 +179,10 @@ jobs:
           # link OpenSSL's libcrypto, nor fontconfig.
           ! objdump -p builddir/src/sdl/weststar | grep -E 'NEEDED +(libcrypto|libfontconfig)'
 
-      - name: nsfc test
+      - name: nsfc and SDL layer tests
         run: |
           NSFC_TEST_FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf \
-            meson test -C builddir --suite nsfc --print-errorlogs
+            meson test -C builddir --suite nsfc --suite plat --print-errorlogs
 
       - name: Headless smoke (about:start)
         run: |

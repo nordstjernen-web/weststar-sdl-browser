@@ -5,6 +5,10 @@
  */
 
 #include "history.h"
+#include "plat/ns_sys.h"
+#include "plat/ns_fs.h"
+#include "plat/ns_plat.h"
+#include "security.h"
 #include "plat/ns_plat.h"
 #include "plat/ns_fs.h"
 #include "config.h"
@@ -271,9 +275,11 @@ ns_history_html_page(void)
             char *e_url   = g_markup_escape_text(url, -1);
             char *e_title = g_markup_escape_text(
                 (title && *title) ? title : url, -1);
-            GDateTime *dt = g_date_time_new_from_unix_local(when);
-            char *date = dt ? g_date_time_format(dt, "%Y-%m-%d %H:%M") : NULL;
-            if (dt) g_date_time_unref(dt);
+            NsDateTime dt;
+            char *date = ns_time_to_fields(when, true, &dt)
+                ? g_strdup_printf("%04d-%02d-%02d %02d:%02d", dt.year,
+                                  dt.month, dt.day, dt.hour, dt.minute)
+                : NULL;
             g_string_append_printf(s,
                 "<li><span class=\"d\">%s</span>"
                 "<a href=\"%s\">%s</a>"

@@ -400,12 +400,13 @@ ns_fs_present(const char *path)
 }
 
 #ifdef NS_FS_POSIX
-/* Writes data to a new file tmp (0666 less the umask, as GLib), synced when
+/* Writes data to a new file tmp (mode less the umask, as GLib), synced when
  * sync is set. */
 static bool
-ns_fs_write_new(const char *tmp, const char *data, size_t len, bool sync)
+ns_fs_write_new(const char *tmp, const char *data, size_t len, bool sync,
+                int mode)
 {
-    int fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0666);
+    int fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, (mode_t)mode);
     if (fd < 0) return ns_fs_errno("could not create", tmp);
     while (len > 0) {
         ssize_t n = write(fd, data, len);
@@ -428,9 +429,11 @@ ns_fs_write_new(const char *tmp, const char *data, size_t len, bool sync)
 }
 #else
 static bool
-ns_fs_write_new(const char *tmp, const char *data, size_t len, bool sync)
+ns_fs_write_new(const char *tmp, const char *data, size_t len, bool sync,
+                int mode)
 {
     (void)sync; /* SDL_CloseIO flushes SDL's and the C library's buffers. */
+    (void)mode; /* No Unix permissions here. */
     SDL_IOStream *io = SDL_IOFromFile(tmp, "wb");
     if (!io) return false;
     bool ok = SDL_WriteIO(io, data, len) == len;
@@ -441,6 +444,13 @@ ns_fs_write_new(const char *tmp, const char *data, size_t len, bool sync)
 
 bool
 ns_fs_set_contents(const char *path, const char *data, ptrdiff_t length)
+{
+    return ns_fs_set_contents_mode(path, data, length, 0666);
+}
+
+bool
+ns_fs_set_contents_mode(const char *path, const char *data, ptrdiff_t length,
+                        int mode)
 {
     size_t len = length < 0 ? strlen(data) : (size_t)length;
     /* As GLib: sync the new contents first when they replace a file that
@@ -454,7 +464,7 @@ ns_fs_set_contents(const char *path, const char *data, ptrdiff_t length)
             SDL_free(tmp);
             continue;
         }
-        if (!ns_fs_write_new(tmp, data, len, sync)) {
+        if (!ns_fs_write_new(tmp, data, len, sync, mode)) {
 #ifdef NS_FS_POSIX
             bool taken = errno == EEXIST;
 #else
@@ -484,6 +494,104 @@ ns_fs_set_contents(const char *path, const char *data, ptrdiff_t length)
         return true;
     }
     return SDL_SetError("could not find a temporary name beside %s", path);
+}
+
+char *
+ns_fs_read_link(const char *path)
+{
+#ifdef NS_FS_POSIX
+    size_t cap = 256;
+    for (;;) {
+        char *buf = malloc(cap);
+        if (!buf) return NULL;
+        ssize_t n = readlink(path, buf, cap);
+        if (n < 0) {
+            free(buf);
+            return NULL;
+        }
+        if ((size_t)n < cap) {
+            buf[n] = 0;
+            return buf;
+        }
+        free(buf);
+        cap *= 2;
+    }
+#else
+    (void)path;
+    return NULL;
+#endif
+}
+
+/* The Downloads folder named in the user's user-dirs.dirs, from malloc(),
+ * or NULL. A line reads XDG_DOWNLOAD_DIR="$HOME/Downloads" or gives an
+ * absolute path; anything else is not a folder the user chose. */
+static char *
+ns_fs_xdg_download_dir(void)
+{
+    char *file = NULL, *contents = NULL, *found = NULL;
+    const char *config = ns_fs_user_config_dir(), *home = ns_fs_home_dir();
+    static const char key[] = "XDG_DOWNLOAD_DIR";
+    if (!config || SDL_asprintf(&file, "%s/user-dirs.dirs", config) < 0)
+        return NULL;
+    bool ok = ns_fs_get_contents(file, &contents, NULL);
+    SDL_free(file);
+    if (!ok) return NULL;
+    for (char *line = contents; line && *line;) {
+        char *end = strchr(line, '\n');
+        if (end) *end = 0;
+        char *p = line;
+        while (*p == ' ' || *p == '\t') p++;
+        if (strncmp(p, key, sizeof key - 1) == 0) {
+            p += sizeof key - 1;
+            while (*p == ' ' || *p == '\t') p++;
+            if (*p == '=') {
+                p++;
+                while (*p == ' ' || *p == '\t') p++;
+                char *close_quote = *p == '"' ? strrchr(p + 1, '"') : NULL;
+                if (close_quote) {
+                    *close_quote = 0;
+                    p++;
+                    char *dir = NULL;
+                    if (strncmp(p, "$HOME", 5) == 0 && (p[5] == '/' || !p[5])) {
+                        if (home && SDL_asprintf(&dir, "%s%s", home, p + 5) < 0)
+                            dir = NULL;
+                    } else if (*p == '/') {
+                        dir = SDL_strdup(p);
+                    }
+                    if (dir) {
+                        /* The last such line counts. */
+                        SDL_free(found);
+                        found = dir;
+                    }
+                }
+            }
+        }
+        line = end ? end + 1 : NULL;
+    }
+    free(contents);
+    return found;
+}
+
+const char *
+ns_fs_user_download_dir(void)
+{
+    static NsOnce once;
+    static char *dir;
+    if (ns_once_enter(&once)) {
+#if defined(NS_FS_XDG)
+        dir = ns_fs_xdg_download_dir();
+#else
+        (void)ns_fs_xdg_download_dir;
+        const char *folder = SDL_GetUserFolder(SDL_FOLDER_DOWNLOADS);
+        dir = folder && *folder ? SDL_strdup(folder) : NULL;
+#endif
+        /* Without a separator at the end, unless it is all there is. */
+        size_t len = dir ? strlen(dir) : 0;
+        while (len > 1 && (dir[len - 1] == '/' || dir[len - 1] == '\\'))
+            dir[--len] = 0;
+        ns_once_leave(&once);
+    }
+    return dir;
 }
 
 /* ---- Paths ---- */

@@ -5,6 +5,10 @@
  */
 
 #include "cache.h"
+#include "plat/ns_sys.h"
+#include "plat/ns_fs.h"
+#include "plat/ns_plat.h"
+#include "security.h"
 #include "plat/ns_plat.h"
 #include "plat/ns_fs.h"
 #include "config.h"
@@ -405,12 +409,9 @@ static gint64
 parse_http_date(const char *s)
 {
     if (!s || !*s) return 0;
-    GDateTime *dt = g_date_time_new_from_iso8601(s, NULL);
-    if (dt) {
-        gint64 r = g_date_time_to_unix(dt);
-        g_date_time_unref(dt);
-        return r;
-    }
+    Sint64 iso;
+    if (ns_time_parse_iso8601(s, &iso))
+        return iso;
     const char *comma = strchr(s, ',');
     const char *p = comma ? comma + 1 : s;
     while (*p == ' ') p++;
@@ -432,13 +433,8 @@ parse_http_date(const char *s)
     if (year < 1970 || year > 9999 || day < 1 || day > 31 ||
         hh < 0 || hh > 23 || mm < 0 || mm > 59 || ss < 0 || ss > 60)
         return 0;
-    GTimeZone *utc = g_time_zone_new_utc();
-    dt = g_date_time_new(utc, year, month, day, hh, mm, (double)ss);
-    g_time_zone_unref(utc);
-    if (!dt) return 0;
-    gint64 r = g_date_time_to_unix(dt);
-    g_date_time_unref(dt);
-    return r;
+    Sint64 r;
+    return ns_time_from_utc(year, month, day, hh, mm, ss, &r) ? r : 0;
 }
 
 /* Expiry time from Cache-Control/Expires; -1 for no-store, 0 for no-cache or unknown. */
@@ -710,11 +706,9 @@ ns_cache_put(const char *url,
     if (rc != SQLITE_DONE) return;
 
     g_autofree char *bp = body_path_for_key(key, TRUE);
-    GError *err = NULL;
-    if (!g_file_set_contents_full(bp, body ? body : "", (gssize)body_len,
-                                  G_FILE_SET_CONTENTS_CONSISTENT, 0600, &err)) {
-        g_warning("cache: failed to write %s: %s", bp, err->message);
-        g_clear_error(&err);
+    if (!ns_fs_set_contents_mode(bp, body ? body : "", (gssize)body_len,
+                                 0600)) {
+        g_warning("cache: failed to write %s: %s", bp, ns_fs_last_error());
         delete_key(key);
         return;
     }

@@ -135,12 +135,12 @@ jobs:
           mkdir -p gfx-test-out
           GFX_TEST_OUT="$(cygpath -m "$PWD/gfx-test-out")" meson test -C builddir --suite gfx --print-errorlogs
 
-      - name: nsfc test
+      - name: nsfc and SDL layer tests
         # The in-tree font finder (this build finds its fonts through
         # fontconfig), with one of Windows' own fonts to scan.
         run: |
           NSFC_TEST_FONT="C:/Windows/Fonts/arial.ttf" \
-            meson test -C builddir --suite nsfc --print-errorlogs
+            meson test -C builddir --suite nsfc --suite plat --print-errorlogs
 
       - name: Upload the gfx test images
         if: failure()

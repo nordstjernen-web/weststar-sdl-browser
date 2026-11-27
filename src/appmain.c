@@ -33,6 +33,10 @@
 #include <web-text-lib/ns-pango-cache.h>
 
 #include "audio/audio.h"
+#include "plat/ns_sys.h"
+#include "plat/ns_fs.h"
+#include "plat/ns_plat.h"
+#include "security.h"
 #include "plat/ns_env.h"
 #include "plat/ns_fs.h"
 #include "bytecode_cache.h"
@@ -67,7 +71,7 @@ static void
 init_self_exe(const char *argv0)
 {
 #ifdef __linux__
-    char *resolved = g_file_read_link("/proc/self/exe", NULL);
+    char *resolved = ns_fs_read_link("/proc/self/exe");
     if (resolved) { g_self_exe = resolved; return; }
 #endif
 #ifdef __APPLE__

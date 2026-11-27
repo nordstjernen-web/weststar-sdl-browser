@@ -103,6 +103,15 @@ So the shell goes first, and Cairo after it:
       extensions and file signatures, `src/mime_guess.c`, the same on
       every platform), and a list interface on the text library's font
       classes that nothing used.
+      The system services went the same way (`src/plat/ns_sys.c`,
+      `ns_fs.c`): calendar time and ISO 8601 instead of `GDateTime`, the
+      local time zone's name, the user's languages, the processor count,
+      the system's name, the data folders, the Downloads folder, reading
+      a link, a file written for its owner alone, random UUIDs. What the
+      browser still takes from GLib is data structures, Unicode tables,
+      string and URI functions, logging, `GRegex` (the `pattern`
+      attribute and extension rules; it brings PCRE2) and GObject for the
+      text library: 321 functions, from 370.
    5. *GLib's data structures and GObject* (about 500 functions at 21,000
       call sites, and the Pango fork's type system) come from a trimmed
       GLib vendored in the tree and built statically, its few OS calls

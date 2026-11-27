@@ -5,6 +5,10 @@
  */
 
 #include "js.h"
+#include "plat/ns_sys.h"
+#include "plat/ns_fs.h"
+#include "plat/ns_plat.h"
+#include "security.h"
 #include "plat/ns_plat.h"
 #include "plat/ns_env.h"
 #include "plat/ns_fs.h"
@@ -1699,7 +1703,7 @@ ns_drain_mutations(ns_js *js)
 static int
 ns_nav_hardware_concurrency(void)
 {
-    int n = (int)g_get_num_processors();
+    int n = ns_sys_num_processors();
     if (n < 1) n = 1;
     if (n > 32) n = 32;
     return n;
@@ -21030,7 +21034,7 @@ ns_window_url_create_object(JSContext *ctx, JSValueConst this_val,
     (void)this_val;
     ns_js *js = js_from_ctx(ctx);
     char *origin = js ? ns_js_caller_web_origin(js, ctx) : g_strdup("null");
-    char *uuid = g_uuid_string_random();
+    char *uuid = ns_uuid_string_random();
     char *url = g_strdup_printf("blob:%s/%s", origin, uuid);
     g_free(origin);
     g_free(uuid);
@@ -48800,13 +48804,14 @@ static JSValue
 ns_document_get_lastModified(JSContext *ctx, JSValueConst this_val)
 {
     (void)this_val;
-    GDateTime *now = g_date_time_new_now_local();
+    NsDateTime now;
     JSValue r;
-    if (now) {
-        char *s = g_date_time_format(now, "%m/%d/%Y %H:%M:%S");
-        r = JS_NewString(ctx, s ? s : "");
+    if (ns_time_to_fields(ns_time_real_us() / 1000000, true, &now)) {
+        char *s = g_strdup_printf("%02d/%02d/%04d %02d:%02d:%02d", now.month,
+                                  now.day, now.year, now.hour, now.minute,
+                                  now.second);
+        r = JS_NewString(ctx, s);
         g_free(s);
-        g_date_time_unref(now);
     } else {
         r = JS_NewString(ctx, "");
     }

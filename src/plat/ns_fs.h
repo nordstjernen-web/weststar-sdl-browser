@@ -77,6 +77,19 @@ bool ns_fs_get_contents(const char *path, char **contents, size_t *length);
  * on Windows). A reader sees the old file or the new one, never a part; on
  * failure the temporary file is removed and the old file left as it was. */
 bool ns_fs_set_contents(const char *path, const char *data, ptrdiff_t length);
+/* As ns_fs_set_contents, with the new file's permissions given (0600 for a
+ * file nobody else should read) where the platform has them. */
+bool ns_fs_set_contents_mode(const char *path, const char *data,
+                             ptrdiff_t length, int mode);
+
+/* The target of a symbolic link, from malloc(), or NULL: when path is not a
+ * link, or on a platform without them. */
+char *ns_fs_read_link(const char *path);
+
+/* The user's Downloads folder, without a trailing separator, or NULL when
+ * the platform does not say: XDG_DOWNLOAD_DIR from the user's
+ * user-dirs.dirs on Unix, as GLib read it; SDL's answer elsewhere. */
+const char *ns_fs_user_download_dir(void);
 
 /* fopen() with a UTF-8 path on every platform (_wfopen on Windows). */
 FILE *ns_fs_fopen(const char *path, const char *mode);

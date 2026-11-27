@@ -5,6 +5,10 @@
  */
 
 #include "js_intl.h"
+#include "plat/ns_sys.h"
+#include "plat/ns_fs.h"
+#include "plat/ns_plat.h"
+#include "security.h"
 #include "plat/ns_plat.h"
 #include "plat/ns_env.h"
 
@@ -72,7 +76,7 @@ intl_default_locale(void)
 {
     char *loc = intl_norm_locale(ns_i18n_language());
     if (loc) return loc;
-    const gchar *const *names = g_get_language_names();
+    const gchar *const *names = ns_sys_language_names();
     for (int i = 0; names && names[i]; i++) {
         if (!strcmp(names[i], "C") || !strcmp(names[i], "POSIX")) continue;
         if (strchr(names[i], '.') || strchr(names[i], '@')) continue;
@@ -1163,11 +1167,9 @@ intl_dtf_parts_core(JSContext *ctx, JSValueConst opts, const char *locale,
          * abbreviation: "GMT+1" (short), "GMT+01:00" (long) */
         gint64 off_min = 0;
         if (!utc) {
-            GDateTime *dt = g_date_time_new_from_unix_local((gint64)secs);
-            if (dt) {
-                off_min = g_date_time_get_utc_offset(dt) / G_TIME_SPAN_MINUTE;
-                g_date_time_unref(dt);
-            }
+            NsDateTime dt;
+            if (ns_time_to_fields((gint64)secs, true, &dt))
+                off_min = dt.utc_offset / 60;
         }
         gboolean long_form = !strcmp(tz_name, "long") ||
                              !strcmp(tz_name, "longOffset") ||
@@ -1398,17 +1400,33 @@ intl_local_tz_id(void)
             g_free(key);
         }
 #endif
-        GTimeZone *z = g_time_zone_new_local();
-        if (z) {
-            const char *id = g_time_zone_get_identifier(z);
-            if (!cached && id && *id && strcmp(id, "UTC") != 0 &&
-                id[0] != '+' && id[0] != '-' && strchr(id, '/'))
-                cached = g_strdup(id);
-            g_time_zone_unref(z);
-        }
+        /* The zone's name as the system records it: TZ when it names a
+         * zone (":Europe/Oslo" too), else what /etc/localtime links to in
+         * the zone database, else the name in /etc/timezone. */
         if (!cached) {
             const char *env = ns_getenv("TZ");
-            if (env && *env && strchr(env, '/')) cached = g_strdup(env);
+            if (env && *env == ':') env++;
+            if (env && *env && *env != '/' && strchr(env, '/'))
+                cached = g_strdup(env);
+        }
+        if (!cached) {
+            char *target = ns_fs_read_link("/etc/localtime");
+            const char *id = target ? strstr(target, "/zoneinfo/") : NULL;
+            if (id) {
+                id += strlen("/zoneinfo/");
+                if (g_str_has_prefix(id, "posix/")) id += 6;
+                else if (g_str_has_prefix(id, "right/")) id += 6;
+                if (*id && strchr(id, '/')) cached = g_strdup(id);
+            }
+            free(target);
+        }
+        if (!cached) {
+            char *name = NULL;
+            if (ns_fs_get_contents("/etc/timezone", &name, NULL)) {
+                g_strstrip(name);
+                if (*name && strchr(name, '/')) cached = g_strdup(name);
+            }
+            free(name);
         }
         if (!cached) cached = g_strdup("UTC");
     }

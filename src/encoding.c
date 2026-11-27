@@ -5,6 +5,10 @@
  */
 
 #include "encoding.h"
+#include "plat/ns_sys.h"
+#include "plat/ns_fs.h"
+#include "plat/ns_plat.h"
+#include "security.h"
 #include "plat/ns_plat.h"
 
 #include <string.h>
@@ -543,7 +547,7 @@ ns_encoding_locale_default(void)
     static const ns_encoding *dflt;
     static NsOnce once;
     if (ns_once_enter(&once)) {
-        const char *const *names = g_get_language_names();
+        const char *const *names = ns_sys_language_names();
         const char *locale = names && names[0] ? names[0] : "C";
         dflt = ns_encoding_for_label(locale_default_label(locale));
         if (!dflt) dflt = ns_encoding_for_name("windows-1252");
