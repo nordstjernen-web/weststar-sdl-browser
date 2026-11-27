@@ -74,8 +74,9 @@ So the shell goes first, and Cairo after it:
       folders (the same ones as before on Linux and Windows; SDL's
       preference path elsewhere), and environment variables. The toolbar
       icons are compiled into the binary like the other embedded files,
-      so `glib-compile-resources` is no longer needed. (Done; the
-      watchdog keeps GLib's process spawning for its child watch.)
+      so `glib-compile-resources` is no longer needed. (Done. The
+      watchdog's supervisor starts the browser and waits for it with
+      SDL's process API.)
    4. *A portable build profile*: fontconfig optional (fonts found in the
       platform's font folders, with a small bundled fallback set), TLS and
       Web Crypto through mbedTLS instead of OpenSSL, and a bundled CA
@@ -310,9 +311,14 @@ Background work (fetches, image decodes) runs on `ns_job` worker threads
 leaving after 10 s), and `NsTask` (`src/task.c`), shaped like GLib's
 GTask, delivers each result on the loop of the thread that started it.
 
-GLib's loop remains only in the watchdog's supervisor process, which
-spawns the browser and watches it as an OS child process and for Unix
-signals.
+GLib's main loop is not used anywhere. The watchdog's supervisor, a
+process of its own that restarts the browser after a crash or a hang,
+needs no loop at all: it starts the browser with `SDL_CreateProcess`
+(with `NS_WATCHDOG_RECOVER` in that one child's environment for a
+recovery start) and blocks in `SDL_WaitProcess` until it exits. On Unix,
+SIGINT and SIGTERM are passed on to the browser from their signal
+handlers, with an alarm that kills it if it has not gone after three
+seconds.
 
 ## Scrolling
 

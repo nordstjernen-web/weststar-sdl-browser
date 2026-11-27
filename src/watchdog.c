@@ -15,15 +15,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <gio/gio.h>
+#include <glib.h>
+#include <SDL3/SDL_process.h>
+#include <SDL3/SDL_timer.h>
 
 #ifdef G_OS_WIN32
 #include <windows.h>
 #else
-#include <glib-unix.h>
 #include <signal.h>
 #include <unistd.h>
-#include <sys/wait.h>
 #endif
 
 #ifdef __linux__
@@ -173,18 +173,14 @@ ns_watchdog_should_supervise(int argc, char **argv, gboolean enabled_by_default)
 }
 
 typedef struct {
-    char      **child_argv;
-    char       *session_path;
-    GMainLoop  *loop;
-    GPid        pid;
-    gboolean    have_pid;
-    gboolean    stopping;
-    guint       watch_id;
-    int         burst_count;
-    gint64      burst_start_us;
-    gint64      spawned_us;
-    int         recover_streak;
-    int         exit_status;
+    char       **child_argv;
+    char        *session_path;
+    SDL_Process *process;
+    int          burst_count;
+    gint64       burst_start_us;
+    gint64       spawned_us;
+    int          recover_streak;
+    int          exit_status;
 } ns_watchdog;
 
 /* Windows: shows a startup-failure message box naming the diagnostic log. */
@@ -210,182 +206,183 @@ ns_watchdog_report_failure(const char *detail)
 #endif
 }
 
-/* Terminates the child: SIGTERM, SIGKILL when forced, or TerminateProcess on Windows. */
+#ifndef G_OS_WIN32
+/* What the signal handlers read and write: whether the supervisor was asked
+ * to stop, and the browser's process id while it runs (0 otherwise). */
+static volatile sig_atomic_t g_stop_requested;
+static volatile sig_atomic_t g_child_pid;
+
+/* SIGINT or SIGTERM: asks the browser to stop, and arms the alarm that
+ * kills it if it has not gone after the grace period. The supervisor's
+ * wait for the browser then returns. */
 static void
-ns_watchdog_kill(GPid pid, gboolean force)
+ns_watchdog_on_stop_signal(int sig)
+{
+    (void)sig;
+    pid_t pid = (pid_t)g_child_pid;
+    if (g_stop_requested)
+        return;
+    g_stop_requested = 1;
+    if (pid > 0) {
+        kill(pid, SIGTERM);
+        alarm(NS_WATCHDOG_STOP_GRACE_SECS);
+    }
+}
+
+static void
+ns_watchdog_on_alarm(int sig)
+{
+    (void)sig;
+    pid_t pid = (pid_t)g_child_pid;
+    if (pid > 0)
+        kill(pid, SIGKILL);
+}
+
+/* The handlers restart the system call they interrupt, so that the wait
+ * for the browser goes on until it has really exited. */
+static void
+ns_watchdog_install_signals(void)
+{
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    sa.sa_handler = ns_watchdog_on_stop_signal;
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
+    sa.sa_handler = ns_watchdog_on_alarm;
+    sigaction(SIGALRM, &sa, NULL);
+}
+#endif
+
+static gboolean
+ns_watchdog_stopping(void)
 {
 #ifdef G_OS_WIN32
-    (void)force;
-    TerminateProcess((HANDLE)pid, 1);
+    return FALSE;
 #else
-    kill((pid_t)pid, force ? SIGKILL : SIGTERM);
+    return g_stop_requested != 0;
 #endif
 }
 
-static gboolean ns_watchdog_spawn(ns_watchdog *wd, gboolean recover);
-
+/* How the browser gets standard stream `fd`: the supervisor's own. A
+ * Windows program started from the desktop has none, and SDL fails to
+ * start a process that is to inherit a stream that is not there; the
+ * browser then gets the null device. */
+static SDL_ProcessIO
+ns_watchdog_stdio(int fd)
+{
 #ifdef G_OS_WIN32
-typedef struct {
-    wchar_t *data;
-    size_t len;
-    size_t cap;
-} ns_watchdog_wbuf;
-
-/* Grows a wide-char buffer for extra chars plus NUL; FALSE on overflow. */
-static gboolean
-ns_watchdog_wbuf_reserve(ns_watchdog_wbuf *b, size_t extra)
-{
-    if (extra > ((size_t)-1) - b->len - 1) return FALSE;
-    size_t need = b->len + extra + 1;
-    if (need <= b->cap) return TRUE;
-    size_t cap = b->cap ? b->cap : 256;
-    while (cap < need) {
-        if (cap > ((size_t)-1) / 2) return FALSE;
-        cap *= 2;
-    }
-    wchar_t *data = g_renew(wchar_t, b->data, cap);
-    b->data = data;
-    b->cap = cap;
-    return TRUE;
-}
-
-static gboolean
-ns_watchdog_wbuf_append_char(ns_watchdog_wbuf *b, wchar_t ch)
-{
-    if (!ns_watchdog_wbuf_reserve(b, 1)) return FALSE;
-    b->data[b->len++] = ch;
-    b->data[b->len] = L'\0';
-    return TRUE;
-}
-
-static gboolean
-ns_watchdog_wbuf_append_many(ns_watchdog_wbuf *b, wchar_t ch, size_t count)
-{
-    if (!ns_watchdog_wbuf_reserve(b, count)) return FALSE;
-    for (size_t i = 0; i < count; i++) b->data[b->len++] = ch;
-    b->data[b->len] = L'\0';
-    return TRUE;
-}
-
-/* Appends arg quoted per the MSVC CommandLineToArgvW backslash rules. */
-static gboolean
-ns_watchdog_wbuf_append_quoted(ns_watchdog_wbuf *b, const wchar_t *arg)
-{
-    if (!ns_watchdog_wbuf_append_char(b, L'"')) return FALSE;
-    size_t slashes = 0;
-    for (const wchar_t *p = arg; *p; p++) {
-        if (*p == L'\\') {
-            slashes++;
-            continue;
-        }
-        if (*p == L'"') {
-            if (!ns_watchdog_wbuf_append_many(b, L'\\', slashes * 2 + 1))
-                return FALSE;
-            if (!ns_watchdog_wbuf_append_char(b, *p)) return FALSE;
-            slashes = 0;
-            continue;
-        }
-        if (slashes > 0) {
-            if (!ns_watchdog_wbuf_append_many(b, L'\\', slashes)) return FALSE;
-            slashes = 0;
-        }
-        if (!ns_watchdog_wbuf_append_char(b, *p)) return FALSE;
-    }
-    if (slashes > 0 &&
-        !ns_watchdog_wbuf_append_many(b, L'\\', slashes * 2))
-        return FALSE;
-    return ns_watchdog_wbuf_append_char(b, L'"');
-}
-
-/* Builds a quoted UTF-16 Windows command line from argv; caller frees. */
-static wchar_t *
-ns_watchdog_build_command_line(char **argv)
-{
-    ns_watchdog_wbuf b = {0};
-    for (int i = 0; argv[i]; i++) {
-        wchar_t *arg = g_utf8_to_utf16(argv[i], -1, NULL, NULL, NULL);
-        if (!arg) {
-            g_free(b.data);
-            return NULL;
-        }
-        gboolean ok = (i == 0 || ns_watchdog_wbuf_append_char(&b, L' ')) &&
-                      ns_watchdog_wbuf_append_quoted(&b, arg);
-        g_free(arg);
-        if (!ok) {
-            g_free(b.data);
-            return NULL;
-        }
-    }
-    return b.data;
-}
-
-static void
-ns_watchdog_restore_recover_env(const wchar_t *old)
-{
-    SetEnvironmentVariableW(L"NS_WATCHDOG_RECOVER", old && *old ? old : NULL);
-}
-
-/* Starts the child with CreateProcessW, setting NS_WATCHDOG_RECOVER only for that launch. */
-static gboolean
-ns_watchdog_spawn_win32(ns_watchdog *wd, gboolean recover, GPid *pid,
-                        GError **err)
-{
-    wchar_t *app = g_utf8_to_utf16(wd->child_argv[0], -1, NULL, NULL, NULL);
-    wchar_t *cmd = ns_watchdog_build_command_line(wd->child_argv);
-    const char *old_utf8 = ns_getenv(NS_WATCHDOG_RECOVER_ENV);
-    wchar_t *old = old_utf8 ? g_utf8_to_utf16(old_utf8, -1, NULL, NULL, NULL)
-                            : NULL;
-    if (!app || !cmd) {
-        g_set_error(err, G_SPAWN_ERROR, G_SPAWN_ERROR_NOMEM,
-                    "could not build Windows child command line");
-        g_free(app);
-        g_free(cmd);
-        g_free(old);
-        return FALSE;
-    }
-
-    SetEnvironmentVariableW(L"NS_WATCHDOG_RECOVER", recover ? L"1" : NULL);
-
-    STARTUPINFOW si;
-    PROCESS_INFORMATION pi;
-    memset(&si, 0, sizeof si);
-    memset(&pi, 0, sizeof pi);
-    si.cb = sizeof si;
-    BOOL ok = CreateProcessW(app, cmd, NULL, NULL, TRUE, 0,
-                             NULL, NULL, &si, &pi);
-    DWORD error = ok ? 0 : GetLastError();
-    ns_watchdog_restore_recover_env(old);
-    g_free(app);
-    g_free(cmd);
-    g_free(old);
-
-    if (!ok) {
-        char *msg = g_win32_error_message((gint)error);
-        g_set_error(err, G_SPAWN_ERROR, G_SPAWN_ERROR_FAILED,
-                    "CreateProcessW failed: %s", msg ? msg : "unknown error");
-        g_free(msg);
-        return FALSE;
-    }
-
-    CloseHandle(pi.hThread);
-    *pid = (GPid)pi.hProcess;
-    return TRUE;
-}
+    static const DWORD ids[] = {
+        STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE,
+    };
+    HANDLE h = GetStdHandle(ids[fd]);
+    if (!h || h == INVALID_HANDLE_VALUE)
+        return SDL_PROCESS_STDIO_NULL;
+#else
+    (void)fd;
 #endif
-
-/* Respawns the child; only the first retry of a crash streak runs in recovery mode. */
-static gboolean
-ns_watchdog_respawn_cb(gpointer user_data)
-{
-    ns_watchdog *wd = user_data;
-    if (!wd->stopping)
-        ns_watchdog_spawn(wd, wd->recover_streak++ == 0);
-    return G_SOURCE_REMOVE;
+    return SDL_PROCESS_STDIO_INHERITED;
 }
 
-/* Schedules a respawn after backoff, giving up after too many failures in a burst. */
-static void
-ns_watchdog_schedule_restart(ns_watchdog *wd)
+/* Launches the browser child, in recovery mode when asked: with
+ * NS_WATCHDOG_RECOVER=1 in its environment, and only in its. */
+static gboolean
+ns_watchdog_spawn(ns_watchdog *wd, gboolean recover)
+{
+    SDL_Environment *env = SDL_CreateEnvironment(true);
+    SDL_PropertiesID props = SDL_CreateProperties();
+    if (env) {
+        if (recover)
+            SDL_SetEnvironmentVariable(env, NS_WATCHDOG_RECOVER_ENV, "1", true);
+        else
+            SDL_UnsetEnvironmentVariable(env, NS_WATCHDOG_RECOVER_ENV);
+    }
+    if (env && props) {
+        SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER,
+                               wd->child_argv);
+        SDL_SetPointerProperty(props,
+                               SDL_PROP_PROCESS_CREATE_ENVIRONMENT_POINTER,
+                               env);
+        /* The browser reads and writes where the supervisor does. */
+        SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDIN_NUMBER,
+                              ns_watchdog_stdio(0));
+        SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER,
+                              ns_watchdog_stdio(1));
+        SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDERR_NUMBER,
+                              ns_watchdog_stdio(2));
+        wd->process = SDL_CreateProcessWithProperties(props);
+    }
+    char *error = wd->process ? NULL : g_strdup(SDL_GetError());
+    if (props) SDL_DestroyProperties(props);
+    if (env) SDL_DestroyEnvironment(env);
+
+    if (!wd->process) {
+        g_warning("ns_watchdog: failed to launch browser: %s", error);
+        char *detail = g_strdup_printf("Failed to launch the browser process: %s",
+                                       error);
+        ns_watchdog_report_failure(detail);
+        g_free(detail);
+        g_free(error);
+        return FALSE;
+    }
+    wd->spawned_us = ns_time_monotonic_us();
+#ifndef G_OS_WIN32
+    g_child_pid = (sig_atomic_t)SDL_GetNumberProperty(
+        SDL_GetProcessProperties(wd->process), SDL_PROP_PROCESS_PID_NUMBER, 0);
+    /* A stop that arrived while the browser was being started. */
+    if (g_stop_requested && g_child_pid > 0) {
+        kill((pid_t)g_child_pid, SIGTERM);
+        alarm(NS_WATCHDOG_STOP_GRACE_SECS);
+    }
+#endif
+    return TRUE;
+}
+
+/* Waits for the browser to exit. *code gets its exit code, or on Unix the
+ * negative of the signal that ended it. */
+static gboolean
+ns_watchdog_wait(ns_watchdog *wd, int *code)
+{
+    bool waited = SDL_WaitProcess(wd->process, true, code);
+#ifndef G_OS_WIN32
+    g_child_pid = 0;
+    alarm(0);
+#endif
+    if (!waited)
+        g_warning("ns_watchdog: lost track of the browser: %s", SDL_GetError());
+    SDL_DestroyProcess(wd->process);
+    wd->process = NULL;
+    return waited;
+}
+
+/* Whether the browser should be started again after exiting with `code`:
+ * not after a clean exit, nor when it was told to go. */
+static gboolean
+ns_watchdog_should_restart(int code)
+{
+    if (code == 0)
+        return FALSE;
+#ifndef G_OS_WIN32
+    if (code < 0) {
+        int sig = -code;
+        if (sig == SIGTERM || sig == SIGINT || sig == SIGHUP ||
+            sig == SIGQUIT || sig == SIGKILL) {
+            g_message("ns_watchdog: browser terminated by signal %d — stopping",
+                      sig);
+            return FALSE;
+        }
+        g_warning("ns_watchdog: browser stopped by signal %d", sig);
+        return TRUE;
+    }
+#endif
+    g_warning("ns_watchdog: browser exited with code %d", code);
+    return TRUE;
+}
+
+/* Counts a failure; FALSE when there were too many in a short time. */
+static gboolean
+ns_watchdog_count_restart(ns_watchdog *wd)
 {
     gint64 now = ns_time_monotonic_us();
     if (now - wd->burst_start_us > (gint64)NS_WATCHDOG_BURST_SECS * G_USEC_PER_SEC) {
@@ -398,131 +395,11 @@ ns_watchdog_schedule_restart(ns_watchdog *wd)
                   wd->burst_count, NS_WATCHDOG_BURST_SECS);
         ns_watchdog_report_failure(
             "The browser repeatedly exited during startup.");
-        wd->exit_status = 1;
-        g_main_loop_quit(wd->loop);
-        return;
-    }
-    g_message("ns_watchdog: restarting browser (attempt %d)", wd->burst_count);
-    g_timeout_add(NS_WATCHDOG_BACKOFF_MS, ns_watchdog_respawn_cb, wd);
-}
-
-/* Child-exit handler: stops on clean exit or termination signals, else restarts. */
-static void
-ns_watchdog_child_exited(GPid pid, gint status, gpointer user_data)
-{
-    ns_watchdog *wd = user_data;
-    g_spawn_close_pid(pid);
-    wd->have_pid = FALSE;
-    wd->watch_id = 0;
-    if (ns_time_monotonic_us() - wd->spawned_us >
-        (gint64)NS_WATCHDOG_STABLE_SECS * G_USEC_PER_SEC)
-        wd->recover_streak = 0;
-
-    if (wd->stopping) {
-        g_main_loop_quit(wd->loop);
-        return;
-    }
-
-    gboolean clean;
-#ifdef G_OS_WIN32
-    clean = (status == 0);
-#else
-    clean = WIFEXITED(status) && WEXITSTATUS(status) == 0;
-#endif
-    if (clean) {
-        wd->exit_status = 0;
-        g_main_loop_quit(wd->loop);
-        return;
-    }
-
-#ifdef G_OS_WIN32
-    g_warning("ns_watchdog: browser exited abnormally (code %d)", status);
-#else
-    if (WIFSIGNALED(status)) {
-        int sig = WTERMSIG(status);
-        if (sig == SIGTERM || sig == SIGINT || sig == SIGHUP ||
-            sig == SIGQUIT || sig == SIGKILL) {
-            g_message("ns_watchdog: browser terminated by signal %d — stopping",
-                      sig);
-            wd->exit_status = 0;
-            g_main_loop_quit(wd->loop);
-            return;
-        }
-        g_warning("ns_watchdog: browser stopped by signal %d", sig);
-    } else {
-        g_warning("ns_watchdog: browser exited with code %d", WEXITSTATUS(status));
-    }
-#endif
-    ns_watchdog_schedule_restart(wd);
-}
-
-/* Launches the browser child (optionally in recovery mode) and watches for its exit. */
-static gboolean
-ns_watchdog_spawn(ns_watchdog *wd, gboolean recover)
-{
-    GError *err = NULL;
-    GPid pid = 0;
-#ifdef G_OS_WIN32
-    gboolean ok = ns_watchdog_spawn_win32(wd, recover, &pid, &err);
-#else
-    char **envp = g_get_environ();
-    if (recover)
-        envp = g_environ_setenv(envp, NS_WATCHDOG_RECOVER_ENV, "1", TRUE);
-    else
-        envp = g_environ_unsetenv(envp, NS_WATCHDOG_RECOVER_ENV);
-    gboolean ok = g_spawn_async(NULL, wd->child_argv, envp,
-                                G_SPAWN_DO_NOT_REAP_CHILD,
-                                NULL, NULL, &pid, &err);
-    g_strfreev(envp);
-#endif
-    if (!ok) {
-        g_warning("ns_watchdog: failed to launch browser: %s",
-                  err ? err->message : "unknown error");
-        char *detail = g_strdup_printf("Failed to launch the browser process: %s",
-                                       err ? err->message : "unknown error");
-        ns_watchdog_report_failure(detail);
-        g_free(detail);
-        g_clear_error(&err);
-        wd->exit_status = 1;
-        g_main_loop_quit(wd->loop);
         return FALSE;
     }
-    wd->pid = pid;
-    wd->spawned_us = ns_time_monotonic_us();
-    wd->have_pid = TRUE;
-    wd->watch_id = g_child_watch_add(pid, ns_watchdog_child_exited, wd);
+    g_message("ns_watchdog: restarting browser (attempt %d)", wd->burst_count);
     return TRUE;
 }
-
-#ifndef G_OS_WIN32
-static gboolean
-ns_watchdog_force_kill_cb(gpointer user_data)
-{
-    ns_watchdog *wd = user_data;
-    if (wd->have_pid)
-        ns_watchdog_kill(wd->pid, TRUE);
-    return G_SOURCE_REMOVE;
-}
-
-/* SIGINT/SIGTERM handler: asks the child to stop, force-killing after a grace period. */
-static gboolean
-ns_watchdog_signal_cb(gpointer user_data)
-{
-    ns_watchdog *wd = user_data;
-    if (!wd->stopping) {
-        wd->stopping = TRUE;
-        wd->exit_status = 0;
-        if (wd->have_pid) {
-            ns_watchdog_kill(wd->pid, FALSE);
-            g_timeout_add_seconds(NS_WATCHDOG_STOP_GRACE_SECS,
-                                  ns_watchdog_force_kill_cb, wd);
-        } else {
-            g_main_loop_quit(wd->loop);
-        }
-    }
-    return G_SOURCE_CONTINUE;
-}
-#endif
 
 /* Builds child argv without watchdog flags, adding the child flag and session path. */
 static char **
@@ -546,10 +423,10 @@ ns_watchdog_build_child_argv(const char *self_exe, int argc, char **argv,
 }
 
 /* Supervisor main: runs and restarts the browser child; returns its final exit status.
- * The supervisor is a process of its own that only spawns and watches the
- * browser, so it keeps GLib's main loop: its child watch and (on Unix)
- * signal sources are OS-process services GLib implements per platform,
- * which the SDL-based NsLoop does not provide. */
+ * The supervisor is a process of its own that only starts the browser and
+ * waits for it, so it needs no event loop: it starts the browser with
+ * SDL's process API and blocks until it exits. On Unix, SIGINT and
+ * SIGTERM are passed on to the browser from their handlers. */
 int
 ns_watchdog_run_supervisor(const char *self_exe, int argc, char **argv)
 {
@@ -563,25 +440,35 @@ ns_watchdog_run_supervisor(const char *self_exe, int argc, char **argv)
 
     wd.child_argv = ns_watchdog_build_child_argv(self_exe, argc, argv,
                                                  wd.session_path);
-    wd.loop = g_main_loop_new(NULL, FALSE);
     wd.burst_start_us = ns_time_monotonic_us();
 
 #ifndef G_OS_WIN32
-    g_unix_signal_add(SIGINT, ns_watchdog_signal_cb, &wd);
-    g_unix_signal_add(SIGTERM, ns_watchdog_signal_cb, &wd);
+    ns_watchdog_install_signals();
 #endif
 
     g_message("ns_watchdog: supervising browser");
 
-    if (ns_watchdog_spawn(&wd, FALSE))
-        g_main_loop_run(wd.loop);
-
-    if (wd.watch_id) g_source_remove(wd.watch_id);
-    if (wd.have_pid) {
-        ns_watchdog_kill(wd.pid, TRUE);
-        g_spawn_close_pid(wd.pid);
+    /* Only the first retry of a crash streak runs in recovery mode. */
+    gboolean recover = FALSE;
+    while (!ns_watchdog_stopping()) {
+        int code = 0;
+        if (!ns_watchdog_spawn(&wd, recover) || !ns_watchdog_wait(&wd, &code)) {
+            wd.exit_status = 1;
+            break;
+        }
+        if (ns_time_monotonic_us() - wd.spawned_us >
+            (gint64)NS_WATCHDOG_STABLE_SECS * G_USEC_PER_SEC)
+            wd.recover_streak = 0;
+        if (ns_watchdog_stopping() || !ns_watchdog_should_restart(code))
+            break;
+        if (!ns_watchdog_count_restart(&wd)) {
+            wd.exit_status = 1;
+            break;
+        }
+        SDL_Delay(NS_WATCHDOG_BACKOFF_MS);
+        recover = wd.recover_streak++ == 0;
     }
-    g_main_loop_unref(wd.loop);
+
     ns_fs_unlink(wd.session_path);
     g_strfreev(wd.child_argv);
     g_free(wd.session_path);
