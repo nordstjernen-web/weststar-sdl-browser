@@ -39,6 +39,11 @@ typedef struct {
     int                  unchanged;
     int                  n_damage;
     int                 *damage;
+    /* A scrolled frame painted from the one before it: that frame's pixels
+     * moved up by blit_dy and left by blit_dx device pixels, and then the
+     * damage rectangles (the exposed strips among them) were painted. */
+    int                  blit_dx;
+    int                  blit_dy;
     guint64              gen;
     guint64              base_gen;
     const unsigned char *pixels;

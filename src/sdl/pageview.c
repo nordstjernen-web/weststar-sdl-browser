@@ -89,12 +89,16 @@ typedef struct {
     int         security;
     char       *download;
     char       *clipboard;
-    /* Frame pixels: the whole frame, or the bounding box of the damage. */
+    /* Frame pixels: the whole frame (px_w by px_h, px_stride bytes a
+     * row), or for a patch the damaged rectangles one after another, each
+     * with rows of its own width. A patch may start with a scroll: the
+     * texture's pixels move up by blit_dy and left by blit_dx first. */
     guint8     *pixels;
-    int         px_x, px_y, px_w, px_h, px_stride;
+    int         px_w, px_h, px_stride;
     gboolean    is_patch;
     int        *damage;
     int         n_damage;
+    int         blit_dx, blit_dy;
     guint64     gen, base_gen;
     char       *href;
     char       *cursor;
@@ -119,6 +123,7 @@ struct NsPageView {
     /* Main-thread side. */
     SDL_Renderer    *renderer;
     SDL_Texture     *texture;
+    SDL_Texture     *texture_back;  /* the other of the pair a scroll swaps */
     int              tex_w, tex_h;
     guint64          frame_gen;
     gboolean         have_frame;
@@ -201,6 +206,8 @@ pv_free(NsPageView *v)
 {
     if (v->texture)
         SDL_DestroyTexture(v->texture);
+    if (v->texture_back)
+        SDL_DestroyTexture(v->texture_back);
     if (v->history)
         g_ptr_array_unref(v->history);
     g_free(v->current_url);
@@ -279,43 +286,42 @@ stage_full(Res *res, const guint8 *px, int w, int h, int stride)
         return;
     for (int y = 0; y < h; y++)
         memcpy(res->pixels + (gsize)y * row, px + (gsize)y * stride, row);
-    res->px_x = res->px_y = 0;
     res->px_w = w;
     res->px_h = h;
     res->px_stride = (int)row;
     res->is_patch = FALSE;
 }
 
-/* Copies the damaged rectangles into one buffer covering their bounding box. */
+/* Copies the damaged rectangles, one after another: a scroll's patch is a
+ * strip at one edge and perhaps a fixed header at the other, whose
+ * bounding box would be the whole frame. */
 static gboolean
-stage_patch(Res *res, const guint8 *px, int stride, const int *rects, int n)
+stage_patch(Res *res, const guint8 *px, int stride, const int *rects, int n,
+            int frame_w, int frame_h)
 {
-    int x0 = G_MAXINT, y0 = G_MAXINT, x1 = G_MININT, y1 = G_MININT;
+    gsize total = 0;
     for (int i = 0; i < n; i++) {
-        x0 = MIN(x0, rects[4 * i]);
-        y0 = MIN(y0, rects[4 * i + 1]);
-        x1 = MAX(x1, rects[4 * i] + rects[4 * i + 2]);
-        y1 = MAX(y1, rects[4 * i + 1] + rects[4 * i + 3]);
+        const int *r = rects + 4 * i;
+        if (r[0] < 0 || r[1] < 0 || r[2] <= 0 || r[3] <= 0 ||
+            r[0] + r[2] > frame_w || r[1] + r[3] > frame_h)
+            return FALSE;
+        total += (gsize)r[2] * 4u * (gsize)r[3];
     }
-    if (x1 <= x0 || y1 <= y0)
+    if (total == 0)
         return FALSE;
-    int w = x1 - x0, h = y1 - y0;
-    gsize row = (gsize)w * 4u;
-    res->pixels = g_try_malloc0(row * (gsize)h);
+    res->pixels = g_try_malloc(total);
     if (!res->pixels)
         return FALSE;
+    guint8 *out = res->pixels;
     for (int i = 0; i < n; i++) {
-        int rx = rects[4 * i], ry = rects[4 * i + 1];
-        gsize len = (gsize)rects[4 * i + 2] * 4u;
-        for (int y = ry; y < ry + rects[4 * i + 3]; y++)
-            memcpy(res->pixels + (gsize)(y - y0) * row + (gsize)(rx - x0) * 4u,
-                   px + (gsize)y * stride + (gsize)rx * 4u, len);
+        const int *r = rects + 4 * i;
+        gsize row = (gsize)r[2] * 4u;
+        for (int y = r[1]; y < r[1] + r[3]; y++, out += row)
+            memcpy(out, px + (gsize)y * stride + (gsize)r[0] * 4u, row);
     }
-    res->px_x = x0;
-    res->px_y = y0;
-    res->px_w = w;
-    res->px_h = h;
-    res->px_stride = (int)row;
+    res->px_w = frame_w;
+    res->px_h = frame_h;
+    res->px_stride = 0;
     res->is_patch = TRUE;
     return TRUE;
 }
@@ -362,10 +368,12 @@ run_render(NsPageView *v, ns_page_session *s, Req *req)
             gboolean patched = FALSE;
             if (fr.n_damage > 0) {
                 patched = stage_patch(res, fr.pixels, fr.stride, fr.damage,
-                                      fr.n_damage);
+                                      fr.n_damage, fr.width, fr.height);
                 if (patched) {
                     res->damage = fr.damage;
                     res->n_damage = fr.n_damage;
+                    res->blit_dx = fr.blit_dx;
+                    res->blit_dy = fr.blit_dy;
                     fr.damage = NULL;
                     fr.n_damage = 0;
                 }
@@ -724,44 +732,94 @@ arm_anim(NsPageView *v)
     request_render(v);
 }
 
+/* A page texture: opaque, drawn pixel for pixel, and one SDL can draw
+ * into, which is how a scroll moves the page (scroll_texture). */
+static SDL_Texture *
+create_page_texture(NsPageView *v, int w, int h)
+{
+    SDL_Texture *texture = SDL_CreateTexture(v->renderer,
+                                             SDL_PIXELFORMAT_ARGB8888,
+                                             SDL_TEXTUREACCESS_TARGET, w, h);
+    if (!texture)
+        return NULL;
+    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_NONE);
+    SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
+    return texture;
+}
+
+static void
+destroy_textures(NsPageView *v)
+{
+    if (v->texture)
+        SDL_DestroyTexture(v->texture);
+    if (v->texture_back)
+        SDL_DestroyTexture(v->texture_back);
+    v->texture = v->texture_back = NULL;
+    v->tex_w = v->tex_h = 0;
+    v->have_frame = FALSE;
+}
+
 static gboolean
 ensure_texture(NsPageView *v, int w, int h)
 {
     if (v->texture && v->tex_w == w && v->tex_h == h)
         return TRUE;
-    if (v->texture)
-        SDL_DestroyTexture(v->texture);
-    v->texture = SDL_CreateTexture(v->renderer, SDL_PIXELFORMAT_ARGB8888,
-                                   SDL_TEXTUREACCESS_STREAMING, w, h);
+    destroy_textures(v);
+    v->texture = create_page_texture(v, w, h);
     v->tex_w = v->texture ? w : 0;
     v->tex_h = v->texture ? h : 0;
-    v->have_frame = FALSE;
-    if (!v->texture)
+    return v->texture != NULL;
+}
+
+/* Scrolls the page on the GPU: the frame's pixels move up by dy and left
+ * by dx, as the engine moved its own copy before painting what the scroll
+ * exposed. SDL cannot draw a texture onto itself, so the page is a pair of
+ * textures and each scroll draws one into the other. The strips the move
+ * leaves behind hold old pixels until the patch's rectangles, which cover
+ * them, are uploaded. */
+static gboolean
+scroll_texture(NsPageView *v, int dx, int dy)
+{
+    int w = v->tex_w - ABS(dx), h = v->tex_h - ABS(dy);
+    if (w <= 0 || h <= 0)
         return FALSE;
-    /* Page frames are opaque, and drawn pixel for pixel. */
-    SDL_SetTextureBlendMode(v->texture, SDL_BLENDMODE_NONE);
-    SDL_SetTextureScaleMode(v->texture, SDL_SCALEMODE_NEAREST);
+    if (!v->texture_back)
+        v->texture_back = create_page_texture(v, v->tex_w, v->tex_h);
+    if (!v->texture_back)
+        return FALSE;
+    SDL_FRect src = { (float)MAX(dx, 0), (float)MAX(dy, 0), (float)w, (float)h };
+    SDL_FRect dst = { (float)MAX(-dx, 0), (float)MAX(-dy, 0), (float)w, (float)h };
+    SDL_Texture *target = SDL_GetRenderTarget(v->renderer);
+    if (!SDL_SetRenderTarget(v->renderer, v->texture_back))
+        return FALSE;
+    bool drawn = SDL_RenderTexture(v->renderer, v->texture, &src, &dst);
+    SDL_SetRenderTarget(v->renderer, target);
+    if (!drawn)
+        return FALSE;
+    SDL_Texture *front = v->texture_back;
+    v->texture_back = v->texture;
+    v->texture = front;
     return TRUE;
 }
 
 static gboolean
 apply_patch(NsPageView *v, const Res *res)
 {
-    if (!v->texture || !v->have_frame || v->frame_gen != res->base_gen)
+    if (!v->texture || !v->have_frame || v->frame_gen != res->base_gen ||
+        res->px_w != v->tex_w || res->px_h != v->tex_h)
         return FALSE;
-    for (int i = 0; i < res->n_damage; i++) {
-        const int *r = res->damage + 4 * i;
-        if (r[0] < 0 || r[1] < 0 || r[0] + r[2] > v->tex_w ||
-            r[1] + r[3] > v->tex_h)
-            return FALSE;
+    if ((res->blit_dx || res->blit_dy) &&
+        !scroll_texture(v, res->blit_dx, res->blit_dy)) {
+        v->have_frame = FALSE;
+        return FALSE;
     }
+    /* stage_patch checked the rectangles against the frame's size. */
+    const guint8 *src = res->pixels;
     for (int i = 0; i < res->n_damage; i++) {
         const int *r = res->damage + 4 * i;
         SDL_Rect rect = { r[0], r[1], r[2], r[3] };
-        const guint8 *src = res->pixels +
-            (gsize)(r[1] - res->px_y) * res->px_stride +
-            (gsize)(r[0] - res->px_x) * 4u;
-        SDL_UpdateTexture(v->texture, &rect, src, res->px_stride);
+        SDL_UpdateTexture(v->texture, &rect, src, r[2] * 4);
+        src += (gsize)r[2] * 4u * (gsize)r[3];
     }
     v->frame_gen = res->gen;
     return TRUE;
@@ -917,11 +975,7 @@ ns_page_view_present(NsPageView *v)
 void
 ns_page_view_device_reset(NsPageView *v)
 {
-    if (v->texture)
-        SDL_DestroyTexture(v->texture);
-    v->texture = NULL;
-    v->tex_w = v->tex_h = 0;
-    v->have_frame = FALSE;
+    destroy_textures(v);
     v->frame_force_full = TRUE;
     request_render(v);
 }
@@ -2239,10 +2293,7 @@ ns_page_view_close(NsPageView *v)
     push_req(v, req);
     v->closed = TRUE;
     v->notify = NULL;
-    if (v->texture) {
-        SDL_DestroyTexture(v->texture);
-        v->texture = NULL;
-    }
+    destroy_textures(v);
     v->renderer = NULL;
     pv_unref(v);
 }

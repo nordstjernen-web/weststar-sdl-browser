@@ -468,7 +468,8 @@ session_blit(ns_page_session *s, int dx, int dy, int vw, int vh)
 /* Reuses pixels on integer-pixel scrolls, adding exposed strips and fixed bands to damage. */
 static gboolean
 session_scroll_blit(ns_page_session *s, long sx, long sy, int vw, int vh,
-                    double scale, gfx_region_t *region)
+                    double scale, gfx_region_t *region, int *out_dx,
+                    int *out_dy)
 {
     double ddx = (double)(sx - s->frame_sx) * scale;
     double ddy = (double)(sy - s->frame_sy) * scale;
@@ -482,6 +483,8 @@ session_scroll_blit(ns_page_session *s, long sx, long sy, int vw, int vh,
         return FALSE;
     }
     session_blit(s, dx, dy, vw, vh);
+    *out_dx = dx;
+    *out_dy = dy;
     gfx_rectangle_int_t exposed[2] = {
         { dx > 0 ? vw - dx : 0, 0, abs(dx), vh },
         { 0, dy > 0 ? vh - dy : 0, vw, abs(dy) },
@@ -499,14 +502,18 @@ session_scroll_blit(ns_page_session *s, long sx, long sy, int vw, int vh,
     return TRUE;
 }
 
-/* Builds the device-pixel repaint region; NULL means a full repaint is needed. */
+/* Builds the device-pixel repaint region; NULL means a full repaint is needed.
+ * *blit_dx and *blit_dy get how far a scroll moved the frame's pixels first. */
 static gfx_region_t *
 session_damage_region(ns_page_session *s, GArray *damage, long sx, long sy,
-                      int vw, int vh, double scale)
+                      int vw, int vh, double scale, int *blit_dx,
+                      int *blit_dy)
 {
     gfx_region_t *region = gfx_region_create();
+    *blit_dx = *blit_dy = 0;
     if ((sx != s->frame_sx || sy != s->frame_sy) &&
-        !session_scroll_blit(s, sx, sy, vw, vh, scale, region)) {
+        !session_scroll_blit(s, sx, sy, vw, vh, scale, region, blit_dx,
+                             blit_dy)) {
         gfx_region_destroy(region);
         return NULL;
     }
@@ -755,10 +762,12 @@ ns_page_session_render(ns_page_session *s, int width, int height,
     GArray *damage = g_array_new(FALSE, FALSE, sizeof(ns_damage_rect));
     int damage_full = ns_browser_take_damage(s->cur, (int)sx, (int)sy, damage);
     gfx_region_t *region = NULL;
+    int blit_dx = 0, blit_dy = 0;
     if (!unchanged && !damage_full && session_damage_mode() > 0 &&
         s->frame_valid && vw == s->frame_w && vh == s->frame_h &&
         scale == s->frame_scale)
-        region = session_damage_region(s, damage, sx, sy, vw, vh, scale);
+        region = session_damage_region(s, damage, sx, sy, vw, vh, scale,
+                                       &blit_dx, &blit_dy);
     g_array_free(damage, TRUE);
     gboolean scrolled = sx != s->frame_sx || sy != s->frame_sy;
     if (region && gfx_region_is_empty(region) && !scrolled) {
@@ -771,8 +780,13 @@ ns_page_session_render(ns_page_session *s, int width, int height,
         int painted;
         if (region) {
             painted = session_paint_region(s, region, sx, sy, vw, vh, scale);
-            if (!scrolled)
-                session_frame_damage(out, region);
+            /* The shell gets what was painted and, for a scroll, how far
+             * the rest moved: it moves its own copy the same way. */
+            session_frame_damage(out, region);
+            if (out->n_damage > 0) {
+                out->blit_dx = blit_dx;
+                out->blit_dy = blit_dy;
+            }
         } else {
             painted = session_paint_band(s, s->fb, 0, vw, 0, vh, sx, sy,
                                          vw, vh, scale);
@@ -794,6 +808,7 @@ ns_page_session_render(ns_page_session *s, int width, int height,
                    (size_t)stride * (size_t)vh);
             s->frame_valid = 0;
             out->n_damage = 0;
+            out->blit_dx = out->blit_dy = 0;
             g_clear_pointer(&out->damage, free);
         }
     }

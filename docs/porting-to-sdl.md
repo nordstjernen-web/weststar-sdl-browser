@@ -40,15 +40,21 @@ So the shell goes first, and Cairo after it:
    at all. PDF export (`--export=pdf:`) and the dormant print path
    drew through Cairo's PDF and recording surfaces; they are removed for
    now, to come back in a form that does not need Cairo.
-5. **Composite with SDL textures.** Next. Today the engine paints each
+5. **Composite with SDL textures.** Started. The engine paints each
    frame (or its damaged rectangles) on the CPU and the shell uploads it
-   to one texture. Content that moves without changing — the page while
+   to a texture. Content that moves without changing — the page while
    it scrolls, `position: fixed` and `sticky` boxes, elements animating
    only `transform` or `opacity`, canvases and animated images — can
    instead be painted once into its own texture and moved or faded by
-   SDL's renderer on the GPU each frame. That needs a layer tree from the
-   engine (which boxes get their own layer, and their transforms and
-   opacities), handed to the shell with each frame.
+   SDL's renderer on the GPU each frame.
+   - *The page while it scrolls* is done (see Scrolling below): SDL moves
+     the page's texture, and only the strip the scroll exposed, and any
+     `position: fixed` boxes, are painted and uploaded.
+   - Next, a layer tree from the engine (which boxes get their own
+     layer, and their transforms and opacities), handed to the shell with
+     each frame, for the rest: then a fixed header is a texture of its
+     own that is not repainted at all, and a scroll further than the
+     window is tall no longer repaints everything.
 6. **Portability: SDL as the platform.** Weststar should run wherever SDL
    does — Linux and today's Windows, and in time Windows XP and the Amiga
    family (AmigaOS 4, MorphOS, AROS) — so platform services come from SDL
@@ -307,6 +313,29 @@ GTask, delivers each result on the loop of the thread that started it.
 GLib's loop remains only in the watchdog's supervisor process, which
 spawns the browser and watches it as an OS child process and for Unix
 signals.
+
+## Scrolling
+
+On a scroll by a whole number of device pixels, the engine's page session
+keeps what it has already painted: it moves its frame buffer by the
+scroll's distance and repaints the strip that came into view, and the
+places where `position: fixed` boxes were and now are
+(`session_scroll_blit`, `page_session.c`; a page with `sticky` boxes,
+fixed backgrounds or 3D transforms is repainted whole). The frame it
+hands to the shell says how far the pixels moved (`blit_dx`, `blit_dy`)
+and which rectangles were painted.
+
+The shell does the same to its copy with SDL (`scroll_texture`,
+`pageview.c`). SDL cannot draw a texture onto itself, so the page is a
+pair of textures, each one a render target: a scroll draws the front
+texture into the back one at the offset, the two swap, and the painted
+rectangles are uploaded into the new front. A scrolled frame used to be
+copied whole out of the engine and uploaded whole; in a 1200×820 window that copy
+took 0.86 ms and now takes 0.04 ms for a wheel step, and the upload
+shrinks the same way. The window's contents after a series of wheel,
+arrow, Page Down and End scrolls are identical, pixel for pixel, to those
+of full repaints (`NS_DAMAGE=0`), with and without fixed boxes on the
+page.
 
 ## What is gone, and where it went
 

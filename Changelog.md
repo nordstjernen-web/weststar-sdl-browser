@@ -19,6 +19,8 @@ The first Weststar release: Northstar 1.0.27 ported from GTK 4 to SDL3.
 * fontconfig is optional: with `-Dfontconfig=disabled`, or where it is
   not installed, the browser finds the fonts in the platform's font
   folders itself (`src/fc/`), for platforms that have no fontconfig.
+* Scrolling moves the page's texture with SDL's renderer; only the strip
+  that came into view, and fixed boxes, are painted and uploaded.
 * `-Dca_bundle=<file>` compiles a set of CA certificates into the
   browser, for systems with no root certificates or with ones too old;
   `NS_CA_BUNDLE` chooses a certificate file, or `builtin`.
