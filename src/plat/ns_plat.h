@@ -30,10 +30,7 @@
 #define NS_PLAT_H
 
 #include <stddef.h>
-#include <SDL3/SDL_stdinc.h>
-#include <SDL3/SDL_atomic.h>
-#include <SDL3/SDL_mutex.h>
-#include <SDL3/SDL_thread.h>
+#include "plat/ns_sdl.h"
 
 /* ---- Mutexes ---- */
 

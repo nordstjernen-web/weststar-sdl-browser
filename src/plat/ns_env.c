@@ -5,7 +5,7 @@
 
 #include "plat/ns_env.h"
 
-#include <SDL3/SDL_error.h>
+#include "plat/ns_sdl.h"
 
 #ifdef _WIN32
 #  include <stdlib.h>
@@ -47,25 +47,36 @@ ns_setenv(const char *name, const char *value, bool overwrite)
     if (!ns_env_name_ok(name) || !value) return false;
     /* Takes SDL's copy first, if it is not taken yet, so the C library's
      * value below cannot be missed by or doubled into it. */
+#ifndef NS_SDL2
     SDL_Environment *env = SDL_GetEnvironment();
+#endif
     if (!overwrite && SDL_getenv(name)) return true;
 #ifdef _WIN32
     if (!ns_env_crt_put(name, value)) return false;
 #else
     if (SDL_setenv_unsafe(name, value, 1) != 0) return false;
 #endif
+#ifdef NS_SDL2
+    /* SDL2 keeps no copy of the environment: the C library's is the one. */
+    return true;
+#else
     return env ? SDL_SetEnvironmentVariable(env, name, value, true) : true;
+#endif
 }
 
 void
 ns_unsetenv(const char *name)
 {
     if (!ns_env_name_ok(name)) return;
+#ifndef NS_SDL2
     SDL_Environment *env = SDL_GetEnvironment();
+#endif
 #ifdef _WIN32
     (void)ns_env_crt_put(name, NULL);
 #else
     (void)SDL_unsetenv_unsafe(name);
 #endif
+#ifndef NS_SDL2
     if (env) (void)SDL_UnsetEnvironmentVariable(env, name);
+#endif
 }

@@ -10,10 +10,7 @@
 
 #include "brand.h"
 
-#include <SDL3/SDL_error.h>
-#include <SDL3/SDL_iostream.h>
-#include <SDL3/SDL_thread.h>
-#include <SDL3/SDL_timer.h>
+#include "plat/ns_sdl.h"
 #include <stdlib.h>
 #include <string.h>
 

@@ -1,4 +1,4 @@
-/* Weststar SDL Browser — the platform layer on SDL3: lazy SDL locks,
+/* Weststar SDL Browser — the platform layer on SDL: lazy SDL locks,
  * threads with pointer results, thread-local values and clocks.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -6,10 +6,7 @@
 
 #include "plat/ns_plat.h"
 
-#include <SDL3/SDL_log.h>
-#include <SDL3/SDL_properties.h>
-#include <SDL3/SDL_time.h>
-#include <SDL3/SDL_timer.h>
+#include "plat/ns_sdl.h"
 #include <stdlib.h>
 
 /* An SDL lock that cannot be created leaves nothing to lock with: like
@@ -134,6 +131,14 @@ ns_thread_try_new(const char *name, NsThreadFunc fn, void *data,
     t->fn = fn;
     t->data = data;
     SDL_SetAtomicInt(&t->refs, 2);
+#ifdef NS_SDL2
+    if (stack_bytes) {
+        t->thread = SDL_CreateThreadWithStackSize(ns_thread_main, name,
+                                                  stack_bytes, t);
+    } else {
+        t->thread = SDL_CreateThread(ns_thread_main, name, t);
+    }
+#else
     if (stack_bytes) {
         SDL_PropertiesID props = SDL_CreateProperties();
         if (props) {
@@ -152,6 +157,7 @@ ns_thread_try_new(const char *name, NsThreadFunc fn, void *data,
     } else {
         t->thread = SDL_CreateThread(ns_thread_main, name, t);
     }
+#endif
     if (!t->thread) {
         SDL_free(t);
         return NULL;

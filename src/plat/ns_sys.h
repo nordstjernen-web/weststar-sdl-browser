@@ -11,7 +11,7 @@
 #ifndef NS_SYS_H
 #define NS_SYS_H
 
-#include <SDL3/SDL_stdinc.h>
+#include "plat/ns_sdl.h"
 #include <stdbool.h>
 
 /* Logical processors, at least 1. */

@@ -138,8 +138,20 @@ So the shell goes first, and Cairo after it:
       still ask the C library for is the environment, the locale's
       character set, files and folders, and `stderr`; whether that needs
       changing is for the first platform without them to say (stage 7).
-   6. *SDL2 as well as SDL3* in the shell, since the Amiga-family ports
-      and XP-capable builds are SDL2.
+   6. *SDL2 as well as SDL3*, since the Amiga-family ports and
+      XP-capable builds are SDL2. Started, from the bottom: the code
+      stays written against SDL3, and `src/plat/ns_sdl.h`, which the
+      sources include in place of SDL's headers, gives an SDL2 build
+      (`NS_SDL2`) the SDL3 names: other spellings of the same thing,
+      SDL3's true-for-success convention over SDL2's zero, and in
+      `ns_sdl2.c` what SDL2 lacks, over POSIX or Win32 — files and
+      folders, calendar time, thread-local keys that are ready when
+      zeroed, once-only initialisation, and read-write locks as plain
+      mutexes. The platform layer (threads, locks, files, environment,
+      system services) and the font finder build and pass their tests on
+      SDL2 in CI. Still SDL3's alone: the window and its renderer, the
+      event loop, audio, the watchdog's child process, and the bundled
+      GLib's thread file.
    7. *Toolchains and targets*: the code kept to C11 (C23 `#embed`
       already has a fallback; the portable CI job builds with
       `-Dc_std=gnu11` and warnings as errors), a 32-bit Windows build against the old

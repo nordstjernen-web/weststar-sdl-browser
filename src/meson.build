@@ -176,6 +176,7 @@ northstar_engine_sources = files(
   'plat/ns_job.c',
   'plat/ns_loop.c',
   'plat/ns_plat.c',
+  'plat/ns_sdl2.c',
   'plat/ns_sys.c',
   'render.c',
   'safebrowsing.c',

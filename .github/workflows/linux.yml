@@ -45,7 +45,8 @@ jobs:
             libharfbuzz-dev libfribidi-dev libfontconfig-dev \
             libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev \
             libglib2.0-dev zlib1g-dev libbrotli-dev libzstd-dev \
-            libopusfile-dev libvorbis-dev xvfb xauth fonts-dejavu-core
+            libopusfile-dev libvorbis-dev xvfb xauth fonts-dejavu-core \
+            libsdl2-dev
 
       - name: Configure and build
         run: |
@@ -71,10 +72,13 @@ jobs:
 
       - name: nsfc and SDL layer tests
         # The in-tree font finder, built and tested here although this
-        # build finds its fonts through fontconfig.
+        # build finds its fonts through fontconfig; and both again on
+        # SDL2 (libsdl2-dev), which the browser itself does not use yet.
         run: |
           NSFC_TEST_FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf \
             meson test -C builddir --suite nsfc --suite plat --print-errorlogs
+          meson test -C builddir --list | grep -q 'ns_sys-sdl2'
+          meson test -C builddir --list | grep -q 'nsfc-sdl2'
 
       - name: No GTK, Cairo or GIO in the binary
         run: |

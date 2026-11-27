@@ -9,8 +9,7 @@
 #include <fontconfig/fontconfig.h>
 #include <fontconfig/fcfreetype.h>
 
-#include <SDL3/SDL_atomic.h>
-#include <SDL3/SDL_stdinc.h>
+#include "plat/ns_sdl.h"
 #include <stdbool.h>
 #include <stddef.h>
 

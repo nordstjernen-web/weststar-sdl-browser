@@ -24,7 +24,7 @@
 #ifndef NS_ENV_H
 #define NS_ENV_H
 
-#include <SDL3/SDL_stdinc.h>
+#include "plat/ns_sdl.h"
 
 /* The variable's value, or NULL; valid until the variable is next changed. */
 static inline const char *ns_getenv(const char *name) { return SDL_getenv(name); }

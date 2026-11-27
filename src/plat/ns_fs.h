@@ -47,8 +47,7 @@
 
 #include <stddef.h>
 #include <stdio.h>
-#include <SDL3/SDL_stdinc.h>
-#include <SDL3/SDL_filesystem.h>
+#include "plat/ns_sdl.h"
 
 /* ---- The user's folders ----
  * Each is computed once and cached for the life of the process; never NULL. */

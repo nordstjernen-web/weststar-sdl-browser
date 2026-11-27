@@ -32,3 +32,25 @@ test(
   ),
   suite: 'nsfc',
 )
+
+# And against SDL2, with the platform layer's SDL2 side (src/plat/).
+if sdl2_dep.found()
+  test(
+    'nsfc-sdl2',
+    executable(
+      'nsfc-test-sdl2',
+      files('tests/nsfc-test.c') + nsfc_sources + files(
+        '../plat/ns_env.c',
+        '../plat/ns_fs.c',
+        '../plat/ns_plat.c',
+        '../plat/ns_sdl2.c',
+      ),
+      c_args: ['-DNS_SDL2'],
+      dependencies: [sdl2_dep, libfreetype, libm] +
+        (host_machine.system() == 'windows' ? [cc.find_library('shell32')] : []),
+      include_directories: [nsfc_inc, include_directories('..')],
+      pie: host_machine.system() != 'windows',
+    ),
+    suite: 'nsfc',
+  )
+endif
