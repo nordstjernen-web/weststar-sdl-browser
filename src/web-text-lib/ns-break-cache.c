@@ -27,6 +27,9 @@
 #include "ns-shape-cache.h"
 #include "ns-pango-cache.h"
 
+/* Threads, locks and queues from the SDL layer; see the header. */
+#include "ns-glib-threads.h"
+
 /* default_break() is the single most expensive thing a layout does that does
  * not touch a font: UAX #14 line breaking and UAX #29 grapheme, word and
  * sentence segmentation, one pass with four-character lookaround, over the

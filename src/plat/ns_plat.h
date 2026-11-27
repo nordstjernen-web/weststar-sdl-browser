@@ -151,6 +151,25 @@ void ns_thread_unref(NsThread *thread);
 /* The calling thread's handle, or NULL on a thread not started by ns_thread_*. */
 NsThread *ns_thread_self(void);
 
+/* ---- Queues between threads ---- */
+
+/* A queue any thread may push to and pop from (GAsyncQueue): what a
+ * worker thread takes its commands from. Reference-counted, so that the
+ * thread that made it and the thread that drains it can each let go. */
+typedef struct NsAsyncQueue NsAsyncQueue;
+
+NsAsyncQueue *ns_async_queue_new(void);
+NsAsyncQueue *ns_async_queue_ref(NsAsyncQueue *queue);
+/* Items still queued when the last reference goes are not freed. */
+void ns_async_queue_unref(NsAsyncQueue *queue);
+/* item must not be NULL. */
+void ns_async_queue_push(NsAsyncQueue *queue, void *item);
+/* Waits for an item. */
+void *ns_async_queue_pop(NsAsyncQueue *queue);
+/* The next item, or NULL when the queue is empty. */
+void *ns_async_queue_try_pop(NsAsyncQueue *queue);
+int ns_async_queue_length(NsAsyncQueue *queue);
+
 /* ---- Thread-local values ---- */
 
 typedef struct NsPrivate {

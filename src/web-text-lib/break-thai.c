@@ -23,6 +23,9 @@
 #include "pango-break.h"
 #include "pango-impl-utils.h"
 
+/* Threads, locks and queues from the SDL layer; see the header. */
+#include "ns-glib-threads.h"
+
 #ifdef HAVE_LIBTHAI
 #include <thai/thwchar.h>
 #include <thai/thbrk.h>

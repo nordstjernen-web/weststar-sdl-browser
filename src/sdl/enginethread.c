@@ -19,7 +19,7 @@ typedef struct {
 } Job;
 
 static NsLoop      *g_loop;
-static GAsyncQueue *g_jobs;
+static NsAsyncQueue *g_jobs;
 
 /* Custom source prepare: ready when jobs are queued and the loop is not
  * inside a nested iteration (a job never runs inside another callback). */
@@ -28,7 +28,7 @@ jobs_prepare(void *data, int *timeout_ms)
 {
     (void)data;
     (void)timeout_ms;
-    return ns_loop_depth() == 0 && g_async_queue_length(g_jobs) > 0;
+    return ns_loop_depth() == 0 && ns_async_queue_length(g_jobs) > 0;
 }
 
 /* Runs every queued engine job in order. */
@@ -37,7 +37,7 @@ jobs_dispatch(void *data)
 {
     (void)data;
     Job *job;
-    while ((job = g_async_queue_try_pop(g_jobs))) {
+    while ((job = ns_async_queue_try_pop(g_jobs))) {
         job->fn(job->data);
         g_free(job);
     }
@@ -86,7 +86,7 @@ engine_start(void)
     static NsOnce started;
     if (ns_once_enter(&started)) {
         g_loop = ns_loop_new();
-        g_jobs = g_async_queue_new();
+        g_jobs = ns_async_queue_new();
         engine_spawn();
         ns_once_leave(&started);
     }
@@ -100,6 +100,6 @@ ns_engine_thread_post(NsEngineJob fn, gpointer data)
     Job *job = g_new0(Job, 1);
     job->fn = fn;
     job->data = data;
-    g_async_queue_push(g_jobs, job);
+    ns_async_queue_push(g_jobs, job);
     ns_loop_wakeup(g_loop);
 }

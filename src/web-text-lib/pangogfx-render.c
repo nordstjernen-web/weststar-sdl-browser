@@ -26,6 +26,9 @@
 
 #include "pangogfx-private.h"
 
+/* Threads, locks and queues from the SDL layer; see the header. */
+#include "ns-glib-threads.h"
+
 #define NS_TYPE_PANGO_GFX_RENDERER (ns_pango_gfx_renderer_get_type ())
 
 typedef struct

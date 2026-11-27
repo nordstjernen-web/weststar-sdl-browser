@@ -62,9 +62,12 @@ So the shell goes first, and Cairo after it:
    1. *Threads, locks, condition variables, thread-local data and time*
       move from GLib to a small layer over SDL3 (`src/plat/`): SDL's
       mutexes, condition variables, read-write locks, threads, TLS and
-      clocks. (Done for Weststar's own code; web-text-lib, the Pango fork,
-      still uses GLib's. GLib's GTask worker threads remain until the
-      main loop moves.)
+      clocks. (Done, web-text-lib included: the Pango fork keeps its
+      `GMutex`, `G_LOCK`, `GPrivate` and `GAsyncQueue` spelling, and
+      `ns-glib-threads.h` gives those names the SDL layer's meaning in
+      the files that use them. The browser imports none of GLib's
+      thread, lock or queue functions; what is left is inside GLib
+      itself, `g_once` and GObject's type system.)
    2. *The main loop and timers* move from GLib's `GMainContext` to an
       SDL-based loop with SDL timers; the engine thread gets the same.
       (Done: see Event loop below.)
@@ -107,7 +110,8 @@ So the shell goes first, and Cairo after it:
    6. *SDL2 as well as SDL3* in the shell, since the Amiga-family ports
       and XP-capable builds are SDL2.
    7. *Toolchains and targets*: the code kept to C11 (C23 `#embed`
-      already has a fallback), a 32-bit Windows build against the old
+      already has a fallback; the portable CI job builds with
+      `-Dc_std=gnu11` and warnings as errors), a 32-bit Windows build against the old
       MSVCRT for XP, and an AROS build in an emulator, each in CI.
    Windows XP is the realistic floor on Windows (2000 and 95 lack too much
    of the API a browser needs today, and their hardware the memory); on

@@ -31,6 +31,9 @@
 
 #include "pangogfx-private.h"
 
+/* Threads, locks and queues from the SDL layer; see the header. */
+#include "ns-glib-threads.h"
+
 /* Glyph extents are cached in a small table indexed by the glyph's low
  * bits, as pangocairo did. */
 #define EXTENTS_CACHE_SIZE 256 /* a power of two */

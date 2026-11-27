@@ -34,6 +34,9 @@
 
 #include <hb-ot.h>
 
+/* Threads, locks and queues from the SDL layer; see the header. */
+#include "ns-glib-threads.h"
+
 /* {{{ Harfbuzz shaping */
 /* {{{ Buffer handling */
 

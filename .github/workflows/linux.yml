@@ -140,8 +140,8 @@ jobs:
   portable:
     # The portable build profile: mbedTLS (fetched as a meson subproject)
     # instead of OpenSSL, nsfc, the in-tree font finder, instead of
-    # fontconfig, which is not even installed, and CA certificates compiled
-    # in. Algorithms mbedTLS lacks (EdDSA) must report NotSupportedError
+    # fontconfig, which is not even installed, CA certificates compiled
+    # in, and the C11 language level older toolchains stop at. Algorithms mbedTLS lacks (EdDSA) must report NotSupportedError
     # (SKIP), never fail.
     name: gcc on ubuntu-26.04, portable profile
     runs-on: ubuntu-26.04
@@ -170,7 +170,7 @@ jobs:
         run: |
           meson setup builddir --werror -Db_lto=false -Dpdfjs=disabled \
             -Dcrypto=mbedtls -Dfontconfig=disabled \
-            -Dca_bundle=/etc/ssl/certs/ca-certificates.crt
+            -Dca_bundle=/etc/ssl/certs/ca-certificates.crt -Dc_std=gnu11
           meson compile -C builddir
 
       - name: No libcrypto and no fontconfig in the binary

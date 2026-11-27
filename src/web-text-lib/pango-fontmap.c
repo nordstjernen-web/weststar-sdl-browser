@@ -28,6 +28,9 @@
 #include <stdlib.h>
 #include <math.h>
 
+/* Threads, locks and queues from the SDL layer; see the header. */
+#include "ns-glib-threads.h"
+
 static NsPangoFontset *ns_pango_font_map_real_load_fontset (NsPangoFontMap               *fontmap,
                                                        NsPangoContext               *context,
                                                        const NsPangoFontDescription *desc,

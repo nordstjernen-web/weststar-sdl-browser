@@ -47,6 +47,9 @@
 #include <hb-ft.h>
 #include <fontconfig/fcfreetype.h>
 
+/* Threads, locks and queues from the SDL layer; see the header. */
+#include "ns-glib-threads.h"
+
 
 /* Overview:
  *

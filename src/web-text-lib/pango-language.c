@@ -29,6 +29,9 @@
 #include "pango-language.h"
 #include "pango-impl-utils.h"
 
+/* Threads, locks and queues from the SDL layer; see the header. */
+#include "ns-glib-threads.h"
+
 
 /* We embed a private struct right *before* a where a NsPangoLanguage *
  * points to.

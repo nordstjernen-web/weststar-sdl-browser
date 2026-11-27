@@ -29,6 +29,9 @@
 #include "ns-pango-cache.h"
 #include "pango-impl-utils.h"
 
+/* Threads, locks and queues from the SDL layer; see the header. */
+#include "ns-glib-threads.h"
+
 /* Pango has no cache that outlives a NsPangoLayout, so a browser that measures
  * a run and then paints it, or that asks for min-content and max-content before
  * laying a cell out, shapes the same bytes with the same font several times

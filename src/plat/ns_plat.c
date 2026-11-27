@@ -224,3 +224,121 @@ ns_sleep_us(Sint64 us)
 {
     if (us > 0) SDL_DelayNS((Uint64)us * 1000u);
 }
+
+/* ---- Queues between threads ---- */
+
+typedef struct QueueItem {
+    struct QueueItem *next;
+    void             *item;
+} QueueItem;
+
+struct NsAsyncQueue {
+    SDL_AtomicInt  ref;
+    SDL_Mutex     *lock;
+    SDL_Condition *ready;
+    QueueItem     *head, *tail;
+    int            length;
+};
+
+NsAsyncQueue *
+ns_async_queue_new(void)
+{
+    NsAsyncQueue *queue = SDL_calloc(1, sizeof *queue);
+    if (queue) {
+        queue->lock = SDL_CreateMutex();
+        queue->ready = SDL_CreateCondition();
+    }
+    if (!queue || !queue->lock || !queue->ready) {
+        SDL_LogError(SDL_LOG_CATEGORY_SYSTEM, "ns_async_queue_new: %s",
+                     SDL_GetError());
+        abort();
+    }
+    SDL_SetAtomicInt(&queue->ref, 1);
+    return queue;
+}
+
+NsAsyncQueue *
+ns_async_queue_ref(NsAsyncQueue *queue)
+{
+    SDL_AtomicIncRef(&queue->ref);
+    return queue;
+}
+
+void
+ns_async_queue_unref(NsAsyncQueue *queue)
+{
+    if (!queue || !SDL_AtomicDecRef(&queue->ref))
+        return;
+    while (queue->head) {
+        QueueItem *next = queue->head->next;
+        SDL_free(queue->head);
+        queue->head = next;
+    }
+    SDL_DestroyCondition(queue->ready);
+    SDL_DestroyMutex(queue->lock);
+    SDL_free(queue);
+}
+
+void
+ns_async_queue_push(NsAsyncQueue *queue, void *item)
+{
+    QueueItem *entry = SDL_malloc(sizeof *entry);
+    if (!entry) {
+        SDL_LogError(SDL_LOG_CATEGORY_SYSTEM, "ns_async_queue_push: out of memory");
+        abort();
+    }
+    entry->next = NULL;
+    entry->item = item;
+    SDL_LockMutex(queue->lock);
+    if (queue->tail)
+        queue->tail->next = entry;
+    else
+        queue->head = entry;
+    queue->tail = entry;
+    queue->length++;
+    SDL_SignalCondition(queue->ready);
+    SDL_UnlockMutex(queue->lock);
+}
+
+/* Called with the lock held and the queue not empty. */
+static void *
+queue_take(NsAsyncQueue *queue)
+{
+    QueueItem *entry = queue->head;
+    void *item = entry->item;
+    queue->head = entry->next;
+    if (!queue->head)
+        queue->tail = NULL;
+    queue->length--;
+    SDL_free(entry);
+    return item;
+}
+
+void *
+ns_async_queue_pop(NsAsyncQueue *queue)
+{
+    SDL_LockMutex(queue->lock);
+    while (!queue->head)
+        SDL_WaitCondition(queue->ready, queue->lock);
+    void *item = queue_take(queue);
+    SDL_UnlockMutex(queue->lock);
+    return item;
+}
+
+void *
+ns_async_queue_try_pop(NsAsyncQueue *queue)
+{
+    SDL_LockMutex(queue->lock);
+    void *item = queue->head ? queue_take(queue) : NULL;
+    SDL_UnlockMutex(queue->lock);
+    return item;
+}
+
+int
+ns_async_queue_length(NsAsyncQueue *queue)
+{
+    SDL_LockMutex(queue->lock);
+    int length = queue->length;
+    SDL_UnlockMutex(queue->lock);
+    return length;
+}

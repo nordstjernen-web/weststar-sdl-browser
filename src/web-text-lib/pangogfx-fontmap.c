@@ -26,6 +26,9 @@
 
 #include "pangogfx-private.h"
 
+/* Threads, locks and queues from the SDL layer; see the header. */
+#include "ns-glib-threads.h"
+
 typedef struct
 {
   NsPangoFcFontMapClass parent_class;

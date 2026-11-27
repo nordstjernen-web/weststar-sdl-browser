@@ -29,6 +29,9 @@
 #include "pango-item-private.h"
 #include "pango-attributes-private.h"
 
+/* Threads, locks and queues from the SDL layer; see the header. */
+#include "ns-glib-threads.h"
+
 /* Itemising is what a layout does before it can shape: bidi levels, script
  * runs, emoji runs, width runs, and a font looked up for every character that
  * the run before it could not cover. It is the last of the three passes over a

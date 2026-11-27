@@ -113,7 +113,7 @@ static SDL_Mutex        *g_null_lock;
 static SDL_Thread       *g_null_thread;
 static SDL_AtomicInt     g_null_quit;
 static ns_audio_player   g_players[NS_AUDIO_MAX_PLAYERS];
-static GAsyncQueue      *g_commands;
+static NsAsyncQueue      *g_commands;
 static NsThread         *g_worker;
 static gint              g_shutting_down;
 static gint              g_silent;
@@ -1177,7 +1177,7 @@ audio_worker(gpointer data)
 {
     (void)data;
     for (;;) {
-        ns_audio_command *command = g_async_queue_pop(g_commands);
+        ns_audio_command *command = ns_async_queue_pop(g_commands);
         if (command->op == NS_AUDIO_OP_QUIT) {
             command_free(command);
             break;
@@ -1273,7 +1273,7 @@ audio_start(void)
     }
     if (!g_dev_ok) null_audio_start();
     g_atomic_int_set(&g_shutting_down, 0);
-    g_commands = g_async_queue_new();
+    g_commands = ns_async_queue_new();
     g_worker = ns_thread_new("ns-audio", audio_worker, NULL);
     emit("ready %s", g_dev_ok || g_null_thread ? "1" : "0");
     return TRUE;
@@ -1299,7 +1299,7 @@ push_command(ns_audio_op op, NsAudioContext *context, const char *token,
         command->document_url = g_strdup(context->document_url);
         ns_mutex_unlock(&context->lock);
     }
-    g_async_queue_push(g_commands, command);
+    ns_async_queue_push(g_commands, command);
 }
 
 /* Validates and queues a player command, starting audio only for open operations. */
@@ -1589,12 +1589,12 @@ ns_audio_shutdown(void)
     for (int i = 0; i < NS_AUDIO_MAX_PLAYERS; i++)
         if (g_players[i].used) player_release(&g_players[i]);
     ns_audio_command *command;
-    while ((command = g_async_queue_try_pop(g_commands))) {
+    while ((command = ns_async_queue_try_pop(g_commands))) {
         if (command->op == NS_AUDIO_OP_DESTROY)
             context_free(command->context);
         command_free(command);
     }
-    g_async_queue_unref(g_commands);
+    ns_async_queue_unref(g_commands);
     g_commands = NULL;
     SDL_QuitSubSystem(SDL_INIT_AUDIO);
 }

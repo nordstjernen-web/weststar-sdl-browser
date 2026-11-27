@@ -48,7 +48,9 @@ wtl_override_options = {
   'werror': false,
 }
 
-wtl_deps = [libm, glib, gobject,
+# SDL: the library's threads, locks and queues come from the browser's SDL
+# layer (ns-glib-threads.h), not from GLib.
+wtl_deps = [libm, glib, gobject, sdl3_dep,
   dependency('fribidi', version: ns_floors['fribidi']),
   dependency('harfbuzz', version: ns_floors['harfbuzz']),
 ]
