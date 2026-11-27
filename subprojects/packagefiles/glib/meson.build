@@ -13,17 +13,17 @@
 # threads and clocks on SDL, gettext without translation, and the names
 # of what is left out.
 #
-# This build is for Unix-like systems so far. What it configures is what
-# those files consult: about sixty of GLib's two hundred configuration
-# macros.
+# What it configures is what those files consult: about sixty of GLib's
+# two hundred configuration macros.
 project('glib', 'c', version: '2.80.5', license: 'LGPL-2.1-or-later',
         meson_version: '>=1.3')
 
 cc = meson.get_compiler('c')
 host_system = host_machine.system()
-if host_system == 'windows' or host_system == 'darwin'
-  error('-Dglib=bundled is set up for Linux and the BSDs so far; use the system GLib on ' + host_system)
+if host_system == 'darwin'
+  error('-Dglib=bundled is not set up for macOS yet; use the system GLib there')
 endif
+is_windows = host_system == 'windows'
 
 python = find_program('python3', 'python')
 gen_visibility_macros = files('tools/gen-visibility-macros.py')
@@ -43,13 +43,17 @@ conf.set('GLIB_INTERFACE_AGE', version_parts[2].to_int())
 conf.set('GLIB_BINARY_AGE', 100 * version_parts[1].to_int() + version_parts[2].to_int())
 # Messages are not translated (no ENABLE_NLS): the browser shows none of
 # GLib's to the user.
-conf.set('THREADS_POSIX', 1)
+if is_windows
+  # Windows 7's API level, as GLib 2.80 asks for.
+  conf.set('_WIN32_WINNT', '0x0601')
+endif
 # The C library's printf is C99's; GLib's own copy (gnulib) is not built.
 conf.set('USE_SYSTEM_PRINTF', true)
 conf.set('HAVE_C99_SNPRINTF', 1)
 conf.set('HAVE_C99_VSNPRINTF', 1)
 
-gnu = ['-D_GNU_SOURCE']
+# MinGW's C99 printf rather than the old C runtime's.
+gnu = ['-D_GNU_SOURCE'] + (is_windows ? ['-D__USE_MINGW_ANSI_STDIO=1'] : [])
 foreach h : ['alloca.h', 'dirent.h', 'sched.h', 'stdatomic.h', 'stdint.h',
              'syslog.h', 'sys/auxv.h', 'sys/param.h', 'sys/prctl.h',
              'sys/resource.h', 'sys/select.h', 'sys/time.h', 'wchar.h',
@@ -66,6 +70,12 @@ foreach f : ['close_range', 'fallocate', 'fsync', 'getauxval', 'getpwuid_r',
              'uselocale', 'vasprintf', 'aligned_alloc', 'issetugid',
              'pthread_attr_setinheritsched', 'pthread_attr_setstacksize',
              'pthread_condattr_setclock', 'pthread_getaffinity_np']
+  # The compiler knows some of these as built-ins and so finds them where
+  # the C library has none: MinGW has no stpcpy, posix_memalign or
+  # aligned_alloc.
+  if is_windows and ['stpcpy', 'posix_memalign', 'memalign', 'strlcpy', 'aligned_alloc'].contains(f)
+    continue
+  endif
   if cc.has_function(f, args: gnu, dependencies: dependency('threads'))
     conf.set('HAVE_' + f.to_upper(), 1)
   endif
@@ -106,7 +116,7 @@ libm = cc.find_library('m', required: false)
 
 # Third-party code: built without the project's warnings, and with its
 # sections apart so that the linker can drop what is not called.
-glib_build_args = ['-w', '-DHAVE_CONFIG_H'] + cc.get_supported_arguments(
+glib_build_args = ['-w', '-DHAVE_CONFIG_H'] + (is_windows ? ['-D__USE_MINGW_ANSI_STDIO=1', '-DUNICODE', '-D_UNICODE'] : []) + cc.get_supported_arguments(
   '-ffunction-sections', '-fdata-sections', '-fno-strict-aliasing')
 
 root_inc = include_directories('.')

@@ -34,3 +34,14 @@ g_get_monotonic_time (void)
 {
   return (gint64) (SDL_GetTicksNS () / 1000);
 }
+
+#ifdef G_OS_WIN32
+/* gmain.c's set-up of its Windows clock, which glib-init.c calls at
+ * start: SDL's clocks need none. */
+void g_clock_win32_init (void);
+
+void
+g_clock_win32_init (void)
+{
+}
+#endif

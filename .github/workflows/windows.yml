@@ -117,9 +117,9 @@ jobs:
           export CC="ccache clang"
           export CC_LD=lld
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            meson setup builddir --werror -Db_lto=false -Dpdfjs=disabled
+            meson setup builddir --werror -Db_lto=false -Dpdfjs=disabled -Dglib=bundled
           else
-            meson setup builddir --werror -Db_lto=true -Db_lto_mode=thin -Dpdfjs=disabled
+            meson setup builddir --werror -Db_lto=true -Db_lto_mode=thin -Dpdfjs=disabled -Dglib=bundled
             THINLTO_CACHE_DIR=$(cygpath -m "$RUNNER_TEMP/thinlto-cache")
             mkdir -p "$THINLTO_CACHE_DIR"
             meson configure builddir -Dc_link_args="-Wl,--thinlto-cache-dir=$THINLTO_CACHE_DIR -Wl,--thinlto-cache-policy=cache_size_bytes=300m"

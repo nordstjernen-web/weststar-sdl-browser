@@ -34,7 +34,9 @@ ns_glib_left_out (const char *name)
 LEFT_OUT (g_bookmark_file_copy)
 LEFT_OUT (g_bookmark_file_free)
 LEFT_OUT (g_child_watch_source_new)
+#ifndef _WIN32 /* gstdio.c, built on Windows, has it */
 LEFT_OUT (g_close)
+#endif
 LEFT_OUT (g_date_time_ref)
 LEFT_OUT (g_date_time_unref)
 LEFT_OUT (g_get_worker_context)
@@ -76,7 +78,9 @@ LEFT_OUT (g_rand_new_with_seed_array)
 LEFT_OUT (g_random_int)
 LEFT_OUT (g_regex_ref)
 LEFT_OUT (g_regex_unref)
+#ifndef _WIN32 /* gstdio.c, built on Windows, has it */
 LEFT_OUT (g_rmdir)
+#endif
 LEFT_OUT (g_shell_unquote)
 LEFT_OUT (g_source_attach)
 LEFT_OUT (g_source_ref)
@@ -97,7 +101,9 @@ LEFT_OUT (g_timer_start)
 LEFT_OUT (g_timer_stop)
 LEFT_OUT (g_tree_ref)
 LEFT_OUT (g_tree_unref)
+#ifndef _WIN32 /* gstdio.c, built on Windows, has it */
 LEFT_OUT (g_unlink)
+#endif
 LEFT_OUT (g_wakeup_acknowledge)
 LEFT_OUT (g_wakeup_free)
 LEFT_OUT (g_wakeup_get_pollfd)
