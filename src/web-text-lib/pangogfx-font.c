@@ -1393,12 +1393,32 @@ _ns_pango_gfx_font_new (NsPangoGfxFontMap *fontmap,
   for (i = 0; FcPatternGetMatrix (pattern, FC_MATRIX, i, &fc_matrix_val) == FcResultMatch; i++)
     FcMatrixMultiply (&fc_matrix, &fc_matrix, fc_matrix_val);
 
-  font->has_shape = fc_matrix.xx != 1 || fc_matrix.xy != 0 ||
-                    fc_matrix.yx != 0 || fc_matrix.yy != 1;
+  /* fontconfig scales a bitmap font (colour emoji) to the requested size
+   * with a matrix: the pattern then carries the size of the font's strike
+   * and a matrix that shrinks it. A transform does not scale FreeType's
+   * bitmaps, so the matrix's uniform scale goes into the size, which
+   * leaves the matrix its shape alone (the slant of a made-up oblique). */
+  {
+    double fc_scale = sqrt (fabs (fc_matrix.xx * fc_matrix.yy -
+                                  fc_matrix.xy * fc_matrix.yx));
+
+    if (fc_scale > 0 && fabs (fc_scale - 1.0) > 1e-6)
+      {
+        size *= fc_scale;
+        font->size = size;
+        fc_matrix.xx /= fc_scale;
+        fc_matrix.xy /= fc_scale;
+        fc_matrix.yx /= fc_scale;
+        fc_matrix.yy /= fc_scale;
+      }
+  }
+
   font->shape.xx = (FT_Fixed) lround (fc_matrix.xx * 65536.0);
   font->shape.xy = (FT_Fixed) lround (fc_matrix.xy * 65536.0);
   font->shape.yx = (FT_Fixed) lround (fc_matrix.yx * 65536.0);
   font->shape.yy = (FT_Fixed) lround (fc_matrix.yy * 65536.0);
+  font->has_shape = font->shape.xx != 0x10000 || font->shape.xy != 0 ||
+                    font->shape.yx != 0 || font->shape.yy != 0x10000;
 
   /* As pangocairo: fontconfig's matrix flipped into y-down font space and
    * scaled to the em, then the gravity's rotation. */
