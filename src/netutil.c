@@ -69,10 +69,9 @@ static char *
 build_accept_language_from_locales(void)
 {
 #ifdef G_OS_WIN32
-    WCHAR locale_name[LOCALE_NAME_MAX_LENGTH];
-    if (GetUserDefaultLocaleName(locale_name, LOCALE_NAME_MAX_LENGTH) > 0) {
-        char *locale = g_utf16_to_utf8((const gunichar2 *)locale_name,
-                                       -1, NULL, NULL, NULL);
+    char locale_name[128];
+    if (ns_sys_win_locale_name(locale_name, sizeof locale_name)) {
+        char *locale = g_strdup(locale_name);
         if (locale && *locale) {
             char *dash = strchr(locale, '-');
             char *base = dash ? g_strndup(locale, dash - locale) : NULL;

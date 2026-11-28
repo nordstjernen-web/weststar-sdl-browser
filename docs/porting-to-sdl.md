@@ -214,6 +214,38 @@ So the shell goes first, and Cairo after it:
       already has a fallback; the portable CI job builds with
       `-Dc_std=gnu11` and warnings as errors), a 32-bit Windows build against the old
       MSVCRT for XP, and an AROS build in an emulator, each in CI.
+      The Windows XP build is done, but for running it on XP itself. It is
+      built in MSYS2's MINGW32 environment (GCC for i686, `msvcrt.dll`) by
+      one meson native file, `scripts/winxp-i686.ini` (see
+      [building.md](building.md)): `_WIN32_WINNT` 0x0501 for every file,
+      SDL2 and the portable profile, every library compiled for XP from
+      its subproject (MINGW32's packages are built for Windows 7) and
+      linked statically into one `weststar.exe`, HTTPS through curl's Mbed
+      TLS backend with compiled-in certificates, and a PE header asking for
+      Windows 5.1. What XP lacks was replaced or looked up at run time:
+      `BCryptGenRandom` by `RtlGenRandom` (the browser's and Mbed TLS's
+      random numbers); `GetUserDefaultLocaleName`,
+      `GetDynamicTimeZoneInformation` and
+      `SetCurrentProcessExplicitAppUserModelID` are used where Windows has
+      them, else the locale's ISO names, and the zone found in the
+      registry by its standard name (`ns_sys.c`); the C runtime's `_s`
+      functions (`freopen_s`, `_wputenv_s`, `vsnprintf_s` and others) by
+      their older forms where the runtime is `msvcrt.dll`; and in the
+      subprojects, patched only where built for XP, SQLite's slim
+      reader/writer locks and `GetTickCount64`, quickjs-ng's one-time
+      initialisation and condition variables, and GLib's
+      `SHGetKnownFolderPath` and `GetFileInformationByHandleEx`.
+      `scripts/check-xp-imports.py` reads the executable's import tables
+      and fails on anything 32-bit XP SP3 does not export, checked against
+      mingw-w64's record of `msvcrt.dll`'s exports by Windows version and
+      ReactOS's export lists (Windows Server 2003's, less what it added
+      over XP that is known to be misused): strong evidence that the
+      executable loads on XP, short of proof. The `winxp` job of the
+      `windows` workflow builds it, runs that check, the rasterizer,
+      platform and font tests and the headless smokes on a Windows Server
+      runner, and uploads the executable. Not yet done: a run on XP itself (in a virtual machine;
+      the GitHub runners cannot), and with it whatever XP does differently
+      at run time that an import table cannot show.
    Windows XP is the realistic floor on Windows (2000 and 95 lack too much
    of the API a browser needs today, and their hardware the memory); on
    the Amiga, the PowerPC and x86 systems, not the 68k classics, whose few

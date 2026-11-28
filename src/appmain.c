@@ -156,14 +156,19 @@ ns_log_writer(GLogLevelFlags log_level,
 
 #ifdef G_OS_WIN32
 
-__declspec(dllimport) HRESULT __stdcall
-SetCurrentProcessExplicitAppUserModelID(PCWSTR AppID);
+typedef HRESULT (WINAPI *ns_set_app_id_fn)(PCWSTR app_id);
 
-/* Sets the Windows AppUserModelID so taskbar grouping and pinning work. */
+/* Sets the Windows AppUserModelID so taskbar grouping and pinning work.
+ * Windows 7 and later have it; looked up at run time for Windows XP. */
 static void
 ns_win32_set_app_id(void)
 {
-    (void)SetCurrentProcessExplicitAppUserModelID(L"Weststar.Browser");
+    HMODULE shell32 = GetModuleHandleW(L"shell32.dll");
+    ns_set_app_id_fn set_id = shell32
+        ? (ns_set_app_id_fn)(void *)GetProcAddress(shell32,
+              "SetCurrentProcessExplicitAppUserModelID")
+        : NULL;
+    if (set_id) (void)set_id(L"Weststar.Browser");
 }
 
 /* Points fontconfig at the bundled fonts.conf and initialises it (Windows). */
@@ -254,6 +259,7 @@ static void
 ns_win32_attach_parent_console(void)
 {
     if (!AttachConsole(ATTACH_PARENT_PROCESS)) return;
+#ifdef _UCRT
     FILE *fp;
     if (!ns_win32_fd_is_bound(_fileno(stdout)))
         (void)freopen_s(&fp, "CONOUT$", "w", stdout);
@@ -261,6 +267,15 @@ ns_win32_attach_parent_console(void)
         (void)freopen_s(&fp, "CONOUT$", "w", stderr);
     if (!ns_win32_fd_is_bound(_fileno(stdin)))
         (void)freopen_s(&fp, "CONIN$",  "r", stdin);
+#else
+    /* Windows XP's msvcrt.dll has no freopen_s. */
+    if (!ns_win32_fd_is_bound(_fileno(stdout)))
+        (void)freopen("CONOUT$", "w", stdout);
+    if (!ns_win32_fd_is_bound(_fileno(stderr)))
+        (void)freopen("CONOUT$", "w", stderr);
+    if (!ns_win32_fd_is_bound(_fileno(stdin)))
+        (void)freopen("CONIN$",  "r", stdin);
+#endif
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
 }

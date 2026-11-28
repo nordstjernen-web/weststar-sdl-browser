@@ -28,7 +28,10 @@ wtl_cflags = [
 ]
 wtl_extra_cflags = ['-w', '-fno-strict-aliasing']
 if host_system == 'windows'
-  wtl_cflags += '-D_WIN32_WINNT=0x0A00'
+  # Not in the Windows XP build, which is for XP throughout.
+  if not ns_winxp
+    wtl_cflags += '-D_WIN32_WINNT=0x0A00'
+  endif
   wtl_extra_cflags += '-mms-bitfields'
 elif host_system == 'linux'
   wtl_extra_cflags += ['-fno-semantic-interposition', '-fno-plt']

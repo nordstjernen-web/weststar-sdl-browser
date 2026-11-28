@@ -156,18 +156,34 @@ ns_security_downloads_dir(void)
 
 #ifdef G_OS_WIN32
 #include <windows.h>
+#if _WIN32_WINNT >= 0x0600
 #include <bcrypt.h>
+#else
+#include <ntsecapi.h>
+#endif
 #endif
 
-/* Fills buf from the OS CSPRNG (BCrypt, getrandom, getentropy, /dev/urandom). */
+/* Fills buf from the OS CSPRNG (BCrypt, or RtlGenRandom on Windows XP,
+ * getrandom, getentropy, /dev/urandom). */
 gboolean
 ns_security_csprng_fill(void *buf, gsize len)
 {
     if (!buf || len == 0) return TRUE;
-#if defined(G_OS_WIN32)
+#if defined(G_OS_WIN32) && _WIN32_WINNT >= 0x0600
     if (BCryptGenRandom(NULL, (PUCHAR)buf, (ULONG)len,
                         BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0)
         return TRUE;
+#elif defined(G_OS_WIN32)
+    /* Windows XP has no BCrypt: RtlGenRandom (advapi32's SystemFunction036). */
+    guint8 *at = buf;
+    gsize left = len;
+    while (left > 0) {
+        ULONG n = left > 0x10000 ? 0x10000 : (ULONG)left;
+        if (!RtlGenRandom(at, n)) break;
+        at += n;
+        left -= n;
+    }
+    if (left == 0) return TRUE;
 #elif defined(__linux__)
     gsize off = 0;
     while (off < len) {

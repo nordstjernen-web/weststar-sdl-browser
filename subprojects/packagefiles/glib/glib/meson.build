@@ -57,16 +57,30 @@ gc.set('glib_void_p', size_void_p)
 gc.set('glib_long', size_long)
 gc.set('glib_size_t', size_size_t)
 gc.set('glib_ssize_t', size_size_t)
-# size_t and pointers: long where they are as wide as long (every Unix),
-# int on a 32-bit system where long is wider, long long on 64-bit Windows.
-if size_size_t == size_long
+# size_t and pointers: the very type the C library's size_t and uintptr_t
+# are, as GLib's must be the same ones: long on every 64-bit Unix, int on
+# 32-bit systems (Windows among them, where long is as wide), long long on
+# 64-bit Windows.
+size_t_is_long = cc.compiles('''#include <stddef.h>
+  _Static_assert(__builtin_types_compatible_p(size_t, unsigned long), "");''',
+  name: 'size_t is unsigned long')
+size_t_is_int = cc.compiles('''#include <stddef.h>
+  _Static_assert(__builtin_types_compatible_p(size_t, unsigned int), "");''',
+  name: 'size_t is unsigned int')
+uintptr_is_long = cc.compiles('''#include <stdint.h>
+  _Static_assert(__builtin_types_compatible_p(uintptr_t, unsigned long), "");''',
+  name: 'uintptr_t is unsigned long')
+uintptr_is_int = cc.compiles('''#include <stdint.h>
+  _Static_assert(__builtin_types_compatible_p(uintptr_t, unsigned int), "");''',
+  name: 'uintptr_t is unsigned int')
+if size_t_is_long
   gc.set('glib_size_type_define', 'long')
   gc.set_quoted('gsize_modifier', 'l')
   gc.set_quoted('gssize_modifier', 'l')
   gc.set_quoted('gsize_format', 'lu')
   gc.set_quoted('gssize_format', 'li')
   gc.set('glib_msize_type', 'LONG')
-elif size_size_t == size_int
+elif size_t_is_int
   gc.set('glib_size_type_define', 'int')
   gc.set_quoted('gsize_modifier', '')
   gc.set_quoted('gssize_modifier', '')
@@ -81,14 +95,14 @@ else
   gc.set_quoted('gssize_format', 'lli')
   gc.set('glib_msize_type', 'INT64')
 endif
-if size_void_p == size_long
+if uintptr_is_long
   gc.set('glib_intptr_type_define', 'long')
   gc.set_quoted('gintptr_modifier', 'l')
   gc.set_quoted('gintptr_format', 'li')
   gc.set_quoted('guintptr_format', 'lu')
   gc.set('glib_gpi_cast', '(glong)')
   gc.set('glib_gpui_cast', '(gulong)')
-elif size_void_p == size_int
+elif uintptr_is_int
   gc.set('glib_intptr_type_define', 'int')
   gc.set_quoted('gintptr_modifier', '')
   gc.set_quoted('gintptr_format', 'i')

@@ -9,8 +9,13 @@
 #include "plat/ns_plat.h"
 
 #include "plat/ns_sdl.h"
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <windows.h>
+#include <wchar.h>
+#endif
 
 int
 ns_sys_num_processors(void)
@@ -205,6 +210,115 @@ ns_sys_language_names(void)
     }
     return list_finish(&names);
 }
+
+#ifdef _WIN32
+/* ---- Windows: the locale and the time zone ----
+ * The Vista functions are looked up at run time, so that the Windows XP
+ * build (_WIN32_WINNT 0x0501) imports none of them and still uses them
+ * where they are. */
+
+typedef int (WINAPI *ns_locale_name_fn)(LPWSTR name, int len);
+
+bool
+ns_sys_win_locale_name(char *buf, size_t len)
+{
+    WCHAR name[85] = {0};  /* LOCALE_NAME_MAX_LENGTH */
+    int n = 0;
+    HMODULE k = GetModuleHandleW(L"kernel32.dll");
+    ns_locale_name_fn get_name = k
+        ? (ns_locale_name_fn)(void *)GetProcAddress(k, "GetUserDefaultLocaleName")
+        : NULL;
+    if (get_name) n = get_name(name, (int)SDL_arraysize(name));
+    if (n <= 0) {
+        WCHAR lang[9], country[9];
+        if (GetLocaleInfoW(LOCALE_USER_DEFAULT, LOCALE_SISO639LANGNAME, lang,
+                           (int)SDL_arraysize(lang)) <= 0)
+            return false;
+        /* Each at most 9 characters with its NUL: "ll-CC" fits. */
+        size_t n_lang = wcslen(lang);
+        memcpy(name, lang, (n_lang + 1) * sizeof *name);
+        if (GetLocaleInfoW(LOCALE_USER_DEFAULT, LOCALE_SISO3166CTRYNAME, country,
+                           (int)SDL_arraysize(country)) > 0) {
+            name[n_lang] = L'-';
+            memcpy(name + n_lang + 1, country, (wcslen(country) + 1) * sizeof *name);
+        }
+    }
+    return len <= INT_MAX &&
+           WideCharToMultiByte(CP_UTF8, 0, name, -1, buf, (int)len, NULL, NULL) > 0;
+}
+
+/* The fields of DYNAMIC_TIME_ZONE_INFORMATION, which the XP headers lack. */
+typedef struct ns_dynamic_tz {
+    LONG Bias;
+    WCHAR StandardName[32];
+    SYSTEMTIME StandardDate;
+    LONG StandardBias;
+    WCHAR DaylightName[32];
+    SYSTEMTIME DaylightDate;
+    LONG DaylightBias;
+    WCHAR TimeZoneKeyName[128];
+    BOOLEAN DynamicDaylightTimeDisabled;
+} ns_dynamic_tz;
+typedef DWORD (WINAPI *ns_dynamic_tz_fn)(ns_dynamic_tz *info);
+
+/* Windows XP: the key under Time Zones whose "Std" is the zone's standard
+ * name, as Windows writes both in the system's language. */
+static bool
+win_time_zone_key_by_name(const WCHAR *std_name, WCHAR *key, DWORD key_len)
+{
+    HKEY zones;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+                      L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Time Zones",
+                      0, KEY_READ, &zones) != ERROR_SUCCESS)
+        return false;
+    bool found = false;
+    for (DWORD i = 0; !found; i++) {
+        DWORD n = key_len;
+        if (RegEnumKeyExW(zones, i, key, &n, NULL, NULL, NULL, NULL) != ERROR_SUCCESS)
+            break;
+        HKEY zone;
+        if (RegOpenKeyExW(zones, key, 0, KEY_READ, &zone) != ERROR_SUCCESS)
+            continue;
+        WCHAR std[64];
+        DWORD type = 0, size = sizeof std - sizeof std[0];
+        if (RegQueryValueExW(zone, L"Std", NULL, &type, (BYTE *)std, &size) == ERROR_SUCCESS &&
+            type == REG_SZ) {
+            std[size / sizeof std[0]] = 0;
+            found = wcscmp(std, std_name) == 0;
+        }
+        RegCloseKey(zone);
+    }
+    RegCloseKey(zones);
+    return found;
+}
+
+bool
+ns_sys_win_time_zone_key(char *buf, size_t len)
+{
+    WCHAR key[128] = {0};
+    bool ok = false;
+    HMODULE k = GetModuleHandleW(L"kernel32.dll");
+    ns_dynamic_tz_fn get_dynamic = k
+        ? (ns_dynamic_tz_fn)(void *)GetProcAddress(k, "GetDynamicTimeZoneInformation")
+        : NULL;
+    if (get_dynamic) {
+        ns_dynamic_tz info = {0};
+        if (get_dynamic(&info) != TIME_ZONE_ID_INVALID && info.TimeZoneKeyName[0]) {
+            memcpy(key, info.TimeZoneKeyName, sizeof key);
+            key[SDL_arraysize(key) - 1] = 0;
+            ok = true;
+        }
+    }
+    if (!ok) {
+        TIME_ZONE_INFORMATION info = {0};
+        if (GetTimeZoneInformation(&info) != TIME_ZONE_ID_INVALID)
+            ok = win_time_zone_key_by_name(info.StandardName, key,
+                                           (DWORD)SDL_arraysize(key));
+    }
+    return ok && len <= INT_MAX &&
+           WideCharToMultiByte(CP_UTF8, 0, key, -1, buf, (int)len, NULL, NULL) > 0;
+}
+#endif
 
 /* ---- calendar time ---- */
 

@@ -433,6 +433,25 @@ are met. See:
 
   <https://github.com/AOMediaCodec/libavif/blob/main/LICENSE>
 
+### The Windows XP build
+
+> `scripts/winxp-i686.ini` links everything statically into one
+> executable, each library built from its subproject.
+
+Besides the libraries above (libcurl, libpsl, SQLite, zlib and GLib
+among them), that executable includes, each under the license named:
+
+- **SDL2** — zlib License, © Sam Lantinga and the SDL contributors, in
+  place of SDL3.
+- **Mbed TLS** — Apache License 2.0, © The Mbed TLS Contributors, in
+  place of OpenSSL: Web Crypto, and libcurl's TLS.
+- **FreeType**, **HarfBuzz** and **GNU FriBidi** — as listed below.
+- **Brotli** — MIT License, © the Brotli authors (Google).
+- **Zstandard** — BSD 3-Clause, © Meta Platforms, Inc. and affiliates.
+- The GCC runtime (**libgcc**, **libstdc++**, under the GPL with the GCC
+  Runtime Library Exception) and mingw-w64's **winpthreads** (MIT and
+  BSD-style) and C runtime startup code (public domain and ZPL).
+
 ### Optional dynamic dependencies
 
 These are linked only when present on the build host, or reached

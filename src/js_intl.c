@@ -1337,16 +1337,12 @@ intl_local_tz_id(void)
     if (!tried) {
         tried = TRUE;
 #ifdef _WIN32
-        DYNAMIC_TIME_ZONE_INFORMATION info = {0};
-        if (GetDynamicTimeZoneInformation(&info) != TIME_ZONE_ID_INVALID) {
-            char *key = g_utf16_to_utf8((const gunichar2 *)info.TimeZoneKeyName,
-                                        -1, NULL, NULL, NULL);
-            wchar_t locale_name[LOCALE_NAME_MAX_LENGTH] = {0};
-            GetUserDefaultLocaleName(locale_name, G_N_ELEMENTS(locale_name));
-            char *locale = g_utf16_to_utf8((const gunichar2 *)locale_name,
-                                           -1, NULL, NULL, NULL);
+        char key[128], locale_buf[128];
+        if (ns_sys_win_time_zone_key(key, sizeof key)) {
+            const char *locale =
+                ns_sys_win_locale_name(locale_buf, sizeof locale_buf) ? locale_buf : NULL;
             const char *region = locale ? strrchr(locale, '-') : NULL;
-            if (key && !strcmp(key, "W. Europe Standard Time") && region) {
+            if (!strcmp(key, "W. Europe Standard Time") && region) {
                 static const struct { const char *region; const char *zone; } west[] = {
                     {"NO","Europe/Oslo"},{"SE","Europe/Stockholm"},
                     {"DK","Europe/Copenhagen"},{"DE","Europe/Berlin"},
@@ -1390,14 +1386,12 @@ intl_local_tz_id(void)
                 {"South Africa Standard Time","Africa/Johannesburg"},
                 {NULL,NULL}
             };
-            if (!cached && key)
+            if (!cached)
                 for (int i = 0; zones[i].windows; i++)
                     if (!strcmp(key, zones[i].windows)) {
                         cached = g_strdup(zones[i].iana);
                         break;
                     }
-            g_free(locale);
-            g_free(key);
         }
 #endif
         /* The zone's name as the system records it: TZ when it names a

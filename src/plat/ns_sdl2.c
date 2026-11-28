@@ -453,10 +453,20 @@ ns_sdl2_EnumerateDirectory(const char *path,
     return r != SDL_ENUM_FAILURE;
 }
 
+/* As SDL3's, the missing folders above it too. */
 bool
 ns_sdl2_CreateDirectory(const char *path)
 {
     wchar_t *w = wide(path);
+    for (wchar_t *c = w ? w + 1 : NULL; c && *c; c++) {
+        if ((*c == L'\\' || *c == L'/') && c[-1] != L':' &&
+            c[-1] != L'\\' && c[-1] != L'/') {
+            wchar_t sep = *c;
+            *c = 0;
+            (void)CreateDirectoryW(w, NULL);
+            *c = sep;
+        }
+    }
     BOOL ok = w && (CreateDirectoryW(w, NULL) ||
                     GetLastError() == ERROR_ALREADY_EXISTS);
     SDL_free(w);
@@ -527,10 +537,20 @@ ns_sdl2_EnumerateDirectory(const char *path,
     return r != SDL_ENUM_FAILURE;
 }
 
+/* As SDL3's, the missing folders above it too. */
 bool
 ns_sdl2_CreateDirectory(const char *path)
 {
     struct stat st;
+    char *parents = SDL_strdup(path);
+    for (char *c = parents ? parents + 1 : NULL; c && *c; c++) {
+        if (*c == '/' && c[-1] != '/') {
+            *c = '\0';
+            (void)mkdir(parents, 0777);
+            *c = '/';
+        }
+    }
+    SDL_free(parents);
     if (mkdir(path, 0777) == 0) return true;
     if (errno == EEXIST && stat(path, &st) == 0 && S_ISDIR(st.st_mode))
         return true;

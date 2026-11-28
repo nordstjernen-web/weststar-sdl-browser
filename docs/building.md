@@ -79,6 +79,66 @@ links (`ldd weststar.exe`) and `/ucrt64/etc/fonts` as `etc/fonts`: the
 bundle and checks that it starts with only the Windows system folders on
 `PATH`.
 
+### Windows XP (32-bit)
+
+A browser for Windows XP SP3 and later is built in MSYS2's **MINGW32**
+shell (i686, against the system's old `msvcrt.dll` rather than the UCRT),
+on SDL2 with the portable profile. Only the toolchain comes from MSYS2,
+since MINGW32's own libraries are built for Windows 7:
+
+```sh
+pacman -S --needed git mingw-w64-i686-{gcc,binutils,pkgconf,meson,ninja,python,ca-certificates}
+meson setup builddir-xp --native-file scripts/winxp-i686.ini \
+    -Dpdfjs=disabled -Dca_bundle=/mingw32/etc/ssl/certs/ca-bundle.crt
+meson compile -C builddir-xp
+python3 scripts/check-xp-imports.py builddir-xp/src/sdl/weststar.exe
+```
+
+The native file `scripts/winxp-i686.ini` is the whole configuration:
+
+- `_WIN32_WINNT` and `WINVER` 0x0501 for every file, the subprojects'
+  too, so that the Windows headers declare nothing newer than XP; where
+  the browser can use a newer function it looks it up at run time.
+- `-Dsdl=sdl2 -Dcrypto=mbedtls -Dglib=bundled -Dfontconfig=disabled`,
+  without AVIF and WebAssembly (WAMR has no 32-bit x86 Windows build).
+- Every library from its subproject, built for XP and linked
+  statically (`force_fallback_for`): SDL2, Mbed TLS, GLib, and from
+  WrapDB curl, FreeType, HarfBuzz, FriBidi, SQLite, zlib, Brotli, zstd
+  and libpsl. libgcc, libstdc++ and winpthreads are linked statically
+  too, so `weststar.exe` is the whole browser and needs no DLL beside it.
+- HTTPS through curl's Mbed TLS backend (XP's own Schannel has no TLS
+  1.2), with the certificates `-Dca_bundle` compiles in, as XP's root
+  store is long out of date. No HTTP/2 and no IDN.
+- A PE header that asks for Windows 5.1 (OS and subsystem version).
+- No link-time optimisation.
+
+Some of the subprojects need a patch for XP, applied only when they are
+built for it: SQLite (`sqlite3-winxp.patch`: critical sections where it
+now takes slim reader/writer locks, and `GetTickCount`), GLib
+(`glib-winxp.patch`: special folders through `SHGetFolderPathW`, file
+sizes from `GetFileInformationByHandle`, none of the CRT's `_s`
+functions), quickjs-ng (`quickjs-ng-winxp.patch`: one-time
+initialisation and condition variables of its own), Mbed TLS (entropy
+from `RtlGenRandom`, where it took `BCryptGenRandom`) and curl
+(`curl-mbedtls.patch`, which adds the Mbed TLS backend to WrapDB's
+port).
+
+`scripts/check-xp-imports.py` reads the import tables of the
+executable (and of any DLL given with it) and fails on any DLL or
+function that 32-bit Windows XP SP3 does not export, and on a PE header
+asking for more than Windows 5.1. Its lists of XP's exports are fetched
+once from pinned commits and cached: `msvcrt.dll`'s from mingw-w64's
+`msvcrt.def.in`, which records the Windows version each export came
+with, and the other system DLLs' from ReactOS's `.spec` files, which
+describe Windows Server 2003 and mark later exports; the functions
+Server 2003 added over XP that are known to be misused are refused by
+name. A pass is strong evidence that the executable loads on XP, not
+proof: that is only had by running it there, which CI cannot do. The
+`winxp` job of the `windows` workflow builds this configuration, runs
+the import check, the rasterizer, platform and font tests and the
+headless smokes on the Windows Server runner, and uploads the
+executable as the `weststar-winxp-i686` artifact.
+
 ## Visual Studio Code
 
 The repository's `.vscode/` workspace builds, runs and debugs the browser
@@ -452,6 +512,7 @@ canvas checks that each print PASS or FAIL, which CI renders with
 | `_msys_build.sh`, `_msys_env.sh`, `_msys_eval.sh`, `_msys_act.sh`, `_msys_wpt.sh`, `run-windows.ps1`, `smoke-windows.ps1`, `check-windows-bundle.ps1` | Build, drive and smoke-test the Windows binary; `check-windows-bundle.ps1` starts the packaged bundle with only the Windows system folders on PATH. |
 | `pack-linux.sh`, `pack-deb.sh`, `pack-rpm.sh`, `pack-srpm.sh`, `pack-appimage.sh`, `pack-bsd.sh`, `pack-windows.sh`, `pack-windows-installer.sh`, `pack-msix.sh` | Release packaging. |
 | `nightly.sh`, `nightly-distro-build.sh` | Nightly build orchestration. |
+| `winxp-i686.ini`, `check-xp-imports.py` | The Windows XP build: its meson native file, and the check that an executable imports nothing Windows XP SP3 lacks. See Windows XP above. |
 | `check-subprojects.sh` | Fail when a `subprojects/` checkout is not at the revision its `.wrap` pins; the packaging scripts run it first. |
 | `ci-linux-i386.sh` | The 32-bit x86 CI build and smoke test, run inside a 32-bit Debian 13 container (`debian:trixie` with `--platform linux/386`). |
 | `ci-musl.sh` | The musl CI build and smoke test, run inside an `alpine:3.24` container. |

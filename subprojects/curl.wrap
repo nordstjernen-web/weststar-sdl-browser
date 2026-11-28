@@ -1,0 +1,21 @@
+[wrap-file]
+# curl 8.12.1 (WrapDB's meson port), used where no system libcurl is found,
+# or forced with --force-fallback-for=libcurl: the Windows XP build
+# (scripts/winxp-i686.ini) builds it statically with TLS through Mbed TLS,
+# as XP's own Schannel speaks no TLS 1.2. curl-mbedtls.patch adds that
+# backend to the port, which offers only OpenSSL and Schannel. 8.12 is
+# still built for XP (_WIN32_WINNT 0x0501).
+directory = curl-8.12.1
+source_url = https://github.com/curl/curl/releases/download/curl-8_12_1/curl-8.12.1.tar.xz
+source_fallback_url = https://wrapdb.mesonbuild.com/v2/curl_8.12.1-2/get_source/curl-8.12.1.tar.xz
+source_filename = curl-8.12.1.tar.xz
+source_hash = 0341f1ed97a26c811abaebd37d62b833956792b7607ea3f15d001613c76de202
+patch_filename = curl_8.12.1-2_patch.zip
+patch_url = https://wrapdb.mesonbuild.com/v2/curl_8.12.1-2/get_patch
+patch_fallback_url = https://github.com/mesonbuild/wrapdb/releases/download/curl_8.12.1-2/curl_8.12.1-2_patch.zip
+patch_hash = bfd8886cc76ccfab52b1b0472e6c682cdf5374a4c30be2427326f2f495de4eba
+wrapdb_version = 8.12.1-2
+diff_files = curl-mbedtls.patch
+
+[provide]
+dependency_names = libcurl

@@ -260,8 +260,12 @@ if host_system == 'windows'
   northstar_link_args += cc.get_supported_link_arguments(
     ['-Wl,--stack,8388608'],
   )
+  # Random numbers from BCrypt, or on Windows XP, which has none, from
+  # advapi32's RtlGenRandom (security.c).
+  if not ns_winxp
+    northstar_deps += cc.find_library('bcrypt')
+  endif
   northstar_deps += [
-    cc.find_library('bcrypt'),
     cc.find_library('advapi32'),
     cc.find_library('shell32'),
     cc.find_library('user32'),

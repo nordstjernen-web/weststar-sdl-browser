@@ -1,0 +1,43 @@
+--- a/sqlite3.c
++++ b/sqlite3.c
+@@ -31465,6 +31465,18 @@
+ */
+ #ifdef SQLITE_MUTEX_W32
+ 
++/* Windows XP has no slim reader/writer locks (Vista and later): there the
++** fast mutexes are critical sections too. (Added for Weststar's Windows XP
++** build.) */
++#if defined(_WIN32_WINNT) && _WIN32_WINNT<0x0600
++# define SQLITE_W32_NO_SRWLOCK 1
++# define SRWLOCK CRITICAL_SECTION
++# define InitializeSRWLock InitializeCriticalSection
++# define AcquireSRWLockExclusive EnterCriticalSection
++# define TryAcquireSRWLockExclusive TryEnterCriticalSection
++# define ReleaseSRWLockExclusive LeaveCriticalSection
++#endif
++
+ #if MSVC_VERSION>0
+ # define ALIGN128 __declspec(align(128))
+ #else
+@@ -31693,6 +31705,9 @@
+   assert( p );
+   assert( p->nRef==0 && p->owner==0 );
+   if( p->id==SQLITE_MUTEX_FAST ){
++#ifdef SQLITE_W32_NO_SRWLOCK
++    DeleteCriticalSection(&p->u.srwl);
++#endif
+     sqlite3_free(p);
+   }else if( p->id==SQLITE_MUTEX_RECURSIVE ){
+     DeleteCriticalSection(&p->u.cs);
+@@ -49594,6 +49609,11 @@
+ ** testing and sandboxing.  The following array holds the names and pointers
+ ** to all overrideable system calls.
+ */
++#ifdef SQLITE_W32_NO_SRWLOCK
++/* Nor GetTickCount64 on Windows XP; it only seeds randomness. (Weststar) */
++static ULONGLONG WINAPI sqlite3XpGetTickCount64(VOID){ return GetTickCount(); }
++# define GetTickCount64 sqlite3XpGetTickCount64
++#endif
+ static struct win_syscall {
+   const char *zName;            /* Name of the system call */
+   sqlite3_syscall_ptr pCurrent; /* Current value of the system call */

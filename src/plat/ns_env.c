@@ -9,6 +9,8 @@
 
 #ifdef _WIN32
 #  include <stdlib.h>
+#  include <string.h>
+#  include <wchar.h>
 #  include <windows.h>
 
 static wchar_t *
@@ -28,7 +30,24 @@ ns_env_crt_put(const char *name, const char *value)
 {
     wchar_t *wname = ns_env_wide(name);
     wchar_t *wvalue = ns_env_wide(value ? value : "");
+#ifdef _UCRT
     bool ok = wname && wvalue && _wputenv_s(wname, wvalue) == 0;
+#else
+    /* Windows XP's msvcrt.dll has no _wputenv_s: "name=value" to _wputenv,
+     * which copies it ("name=" removes name). */
+    bool ok = false;
+    if (wname && wvalue) {
+        size_t nlen = wcslen(wname), vlen = wcslen(wvalue);
+        wchar_t *pair = SDL_malloc((nlen + vlen + 2) * sizeof *pair);
+        if (pair) {
+            memcpy(pair, wname, nlen * sizeof *pair);
+            pair[nlen] = L'=';
+            memcpy(pair + nlen + 1, wvalue, (vlen + 1) * sizeof *pair);
+            ok = _wputenv(pair) == 0;
+            SDL_free(pair);
+        }
+    }
+#endif
     SDL_free(wname);
     SDL_free(wvalue);
     return ok;

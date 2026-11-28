@@ -15,6 +15,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#if defined(_WIN32) && !defined(_UCRT)
+#include <windows.h>
+#endif
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -53,9 +56,17 @@ static const bench benches[] = {
 static double
 now_ms(void)
 {
+#if defined(_WIN32) && !defined(_UCRT)
+    /* msvcrt.dll, Windows XP's C library, has no timespec_get. */
+    LARGE_INTEGER freq, now;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&now);
+    return (double)now.QuadPart * 1000.0 / (double)freq.QuadPart;
+#else
     struct timespec ts;
     timespec_get(&ts, TIME_UTC);
     return ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
+#endif
 }
 
 /* A 512 x 512 photo-like test image: gradients with some noise. */

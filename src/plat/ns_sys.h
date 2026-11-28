@@ -32,6 +32,21 @@ const char *const *ns_sys_data_dirs(void);
  * platform. Each name is followed by its shorter forms. */
 const char *const *ns_sys_language_names(void);
 
+#ifdef _WIN32
+/* Windows: the user's locale as a language tag ("nb-NO"), in UTF-8. From
+ * GetUserDefaultLocaleName where Windows has it (Vista and later), else
+ * from the locale's ISO 639 and 3166 names (Windows XP). False when
+ * neither says, or buf is too small. */
+bool ns_sys_win_locale_name(char *buf, size_t len);
+
+/* Windows: the registry key name of the local time zone ("W. Europe
+ * Standard Time"), the same in every language, in UTF-8. From
+ * GetDynamicTimeZoneInformation (Vista and later), else found in the
+ * registry's list of zones by the zone's standard name (Windows XP).
+ * False when it cannot be told. */
+bool ns_sys_win_time_zone_key(char *buf, size_t len);
+#endif
+
 /* ---- Calendar time ---- */
 
 typedef struct NsDateTime {

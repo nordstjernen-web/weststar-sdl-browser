@@ -49,6 +49,10 @@ executable(
   pie: weststar_pie,
   win_subsystem: northstar_win_subsystem,
   link_args: northstar_link_args + weststar_sdl_platform_link_args,
+  # Linked as C, with the project's C link arguments (stripping, section
+  # pruning, hardening), even where HarfBuzz is built from its subproject
+  # (the Windows XP build): it is C++ that needs no C++ runtime.
+  link_language: 'c',
   install: true,
 )
 

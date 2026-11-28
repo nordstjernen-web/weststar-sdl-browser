@@ -22,6 +22,15 @@ cc = meson.get_compiler('c')
 fs = import('fs')
 host_system = host_machine.system()
 
+# Windows: the oldest version the build is for, _WIN32_WINNT as the
+# compiler sees it. The Windows XP build (scripts/winxp-i686.ini) sets
+# 0x0501, and then the sources call nothing newer than XP has.
+ns_win32_winnt = 0
+if host_system == 'windows'
+  ns_win32_winnt = cc.compute_int('_WIN32_WINNT', prefix: '#include <windows.h>')
+endif
+ns_winxp = host_system == 'windows' and ns_win32_winnt < 0x0600
+
 common_warning_flags = [
   '-Wshadow',
   '-Wpointer-arith',
@@ -416,6 +425,26 @@ zlib = dependency('zlib')
 libbrotlidec = dependency('libbrotlidec', required: false)
 libzstd = dependency('libzstd', required: false)
 
+# A library built from its subproject (every one in the Windows XP build) is
+# third-party code: its headers count as system headers, as an installed
+# library's do, so that the browser's own warnings stay off them.
+# (libcurl's subproject hands on the compression libraries' headers as its
+# own, unmarked: they are named first, so they are system headers there.)
+libpsl = libpsl.as_system()
+sqlite3 = sqlite3.as_system()
+libfreetype = libfreetype.as_system()
+zlib = zlib.as_system()
+if libbrotlidec.found()
+  # Its headers come with libbrotlicommon, which as_system() does not reach
+  # through libbrotlidec.
+  libbrotlidec = declare_dependency(dependencies: [
+    dependency('libbrotlicommon', required: false).as_system(),
+    libbrotlidec.as_system()])
+endif
+libzstd = libzstd.as_system()
+libcurl = declare_dependency(dependencies: [zlib, libbrotlidec, libzstd,
+                                            libcurl.as_system()])
+
 # A system lexbor 3 is used when there is one, else the pinned subproject.
 liblexbor = dependency('lexbor', version: '>=3.0.0',
                        fallback: ['lexbor', 'lexbor_dep'])
@@ -538,6 +567,7 @@ summary({
   'GLib': get_option('glib') == 'bundled' ? 'bundled ' + glib.version() : 'system ' + glib.version(),
   'Fonts found by': have_system_fontconfig ? 'fontconfig ' + libfontconfig.version() : 'nsfc (in tree)',
   'Bundled fallback fonts': bundled_fonts_source,
+  'Windows XP': ns_winxp,
 }, section: 'Features')
 
 # Files are compiled into the binary (src/embedded/, and nsfc's bundled

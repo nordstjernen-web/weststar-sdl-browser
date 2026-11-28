@@ -43,8 +43,10 @@ conf.set('GLIB_INTERFACE_AGE', version_parts[2].to_int())
 conf.set('GLIB_BINARY_AGE', 100 * version_parts[1].to_int() + version_parts[2].to_int())
 # Messages are not translated (no ENABLE_NLS): the browser shows none of
 # GLib's to the user.
-if is_windows
-  # Windows 7's API level, as GLib 2.80 asks for.
+# Windows 7's API level, as GLib 2.80 asks for, unless the build names its
+# own: the Windows XP build's 0x0501, for which glib-winxp.patch keeps GLib
+# to what XP has.
+if is_windows and cc.get_define('_WIN32_WINNT') == ''
   conf.set('_WIN32_WINNT', '0x0601')
 endif
 # The C library's printf is C99's; GLib's own copy (gnulib) is not built.

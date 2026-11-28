@@ -252,3 +252,147 @@ jobs:
             ${{ runner.temp }}\ccache
             ${{ runner.temp }}\thinlto-cache
           key: ccache-windows-${{ matrix.windows }}-ucrt64-${{ github.sha }}
+
+  # The Windows XP build: 32-bit, against msvcrt.dll, on SDL2 with the
+  # portable profile, every library compiled for XP from its subproject and
+  # linked statically (scripts/winxp-i686.ini). The runner is Windows
+  # Server 2025, not XP: the import check stands in for XP itself.
+  winxp:
+    name: msys2/mingw32 for Windows XP (i686)
+    runs-on: windows-2025
+    timeout-minutes: 90
+    env:
+      NS_ALLOW_ROOT: '1'
+
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up MSYS2 (mingw32)
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
+        with:
+          msystem: MINGW32
+          update: false
+          cache: true
+          # The toolchain, and the CA certificates compiled into the
+          # browser; MINGW32's libraries are built for Windows 7, so none.
+          install: >-
+            git
+            mingw-w64-i686-gcc
+            mingw-w64-i686-binutils
+            mingw-w64-i686-pkgconf
+            mingw-w64-i686-meson
+            mingw-w64-i686-ninja
+            mingw-w64-i686-python
+            mingw-w64-i686-ca-certificates
+
+      - name: Restore the subproject downloads
+        id: wraps-restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: subprojects/packagecache
+          key: wraps-winxp-${{ hashFiles('subprojects/*.wrap') }}
+          restore-keys: |
+            wraps-winxp-
+
+      - name: Show toolchain versions
+        run: |
+          gcc --version
+          gcc -dumpmachine
+          meson --version
+          ninja --version
+
+      - name: Build
+        run: |
+          meson setup builddir-xp --werror --native-file scripts/winxp-i686.ini \
+            -Dpdfjs=disabled -Dca_bundle=/mingw32/etc/ssl/certs/ca-bundle.crt
+          meson compile -C builddir-xp
+
+      - name: Save the subproject downloads
+        if: steps.wraps-restore.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: subprojects/packagecache
+          key: wraps-winxp-${{ hashFiles('subprojects/*.wrap') }}
+
+      # Every function weststar.exe imports must be one that Windows XP SP3
+      # exports, and its header must ask for no more than Windows 5.1.
+      - name: Windows XP import check
+        run: |
+          python3 scripts/check-xp-imports.py --cache "$RUNNER_TEMP/xp-exports" \
+            builddir-xp/src/sdl/weststar.exe
+
+      - name: Rasterizer, platform and font finder tests
+        run: |
+          NSFC_TEST_FONT="C:/Windows/Fonts/arial.ttf" \
+            meson test -C builddir-xp --suite gfx --suite nsfc --suite plat --print-errorlogs
+
+      - name: Headless smoke (about:start)
+        run: |
+          set -o pipefail
+          ./builddir-xp/src/sdl/weststar.exe --headless --dump=text about:start > about.txt
+          head -3 about.txt
+          grep -q 'Search duckduckgo.com' about.txt
+
+      - name: Headless JavaScript smoke
+        run: |
+          set -o pipefail
+          ./builddir-xp/src/sdl/weststar.exe --headless --dump=text --settle-ms=300 \
+            'data:text/html,<p id="a">before</p><script>var a=document.getElementById("a");a.textContent="js-ok "+(6*7);setTimeout(function(){a.textContent+=" timer-ok"},50);</script>' \
+            > js.txt
+          cat js.txt
+          grep -q 'js-ok 42 timer-ok' js.txt
+
+      - name: Canvas 2D smoke
+        run: |
+          set -o pipefail
+          ./builddir-xp/src/sdl/weststar.exe --headless --dump=text --settle-ms=500 \
+            "file:///$(cygpath -m "$PWD")/data/fixtures/canvas-2d.html" > canvas.txt
+          grep -E '^(PASS|FAIL)' canvas.txt
+          grep -q 'PASS toDataURL' canvas.txt
+          ! grep -q '^FAIL' canvas.txt
+
+      - name: Web Crypto checks
+        run: |
+          set -o pipefail
+          ./builddir-xp/src/sdl/weststar.exe --headless --dump=text --settle-ms=3000 \
+            "file:///$(cygpath -m "$PWD")/data/fixtures/webcrypto.html" > webcrypto.txt
+          grep -E '^(PASS|FAIL|SKIP)' webcrypto.txt
+          grep -q '^PASS' webcrypto.txt
+          ! grep -q '^FAIL' webcrypto.txt
+
+      # Linked statically: the executable alone (the import check above
+      # has already refused any DLL but the system's).
+      - name: Bundle
+        run: |
+          mkdir -p bundle
+          cp builddir-xp/src/sdl/weststar.exe LICENSE THIRD-PARTY-LICENSES.md bundle/
+          objdump -p bundle/weststar.exe | grep 'DLL Name'
+
+      - name: Bundle starts without MSYS2 on PATH
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          $p = Start-Process -FilePath bundle\weststar.exe `
+                 -ArgumentList '--headless','--dump=text','about:start' `
+                 -WorkingDirectory bundle -RedirectStandardOutput bundle-about.txt `
+                 -RedirectStandardError bundle-about.err -NoNewWindow -Wait -PassThru
+          Get-Content bundle-about.txt -TotalCount 3
+          Get-Content bundle-about.err
+          if ($p.ExitCode -ne 0) { throw "exit code $($p.ExitCode)" }
+          if (-not (Select-String -Quiet -Path bundle-about.txt -Pattern 'Search duckduckgo.com')) { throw 'about:start did not render' }
+
+      - name: Upload the bundle
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: weststar-winxp-i686
+          path: bundle
+          if-no-files-found: error
+          retention-days: 14
