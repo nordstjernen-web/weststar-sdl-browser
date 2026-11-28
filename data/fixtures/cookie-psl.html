@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Cookies and the Public Suffix List</title>
+<!--
+  Served for any host by scripts/check-cookie-psl.py, through which the
+  browser is pointed as its HTTP proxy. The response sets a cookie for
+  each domain the host is in (h_ cookies, through Set-Cookie, kept by
+  curl's cookie engine), and the script below does the same through
+  document.cookie (js_ cookies, src/net.c). A cookie for a public suffix
+  must be refused; one for any other domain of the host kept.
+-->
+<pre id="out"></pre>
+<script>
+var host = location.hostname;
+var labels = host.split(".");
+var domains = [];
+for (var i = 0; i < labels.length; i++)
+  domains.push(labels.slice(i).join("."));
+function name(prefix, d) { return prefix + d.replace(/[^a-z0-9]/g, "_"); }
+domains.forEach(function (d) {
+  document.cookie = name("js_", d) + "=1; Domain=" + d + "; Path=/";
+});
+var jar = " " + document.cookie.split(";").map(function (s) {
+  return s.trim().split("=")[0];
+}).join(" ") + " ";
+var lines = [];
+domains.forEach(function (d) {
+  ["h_", "js_"].forEach(function (p) {
+    lines.push("COOKIE " + host + " " + p + "Domain=" + d + " " +
+               (jar.indexOf(" " + name(p, d) + " ") >= 0 ? "kept" : "refused"));
+  });
+});
+lines.push("END");
+document.getElementById("out").textContent = lines.join("\n");
+</script>

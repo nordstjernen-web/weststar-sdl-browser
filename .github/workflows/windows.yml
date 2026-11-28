@@ -151,6 +151,9 @@ jobs:
           ! objdump -p builddir/src/sdl/weststar.exe | grep -i 'DLL Name: libpsl'
           meson test -C builddir --suite psl --print-errorlogs
 
+      - name: Cookies for public suffixes are refused
+        run: python3 scripts/check-cookie-psl.py builddir/src/sdl/weststar.exe
+
       - name: Upload the gfx test images
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -449,6 +452,9 @@ jobs:
           grep -q '^PASS' webcrypto.txt
           ! grep -q '^FAIL' webcrypto.txt
           grep -q '^END' webcrypto.txt
+
+      - name: Cookies for public suffixes are refused
+        run: python3 scripts/check-cookie-psl.py builddir-xp/src/sdl/weststar.exe
 
       # Linked statically: the executable alone (the import check above
       # has already refused any DLL but the system's).

@@ -317,7 +317,12 @@ So the shell goes first, and Cairo after it:
       about every rule, names around each, edge cases and 200,000 names
       made of the rules' labels: all alike (libpsl before 0.23 differs on
       names with a trailing dot, which it took for an empty label, and
-      is not compared on them). libcurl still links libpsl
+      is not compared on them). `scripts/check-cookie-psl.py` has the
+      browser, through a local proxy, set cookies for every domain of
+      hosts like `www.example.co.uk`, `a.b.foo.ck` (`*.ck`), `a.www.ck`
+      (`!www.ck`) and `www.example.github.io` (the private section),
+      through `Set-Cookie` and `document.cookie`, and checks that only
+      those for public suffixes are refused. libcurl still links libpsl
       itself: the cookies the browser keeps are in curl's cookie engine,
       which refuses a `Set-Cookie` for a public suffix through it.
    Windows XP is the realistic floor on Windows (2000 and 95 lack too much

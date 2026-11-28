@@ -85,6 +85,9 @@ jobs:
         # only for this test, which asks libpsl the same of the same rules.
         run: meson test -C builddir --suite psl --print-errorlogs
 
+      - name: Cookies for public suffixes are refused
+        run: python3 scripts/check-cookie-psl.py builddir/src/sdl/weststar
+
       - name: No GTK, Cairo or GIO in the binary
         run: |
           test -x builddir/src/sdl/weststar
