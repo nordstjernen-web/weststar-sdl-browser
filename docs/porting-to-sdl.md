@@ -146,6 +146,52 @@ So the shell goes first, and Cairo after it:
       still ask the C library for is the environment, the locale's
       character set, files and folders, and `stderr`; whether that needs
       changing is for the first platform without them to say (stage 7).
+
+      *GLib replaced: nscore.* With `-Dglib=native` (and `-Dtext=native`,
+      since the Pango fork is built on GLib and GObject) the browser links
+      no GLib or GObject at all: nscore (`src/core/`), a core library of
+      its own in plain C11, takes their place. Its functions carry GLib's
+      names with `ns_` for `g_` (`ns_string_new`, `ns_hash_table_insert`,
+      `ns_key_file_to_data`, `ns_utf8_normalize`...), its containers keep
+      GLib's public fields (`str`/`len`/`allocated_len`, `pdata`/`len`,
+      `data`/`len`), and `src/core/glib.h` (with `glib-object.h`,
+      `glib-unix.h` and `glib/gstdio.h`) maps GLib's types, macros and
+      functions onto it. That directory comes first on the include path,
+      so the engine's `#include <glib.h>` lands there and its sources
+      build unchanged (the diagnostics page alone asks which it has).
+      What nscore holds is what the engine imported, 245 functions:
+      memory; C strings, string vectors and printf (C99's on every
+      platform, MinGW's own on Windows, so `%zu` and `%lld` work on the
+      old C runtime too); locale-free `strtod`/`dtostr`/`formatd` and
+      integer parsing; GString, GArray, GPtrArray, GByteArray, GBytes,
+      GHashTable, GList, GQueue; GError and quarks; `g_log` with its
+      writer functions; GKeyFile; SHA-256, SHA-384 and SHA-512; Base64,
+      XML escaping, percent-encoding, form parameters and `file:` URIs;
+      file names (joining, splitting, canonicalizing, finding programs)
+      and gstdio's file calls, through the wide calls on Windows; and
+      UTF-8, UTF-16 and Unicode 17 properties, case mapping,
+      normalization and collation (`ns-unicode.c`, its tables made by
+      `scripts/gen-unicode-tables.py`).
+
+      Where the engine could tell the difference the behaviour is GLib's,
+      written anew from its documented design: the hash table keeps
+      GLib's layout (a prime modulus over a power-of-two array, quadratic
+      probing, the same growth and shrink points and in-place rehash), so
+      tables iterate in the same order and the localStorage files, whose
+      keys come out in that order, are the same; key files are written
+      byte for byte as GLib writes them and read everything it wrote;
+      sorts are stable merge sorts as GLib's are; `ns_str_hash` is GLib's
+      string hash; the log line is GLib's (`** (process:PID): WARNING **:
+      hh:mm:ss.mmm: message`), with G_DEBUG's `fatal-warnings` and
+      `fatal-criticals` and G_MESSAGES_DEBUG honoured. The tests in
+      `src/core/` check known answers and round trips, and, where GLib is
+      installed, run each function beside GLib's on the same input
+      (`meson test --suite nscore`). The browser built both ways (each
+      with `-Dtext=native`) lays out and paints every fixture and render
+      test identically, and the CI builds compare them on Linux and
+      Windows and check that no GLib library is linked. Left out:
+      spell checking, since the system's Enchant links GLib. Not yet
+      tried: the Windows XP build, macOS and the Amiga family.
    6. *SDL2 as well as SDL3*, since the Amiga-family ports and
       XP-capable builds are SDL2. Done: `meson setup -Dsdl=sdl2` builds
       the whole browser on SDL 2.0.18 or later. The code stays written

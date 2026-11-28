@@ -77,6 +77,20 @@ library and rebuild the binary against it.
 > web-text-lib above.
 > <https://gitlab.gnome.org/GNOME/pango>
 
+### nscore — after GLib's design (with `-Dglib=native`)
+
+> Weststar's core library in place of GLib, in `src/core/`, is
+> Weststar's own code (GPL-3.0-or-later); no GLib source is copied into
+> it. To behave as GLib does where the browser can see it, some parts
+> follow GLib's documented algorithms, written anew: the hash table
+> (`ns-hash.c`: GLib's open-addressing layout, prime moduli, probe
+> sequence and resize rules, so that tables iterate in GLib's order),
+> the key file layout and escapes (`ns-keyfile.c`), the rules for
+> joining, splitting and canonicalizing file names and for `file:` URIs
+> (`ns-path.c`, `ns-uri.c`), the log line (`ns-log.c`) and GLib's string
+> hash. GLib (<https://gitlab.gnome.org/GNOME/glib>) is LGPL-2.1-or-later;
+> its system copy is used only by nscore's comparison tests.
+
 ### Unicode Character Database — Unicode License v3
 
 > The Line_Break property in `src/text/nstext-linebreak-table.h`,
