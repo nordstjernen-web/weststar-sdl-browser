@@ -34,7 +34,7 @@ built and tested it on Linux and Windows:
 | 4 | Replace Cairo with an in-tree rasterizer drawing into SDL surfaces | done: Cairo is not used at all |
 | 5 | Composite with SDL textures: scrolling, fixed boxes and `transform`/`opacity` animations moved by the GPU | done for fixed boxes and animations; `sticky` boxes, canvases and animated images are left |
 | 6 | SDL as the platform: threads, the main loop, files, fonts, crypto, SDL2, Windows XP | done, except for a run on XP itself and an Amiga-family build |
-| 6a | Replace Pango with Weststar's own text layout (nstext) | done and the default: Pango and GObject are not linked |
+| 6a | Replace Pango with Weststar's own text layout (nstext) | done: Pango and GObject are not used, and the Pango fork it replaced is removed |
 | 6b | Replace GLib with a small in-tree core library (nscore, `src/core/`) | done, opt-in with `-Dglib=native`: no GLib is linked, and pages come out identical; the default stays the system's GLib for now |
 
 See [docs/porting-to-sdl.md](docs/porting-to-sdl.md) for the plan, what
@@ -51,10 +51,9 @@ The main in-tree parts are:
   - Line breaking, bidi, ellipsis, justification and hit testing follow
     Pango, so pages lay out as they did before.
   - Glyphs are rasterized with FreeType into gfx.
-  - The Pango fork it replaced (`src/web-text-lib/`, `-Dtext=pango`) is
-    kept for a while as the reference that CI compares nstext against,
-    in layout and in pixels. See
-    [docs/text-layout.md](docs/text-layout.md).
+  - It replaced web-text-lib, an in-tree Pango fork, once it laid out
+    and painted every page as the fork did; CI compared the two until
+    the fork was removed. See [docs/text-layout.md](docs/text-layout.md).
 - **`src/plat/`** is the platform layer over SDL: threads, locks, the
   event loop, files, the environment, system information and crypto.
 - **`src/fc/`** (nsfc) finds fonts where fontconfig is not available. It
@@ -102,9 +101,6 @@ included), on 28 November 2026:
 | Font finder (nsfc) | `src/fc/` | 3,060 |
 | Tests and benchmark | `src/*/tests/` | 3,673 |
 | **Total** | | **261,657** |
-
-The Pango fork in `src/web-text-lib/` (48,344 lines) is not counted. It
-is no longer built by default and will be removed.
 
 Besides the C, `data/js/` holds 12,820 lines of JavaScript and CSS
 (polyfills, the PDF viewer, internal pages). The vendored libraries below

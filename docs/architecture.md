@@ -156,7 +156,7 @@ drivers both call.
 | 3. Parse | `html.c`, `encoding.c`, `html_lexbor.c`, `xml.c` | Charset detection (BOM, header, `<meta>` prescan, UTF-8 check, then the locale's default encoding), decoding through the WHATWG Encoding Standard decoders in `encoding.c`, and bytes → DOM via lexbor (WHATWG HTML). `xml.c` parses XHTML and other namespaced XML documents. |
 | 4. DOM | `dom.c` | The document tree and its mutation API, shared by layout and the JS bridge. |
 | 5. Style | `css.c`, `css_syntax.c`, `css_calc.c`, `css_media.c`, `css_prop_syntax.c`, `anim.c`, `font.c` | Stylesheet parse, selector matching, the cascade, computed values. `css_syntax.c` is the CSS Syntax tokenizer, `css_calc.c` simplifies `calc()` trees and serializes specified values, `css_media.c` the Media Queries Level 4 parser and evaluator, and `css_prop_syntax.c` the `<syntax>` grammar behind `@property` and `CSS.registerProperty`. `anim.c` runs transitions and `@keyframes` animations; `font.c` loads `@font-face` web fonts. |
-| 6. Layout | `layout.c`, `mathml.c` | Box tree and fragmentation: block/inline, flex, grid, tables, multicol, positioned boxes. Text is itemized, shaped and broken into lines by web-text-lib. The box tree is rebuilt on every relayout, but a text run's measured height, max-content and min-content widths are kept across relayouts, keyed by its text, the font attributes of its inline runs, its style (whose mutation counter animations bump), the width and the viewport, so an unchanged paragraph is not broken into lines again. `mathml.c` lays out presentation MathML. |
+| 6. Layout | `layout.c`, `mathml.c` | Box tree and fragmentation: block/inline, flex, grid, tables, multicol, positioned boxes. Text is itemized, shaped and broken into lines by nstext (`src/text/`). The box tree is rebuilt on every relayout, but a text run's measured height, max-content and min-content widths are kept across relayouts, keyed by its text, the font attributes of its inline runs, its style (whose mutation counter animations bump), the width and the viewport, so an unchanged paragraph is not broken into lines again. `mathml.c` lays out presentation MathML. |
 | 7. Paint | `paint.c`, `svg.c`, `smil.c`, `image.c`, `texture.c`, `selection.c`, `spellcheck.c` | `ns_paint` walks the box tree in stacking order and draws straight into a gfx context (`src/gfx/`); there is no intermediate display list, and the retained box tree plays that part when only part of the viewport is repainted. Blurred box shadows are cached by size, corner radii, blur and colour, so a page of identical cards blurs one shadow. `svg.c` renders inline and image SVG, reading every attribute through the SMIL timeline in `smil.c` (`<animate>`, `<set>`, `<animateTransform>`, `<animateMotion>`: one timeline per document, and one per animated SVG image), which is ticked with the other animations and never writes to the DOM. `image.c` decodes images on demand into the `texture.c` pixel abstraction, and paint draws the text selection (`selection.c`) and misspelling marks (`spellcheck.c`, over Enchant) over the text. |
 | 8. Present | `src/sdl/pageview.c`, `headless.c` | The GUI uploads the frame (or its damaged rectangles) to an SDL texture; headless writes it to PNG or dumps a text/DOM/layout tree. |
 
@@ -292,30 +292,20 @@ will come back in a form that does not need Cairo (see
 Fetched by `meson setup` as pinned subprojects: **lexbor** (HTML parsing
 and the WHATWG URL parser — CSS is the engine's own), **quickjs-ng** (JS;
 `-Djs_engine=quickjs` takes the original **QuickJS** instead). Vendored
-in-tree: **web-text-lib** (text itemization, shaping and line breaking,
-`src/web-text-lib/`), **Wuffs** (images), **pl_mpeg** (the MP2 audio of
+in-tree: **Wuffs** (images), **pl_mpeg** (the MP2 audio of
 MPEG-1 streams), **WAMR** (WebAssembly, `subprojects/wamr.wrap`) and **minimp3** (MP3,
 `src/audio/minimp3.h`). See
 [`../THIRD-PARTY-LICENSES.md`](../THIRD-PARTY-LICENSES.md).
 
-web-text-lib is a Pango fork, shared with Nordstjernen Sol, that exists for one reason: stock Pango keeps no
-cache outliving a `PangoLayout`, so the same bytes were shaped once to
-measure a run and again to paint it. The fork adds a process-wide cache of
-finished glyph strings and a per-context metrics cache. Every symbol in it
-is renamed (`ns_pango_*`, `NsPango*`), because GTK loads the system Pango
-into the same process and GObject aborts if two libraries register the same
-type name — so the engine reaches it through `src/ns_pango.h` (`<web-text-lib/…>`) and the GTK shell keeps
-using the system Pango for its own widgets. A run is cached only when its
-shaping cannot depend on the text around it, and HarfBuzz is what decides
-that: asked for unsafe-to-concat flags, it marks every cluster whose glyphs
-would move if the neighbouring text changed, and a piece is stored only
-when both of its cuts came back clear — a font that kerns a space against
-the letter after it, as Liberation Sans and Liberation Serif do, therefore
-refuses the cut that a whitespace rule would have allowed. Whitespace or a
-paragraph edge still governs the item's own two ends.
-`NS_PANGO_SHAPE_CACHE=verify` serves each item from the cache, shapes it
-again and compares the two, warning on any difference;
-`NS_PANGO_SHAPE_CACHE=0` turns the shape, break and item caches all off.
+Text is laid out by **nstext** (`src/text/`), Weststar's own library on
+HarfBuzz, FriBidi and FreeType, which the engine reaches through
+`src/ns_pango.h` under the `ns_pango_*` names of the Pango fork it replaced
+([text-layout.md](text-layout.md)). It keeps one cache of shaped runs for
+all threads, so that the same bytes are not shaped once to measure a run
+and again to paint it: the key is everything shaping reads (the font, bidi
+level, script, language, features, letter spacing and the run's text with
+up to 16 bytes of the paragraph either side, which HarfBuzz looks at as
+context). `NS_PANGO_SHAPE_CACHE=0` turns it off.
 
 ## Diagnostics
 
@@ -348,7 +338,7 @@ again and compares the two, warning on any difference;
   `--debug=info,warn,error,render,net,js` selects levels and `--debug`
   alone selects all of them. With `net` selected, a headless run ends with
   a `[net perf]` line: fetch count and bytes, relayout time, and the
-  web-text-lib shape, break and item cache hits, misses and skips.
+  text library's shape cache hits, misses and skips.
 - **`debuglog.c`** is the in-process event log. Engine code and the JS
   console emit into it and `--debug` subscribes to it. It is mirrored to
   a file when `NS_LOG_FILE` is set (to that path, or by default

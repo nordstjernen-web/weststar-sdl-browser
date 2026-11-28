@@ -32,7 +32,7 @@ no libpsl; a distribution's libcurl may link it for its own cookie
 engine, and its package brings it. Where libpsl's headers are installed,
 `meson test --suite psl` compares the two.
 
-The text stack has version floors set by web-text-lib: GLib ≥ 2.80,
+The text stack has version floors: GLib ≥ 2.80,
 HarfBuzz ≥ 8.3, fontconfig ≥ 2.15 and FriBidi ≥ 1.0.6, with FreeType;
 fontconfig is optional (see `fontconfig` under Build options);
 SDL3 must be ≥ 3.2 and libcurl ≥ 8.5. `meson setup` checks every floor
@@ -176,11 +176,9 @@ dependencies:
 of quickjs-ng; [quickjs.md](quickjs.md) covers how it is built, the adapter
 and the differences between the two.
 
-WAMR, Wuffs, pl_mpeg, minimp3 and web-text-lib (`src/web-text-lib/`, the
-Pango fork the engine lays text out with, shared with Nordstjernen Sol)
-are vendored in-tree and need no network. web-text-lib is trimmed to what
-the engine calls; a new caller may need a function restored from upstream
-Pango, renamed with `src/web-text-lib/ns-rename.py`.
+WAMR, Wuffs, pl_mpeg and minimp3 are vendored in-tree and need no
+network. Text layout is Weststar's own (nstext, `src/text/`; see
+[text-layout.md](text-layout.md)).
 No in-tree fork of any browser engine is carried.
 
 So the first build needs network access for whichever of those two it
@@ -308,8 +306,9 @@ drift, and the browser launched on the paths the dependency touches. A
 text-layout change wants more than that, because the shaping cache can be
 wrong only for the second paragraph that shares a word with the first:
 dump the layout of every page in `data/render-tests/` with the cache off
-and on, require the two sets to be identical, then check that
-`NS_PANGO_SHAPE_CACHE=verify` reports no mismatch over the same pages.
+and on, and require the two sets to be identical. For a change to nstext
+itself, also compare the output of `text-layout-dump` before and after
+it ([text-layout.md](text-layout.md)).
 
 ```sh
 for f in data/render-tests/*.html; do
@@ -338,10 +337,9 @@ once (`apt install ccache` / `dnf install ccache`). Optionally use the
 | `audio` | `auto` | Enable in-process audio playback (needs SDL3 3.2 or newer, or SDL2 2.0.18 or newer with `-Dsdl=sdl2`). |
 | `crypto` | `openssl` | The crypto library behind Web Crypto, random numbers and Safe Browsing hashes: `openssl` (OpenSSL's libcrypto from the system), or `mbedtls` for the portable build profile, Mbed TLS 3.6 from the system or else fetched and built as a subproject (`subprojects/mbedtls.wrap`). The `mbedtls` build lacks Ed25519 and Ed448, which Web Crypto then reports as not supported. HTTPS is libcurl's either way. |
 | `fontconfig` | `auto` | Find fonts through the system's fontconfig. `auto` uses it when it is installed (2.15 or newer); `disabled`, or a system without it, builds nsfc instead (`src/fc/`), which reads the platform's font folders itself with FreeType: `/usr/share/fonts`, `/usr/local/share/fonts`, the `fonts` folder of each `XDG_DATA_DIRS` entry, `~/.local/share/fonts` and `~/.fonts`; `%WINDIR%\Fonts` and the per-user font folder on Windows; the three `Library/Fonts` folders on macOS; then a `fonts` folder beside the executable and the folders named in `NS_FONT_PATH`. It needs no configuration files, and keeps what it found in `fonts.cache` in the browser's cache folder. `enabled` makes fontconfig required. See [porting-to-sdl.md](porting-to-sdl.md). |
-| `text` | `native` | The text layout library behind the engine's `ns_pango_*` API. `native`: nstext (`src/text/`), written on HarfBuzz, FriBidi and FreeType with fonts from fontconfig or nsfc, with no Pango, GObject or GLib in it; the browser then links no GObject. `pango`: web-text-lib, the in-tree Pango fork (`src/web-text-lib/`), on GLib and GObject, kept for a while as the reference CI compares nstext against. libthai is used for Thai word breaks with either, when installed. See [text-layout.md](text-layout.md). |
 | `bundled_fonts` | `auto` | Compile fallback fonts into the browser for nsfc: DejaVu Sans, Sans Bold, Serif and Sans Mono 2.37, about 2.1 MB, fetched from the release pinned in `subprojects/dejavu-fonts.wrap` (Bitstream Vera licence, in `THIRD-PARTY-LICENSES.md`). They are used only where the system has no font of the kind a page asks for, or none with its characters, so a portable build still draws text on a system with few or no fonts. `auto` builds them in wherever nsfc is built, and leaves them out (they would never be used) where the system's fontconfig is; `disabled` leaves them out; `enabled` requires them, and fails with the system's fontconfig. `NS_NO_SYSTEM_FONTS=1` in the environment hides the system's fonts from nsfc, to see the bundled ones alone. |
 | `ca_bundle` | empty | A file of CA certificates in PEM format, such as [Mozilla's set from curl.se](https://curl.se/docs/caextract.html), to compile into the browser as its own trust store for HTTPS. It is used where the system has no certificate file, and wherever the environment has `NS_CA_BUNDLE=builtin`, for a system whose own root certificates are too old. (`NS_CA_BUNDLE` may also name a certificate file to use, in any build.) The certificates are as old as the build: a browser built this way needs rebuilding to learn of new ones. |
-| `glib` | `system` | Where GLib and GObject come from. `system`: the installed libraries (2.80 or newer). `bundled`: the part of them the browser uses (containers, strings, the Unicode tables, key files, checksums, logging, GObject's type system), built statically from the GLib release pinned in `subprojects/glib.wrap` by `subprojects/packagefiles/glib/meson.build`; the browser then needs no GLib installed, nor PCRE2, libffi or libintl. For Linux, the BSDs and Windows (the Windows CI build uses it); not macOS yet. (A distribution's HarfBuzz may load the system's GLib for its own use all the same.) `native`: no GLib or GObject at all, but nscore (`src/core/`), the browser's own core library under GLib's names; it needs `-Dtext=native` and leaves spell checking out (the system's Enchant links GLib). GLib is then needed only for nscore's tests against it, which are skipped without it. See [porting-to-sdl.md](porting-to-sdl.md), stage 6.5. |
+| `glib` | `system` | Where GLib comes from. `system`: the installed library (2.80 or newer). `bundled`: the part of it the browser uses (containers, strings, the Unicode tables, key files, checksums, logging), built statically from the GLib release pinned in `subprojects/glib.wrap` by `subprojects/packagefiles/glib/meson.build`; the browser then needs no GLib installed, nor PCRE2, libffi or libintl. For Linux, the BSDs and Windows (the Windows CI build uses it); not macOS yet. (A distribution's HarfBuzz may load the system's GLib for its own use all the same.) `native`: no GLib at all, but nscore (`src/core/`), the browser's own core library under GLib's names; it leaves spell checking out (the system's Enchant links GLib). GLib is then needed only for nscore's tests against it, which are skipped without it. See [porting-to-sdl.md](porting-to-sdl.md), stage 6.5. |
 | `avif` | `auto` | Decode AVIF through libavif. Disabling drops a full AV1 decoder; AVIF images then fail to decode. |
 | `pdfjs` | `auto` | The PDF viewer, built on PDF.js and embedded at build time. `auto` builds it when PDF.js is available; `enabled` makes PDF.js a required dependency, so the build fails without it; `disabled` leaves the viewer out, and a PDF shows a link to the file. |
 | `pdfjs_dir` | *(empty)* | Directory of an installed PDF.js to use instead of the pinned release, such as Arch's `/usr/share/pdf.js`. See below. |
@@ -482,7 +480,7 @@ Others the browser reads:
 | `NS_FRAME_STATS` | Print, for each frame the window gets, what painting the page and the layers, copying and uploading it took. |
 | `NS_GUI_TEST` | A script of waits, key presses, wheel turns and window shots (BMP files beside it) for the window to run, for comparing what it shows (`src/sdl/guitest.c`). |
 | `NS_FORCE_HTTP3` | Use HTTP/3 directly instead of waiting for Alt-Svc. |
-| `NS_PANGO_SHAPE_CACHE` | `0` turns the web-text-lib caches off; `verify` checks every cached shape against a fresh one. |
+| `NS_PANGO_SHAPE_CACHE` | `0` turns the text library's shape cache off. |
 | `NS_HEADLESS_LEGACY` | Send every headless run through the direct engine path. |
 
 Running as `root` is refused for safety; `NS_ALLOW_ROOT=1` overrides it,

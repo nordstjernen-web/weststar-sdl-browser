@@ -1,21 +1,15 @@
-# Text without Pango: nstext
+# The text library: nstext
 
 The engine lays text out and draws it through one API, the `ns_pango_*`
-functions of `src/ns_pango.h`. Two libraries implement it:
+functions of `src/ns_pango.h`, implemented by **nstext** (`src/text/`):
+Weststar's own text layout on HarfBuzz, FriBidi and FreeType, with fonts
+from fontconfig or nsfc (`src/fc/`), drawn with gfx. No Pango, no GObject,
+no GLib.
 
-- **nstext** (`src/text/`, `-Dtext=native`, the default): the API written
-  for the browser on HarfBuzz, FriBidi and FreeType, with fonts from
-  fontconfig or nsfc (`src/fc/`), drawn with gfx. No Pango, no GObject, no
-  GLib.
-- **web-text-lib** (`src/web-text-lib/`, `-Dtext=pango`): the in-tree Pango
-  1.58 fork with its gfx backend (`pangogfx`), on GLib and GObject. It is
-  kept for a while as the reference the CI compares nstext against, and
-  then removed.
-
-nstext is the default since it lays out every page compared the same as
-the fork, in boxes and in pixels (see *Status*).
-This page records what the engine needs of the API, how nstext provides
-it, and how far the two agree.
+nstext replaced web-text-lib, an in-tree fork of Pango 1.58 with a gfx
+backend, on GLib and GObject, which is where the `ns_pango_*` names come
+from (*History*, below). This page records what the engine needs of the
+API, how nstext provides it, and how it was checked against the fork.
 
 ## What the engine uses
 
@@ -89,17 +83,17 @@ outlines).
 
 **Diagnostics.** `ns_pango_version_string` (about:weststar) and the
 shape, break and item cache statistics (`--debug=net`). nstext keeps a
-shape cache only (`NS_PANGO_SHAPE_CACHE=0` turns it off, as for the
-fork); its break and item statistics read zero.
+shape cache only (`NS_PANGO_SHAPE_CACHE=0` turns it off); its break and
+item statistics read zero.
 
 ## The design of nstext
 
 nstext implements those functions and nothing else. Its types are plain
 C structs with reference counts; its locks, once-only initialisation and
 thread-local values are the SDL platform layer's (`src/plat/ns_plat.h`).
-Where the fork's behaviour decides a pixel (line breaks, rounding, line
+Where the fork's behaviour decided a pixel (line breaks, rounding, line
 heights, decoration geometry), nstext follows the fork's code closely, so
-that pages lay out the same; the rest is written anew.
+that pages laid out the same; the rest is written anew.
 
 | File | What |
 |------|------|
@@ -116,11 +110,11 @@ that pages lay out the same; the rest is written anew.
 | `nstext-glyph-item.c` | Runs as Pango's glyph items: the cluster iterator and the split of a run (`pango-glyph-item.c`). |
 | `nstext-layout.c` | Layouts: paragraphs, Pango's greedy line breaker (`process_item`, `process_line`), tabs, hyphens, trailing spaces, rise, bidi reordering, justification between words and between clusters (`justify_words`, `justify_clusters`), extents, line spacing, alignment and indent, hit testing, iterators, the context's metrics. |
 | `nstext-ellipsize.c` | Ellipsis: Pango's `ellipsize.c`, a gap grown from the start, the middle or the end of the line, balanced around that position, with the ellipsis (U+2026, U+22EF before wide characters, or "...") shaped in the gap's font, and the line's runs rebuilt around it. |
-| `nstext-render.c` | Drawing: backgrounds, glyphs and decorations run by run as Pango's renderer does, glyphs as the fork's gfx backend draws them (bitmaps at quarter-pixel phases, colour glyphs, outlines when rotated). |
+| `nstext-render.c` | Drawing: backgrounds, glyphs and decorations run by run as Pango's renderer does, glyphs as the fork's gfx backend drew them (bitmaps at quarter-pixel phases, colour glyphs, outlines when rotated). |
 
 Line breaking uses Pango's rules on a table generated from the Unicode
-Character Database rather than libunibreak: the rules are what the fork
-runs today (so breaks agree to the character), libunibreak would add a
+Character Database rather than libunibreak: the rules are the ones the fork
+ran (so breaks agreed to the character), libunibreak would add a
 dependency and its own tailoring, and the table is the only Unicode data
 the rules need that HarfBuzz does not have.
 
@@ -130,27 +124,48 @@ which fonts a page got.
 
 ### The one API change
 
-The fork's layouts are GObjects, which the engine held with
-`g_object_ref`/`g_object_unref`. Those 36 calls now read
-`ns_pango_layout_ref`/`ns_pango_layout_unref`, which `ns_pango.h`
-defines over GObject for the fork. `appmain.c` reaches the cache
-statistics through `ns_pango.h` instead of a fork header.
+The fork's layouts were GObjects, which the engine held with
+`g_object_ref`/`g_object_unref`. Those 36 calls read
+`ns_pango_layout_ref`/`ns_pango_layout_unref` since nstext came, and
+`appmain.c` reaches the cache statistics through `ns_pango.h` instead of
+a fork header.
 
 ### Dependencies
 
 nstext needs HarfBuzz, FriBidi, FreeType, fontconfig (or nsfc) and SDL
 through the platform layer; libthai is used where installed. It calls no
-GLib function and includes no GLib header. With `-Dtext=native` the
-browser does not link GObject at all; GLib itself is still linked, for
-the rest of the engine (stage 6.5 of [porting-to-sdl.md](porting-to-sdl.md)).
+GLib function and includes no GLib header.
 
 ## Status
 
-`meson setup -Dtext=native` builds the whole browser, with SDL3 or SDL2,
-with fontconfig or nsfc (and its bundled fonts), with gcc and with clang
-ThinLTO under `--werror`, and is the default. Measured on Windows (MSYS2 UCRT64, system
-fontconfig) with `--headless --viewport=800x1000`, comparing `--dump=png`
-byte for byte and `--dump=layout` line by line, 77 pages:
+nstext builds with SDL3 or SDL2, with fontconfig or nsfc (and its bundled
+fonts), with gcc and with clang ThinLTO under `--werror`, on Linux,
+Windows and Windows XP. Not implemented: vertical text and gravity (the
+engine sets none). Of the fork's cache statistics only the shape cache's
+are reported: nstext has no break or item cache, and those read zero.
+
+`text-layout-dump` (`src/text/tests/text-layout-dump.c`, `ninja -C
+builddir text-layout-dump`) prints the lines, extents, every character's
+position, hits across the width, x ranges and a hash of the pixels of a
+set of ellipsized and justified layouts, the middle ellipsis and carets
+and hits inside an ellipsis among them, which no CSS reaches; given a
+directory as argument it writes their pictures there. Its output depends
+on the fonts installed, so it is not compared with a stored copy: run it
+before and after a change to nstext and compare the two. `meson test
+--suite text` only checks that it lays every case out.
+
+## History: nstext against the Pango fork
+
+Until nstext could take its place the fork was kept beside it
+(`-Dtext=pango`, with nstext as `-Dtext=native`, the default from the
+time the two laid every page out alike), and CI compared the two; then
+`src/web-text-lib/` was removed, and with it the last use of GObject.
+
+Where the fork's behaviour decided a pixel, nstext had followed its code,
+so the comparison asked for the same output. Measured on Windows (MSYS2
+UCRT64, system fontconfig) with `--headless --viewport=800x1000`,
+comparing `--dump=png` byte for byte and `--dump=layout` line by line,
+77 pages:
 
 | Pages | Pictures | Layout |
 |-------|----------|--------|
@@ -160,12 +175,14 @@ byte for byte and `--dump=layout` line by line, 77 pages:
 | about:start | the animated logo only (it differs between two runs of the same build too) | identical |
 | about:weststar | the line naming the text library | that line |
 
-canvas-2d gives 21 PASS and webcrypto 57 PASS with either library. The
+canvas-2d gave 21 PASS and webcrypto 57 PASS with either library. The
 WPT checkout's testharness tests under `css/css-text`, `css/css-text-decor`
 and `css/css-fonts` (355 files, 6718 subtests, parsing tests left out)
-give 4135 passes with the fork and 4138 with nstext: the same results in
+gave 4135 passes with the fork and 4138 with nstext: the same results in
 every file but `css-fonts/variations/at-font-face-font-matching.html`,
-where nstext passes three more.
+where nstext passed three more. On Linux the CI required the same
+`--dump=layout` for every fixture, and the same `text-layout-dump` output
+but for its pixel hashes.
 
 `text-small-caps.html` has small caps in a font with `smcp` (Calibri or
 Linux Libertine, where installed) and synthesized in DejaVu (U+00DF,
@@ -181,21 +198,15 @@ spacing, decorations, Arabic and Hebrew with embedded numbers and Latin,
 Devanagari, Thai (dictionary breaks), CJK, colour emoji with modifiers,
 flags and ZWJ sequences, combining marks, tabs, the white-space values,
 hyphens, overflow-wrap, inline boxes, indent, line-height and the
-ellipsis are the same, and so are their pixels. `text-ellipsis.html`
+ellipsis were the same, and so were their pixels. `text-ellipsis.html`
 cuts lines at the end (ltr) and at the start (rtl): Latin, Hebrew,
 Arabic and mixed bidi, letter spacing, a font change and combining
 marks at the cut, CJK (the midline ellipsis), and justifies CJK, Korean
 and Thai paragraphs that have no spaces. (The fixture's caret probe
-reads Range rectangles, which the headless engine reports as empty with
-either library.)
-
-The middle ellipsis, which no CSS asks for, and carets and hits inside
-an ellipsis are compared by `text-layout-dump`, a small program built
-with either library (`ninja -C build-X text-layout-dump`): it prints the
-lines, extents, every character's position, hits across the width, x
-ranges and a hash of the pixels of a set of ellipsized and justified
-layouts, and writes their pictures to a directory given as argument.
-The two builds print the same.
+reads Range rectangles, which the headless engine reports as empty.)
+The middle ellipsis and carets and hits inside an ellipsis were compared
+with `text-layout-dump`, built with either library: the two printed the
+same.
 
 Differences found and fixed on the way, each visible in the pictures:
 decorations pending when a colour changes are drawn in the old colour
@@ -204,13 +215,3 @@ another link); glyph offsets are not rounded (marks in Devanagari and
 Thai); the context's metrics shape their sample string unrounded (the
 width of text inputs); a variation selector asks for a colour or a text
 emoji font (the height of a line with emoji).
-
-### What is left before the fork can go
-
-- Vertical text and gravity are not implemented (the engine sets none).
-- The comparison has been run on Windows only; the `text-native` job of
-  the Linux workflow builds both libraries and requires the same
-  `--dump=layout` for every fixture there, and the same
-  `text-layout-dump` but for its pixel hashes.
-- Of the fork's cache statistics only the shape cache's are reported:
-  nstext has no break or item cache.

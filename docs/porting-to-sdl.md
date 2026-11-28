@@ -8,8 +8,8 @@ with SDL3, and the record of what has been done.
 
 Northstar's engine paints straight into a Cairo context: `paint.c`,
 `js_canvas.c` and `svg.c` alone make about 1,500 Cairo calls, and the
-vendored text stack (`src/web-text-lib/`, a Pango fork) renders glyphs
-through `pangocairo` and `cairo-ft`. The GTK shell, by contrast, is
+vendored text stack (web-text-lib, a Pango fork, since replaced by
+nstext) rendered glyphs through `pangocairo` and `cairo-ft`. The GTK shell, by contrast, is
 self-contained: about 7,000 lines in `src/gtk/` behind a small request /
 response protocol with the engine thread (`page_session.c`).
 
@@ -34,9 +34,10 @@ So the shell goes first, and Cairo after it:
    transforms, linear, radial and mesh gradients, surface patterns with
    filters and extend modes, the Porter-Duff and blend operators, groups,
    masks and damage regions — drawing into premultiplied ARGB32 pixel
-   buffers that upload to SDL textures as they are. Text is laid out by
-   web-text-lib (the engine's Pango fork) and its glyphs are rasterized
-   with FreeType into gfx. Cairo is not a build dependency
+   buffers that upload to SDL textures as they are. Text was laid out by
+   web-text-lib (the engine's Pango fork, since replaced by nstext: see
+   Text without Pango) and its glyphs were rasterized with FreeType into
+   gfx, as nstext's are. Cairo is not a build dependency
    at all. PDF export (`--export=pdf:`) and the dormant print path
    drew through Cairo's PDF and recording surfaces; they are removed for
    now, to come back in a form that does not need Cairo.
@@ -68,10 +69,10 @@ So the shell goes first, and Cairo after it:
    1. *Threads, locks, condition variables, thread-local data and time*
       move from GLib to a small layer over SDL3 (`src/plat/`): SDL's
       mutexes, condition variables, read-write locks, threads, TLS and
-      clocks. (Done, web-text-lib included: the Pango fork keeps its
+      clocks. (Done, web-text-lib included: the Pango fork kept its
       `GMutex`, `G_LOCK`, `GPrivate` and `GAsyncQueue` spelling, and
-      `ns-glib-threads.h` gives those names the SDL layer's meaning in
-      the files that use them. The browser imports none of GLib's
+      `ns-glib-threads.h` gave those names the SDL layer's meaning in
+      the files that used them. The browser imports none of GLib's
       thread, lock or queue functions; what is left is inside GLib
       itself, `g_once` and GObject's type system.)
    2. *The main loop and timers* move from GLib's `GMainContext` to an
@@ -447,6 +448,10 @@ Not in gfx: vector output (PDF) and curved mesh patch sides.
 
 ## Text: pangogfx
 
+This is how glyphs came to be drawn with gfx, in web-text-lib, the Pango
+fork the engine then used; nstext, which replaced it, draws them the same
+way.
+
 web-text-lib drew glyphs through its Cairo backend (`pangocairo-*`).
 `pangogfx-*` replaces it: a fontconfig font map and font (subclasses of
 web-text-lib's `NsPangoFcFontMap` and `NsPangoFcFont`) and a renderer.
@@ -467,9 +472,8 @@ web-text-lib's `NsPangoFcFontMap` and `NsPangoFcFont`) and a renderer.
 
 ## Text without Pango
 
-Pango, and with it GObject, is the heaviest library left that is not
-SDL. Its replacement is done: nstext (`src/text/`, `meson setup
--Dtext=native`) implements the `ns_pango_*` API the engine calls (105
+Pango, and with it GObject, was the heaviest library left that was not
+SDL. Its replacement is done: nstext (`src/text/`) implements the `ns_pango_*` API the engine calls (105
 functions) on HarfBuzz, FriBidi and FreeType, with fonts from fontconfig
 or nsfc and glyphs drawn with gfx as pangogfx draws them. It has no
 GObject and calls no GLib (its locks and thread-local values are the SDL
@@ -480,17 +484,17 @@ pages lay out alike. The only change the engine needed is
 `ns_pango_layout_ref`/`unref` in place of `g_object_ref`/`unref` on
 layouts.
 
-Status: it builds with either SDL and either font finder, and on the
-fixtures and the 51 render tests it lays out as the fork does (boxes and
-line breaks and pictures identical); see [text-layout.md](text-layout.md)
-for the comparison and what is left. It is the default; `-Dtext=pango`
-builds the fork, which the Linux CI still compares nstext against for a
-while. Then `src/web-text-lib/` goes, and GObject with it.
+Status: done. It builds with either SDL and either font finder, and on
+the fixtures and the 51 render tests it laid out as the fork did (boxes
+and line breaks and pictures identical); see [text-layout.md](text-layout.md)
+for the comparison. Once that held on Linux and Windows the fork
+(`src/web-text-lib/`, `-Dtext=pango`) was removed, and GObject with it:
+nothing else in the browser used GObject.
 
 ## Fonts: nsfc
 
-web-text-lib's font map (`pangofc-fontmap.c`, 3,700 lines) and the engine
-find fonts by calling fontconfig: about 85 of its functions. fontconfig
+The text library's font map (web-text-lib's `pangofc-fontmap.c`, 3,700
+lines, then nstext's) and the engine find fonts by calling fontconfig: about 85 of its functions. fontconfig
 is a library of the Unix desktop, configured by a tree of XML files;
 Windows needs its configuration bundled beside the executable, and the
 Amiga family has no port to speak of. Rather than rewrite the font map,
@@ -588,8 +592,8 @@ popups and scrollable windows, and emits a plain list of draw commands.
 `src/sdl/nkui.c` is Weststar's backend for it: SDL3 events are fed in,
 the commands are drawn with gfx into a window-sized layer, and only the
 part that changed since the last frame is uploaded to the GPU. Text goes
-through an `nk_user_font` that measures and draws with web-text-lib (the
-engine's Pango fork), so the chrome gets HarfBuzz shaping and fontconfig
+through an `nk_user_font` that measures and draws with nstext (the
+engine's text library), so the chrome gets HarfBuzz shaping and fontconfig
 fallback; kerning is off in the chrome because Nuklear places the caret
 by adding up the widths of single characters. The chrome was the first
 code moved to gfx.
