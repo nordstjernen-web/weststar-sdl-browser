@@ -33,6 +33,7 @@ nt_item_copy (const NtItem *item)
 
   *c = *item;
   nt_font_ref (c->font);
+  nt_font_ref (c->size_font);
   c->extra_attrs = item->n_extra ? nt_new (NtAttr *, item->n_extra) : NULL;
   for (i = 0; i < item->n_extra; i++)
     c->extra_attrs[i] = nt_attr_copy (item->extra_attrs[i]);
@@ -47,6 +48,7 @@ nt_item_free (NtItem *item)
   if (!item)
     return;
   nt_font_unref (item->font);
+  nt_font_unref (item->size_font);
   for (i = 0; i < item->n_extra; i++)
     ns_pango_attribute_destroy (&item->extra_attrs[i]->base);
   free (item->extra_attrs);
@@ -893,31 +895,30 @@ collect_features (const NtItem *item, hb_feature_t *features, unsigned int lengt
         }
     }
 
-  /* Small caps: the font's own, where it has them. */
-  {
-    NtAttr *v = nt_item_find_attr (item, NT_ATTR_VARIANT);
+  /* Small caps: the font's own, where it has them (the variant's features,
+   * which pangofc puts in the font's pattern; synthesized small caps keep
+   * them, to no effect). */
+  if (item->variant != NS_PANGO_VARIANT_NORMAL && n + 1 < length)
+    {
+      static const char *const feats[] = {
+        NULL, "smcp", "c2sc,smcp", "pcap", "c2pc,pcap", "unic", "titl"
+      };
+      const char *f = (unsigned) item->variant < NT_N_ELEMENTS (feats)
+                        ? feats[item->variant] : NULL;
 
-    if (v && v->v.i != NS_PANGO_VARIANT_NORMAL && n + 1 < length)
-      {
-        static const char *const feats[] = {
-          NULL, "smcp", "c2sc,smcp", "pcap", "c2pc,pcap", "unic", "titl"
-        };
-        const char *f = (unsigned) v->v.i < NT_N_ELEMENTS (feats) ? feats[v->v.i] : NULL;
+      while (f && n < length)
+        {
+          const char *end = strchr (f, ',');
 
-        while (f && n < length)
-          {
-            const char *end = strchr (f, ',');
-
-            if (hb_feature_from_string (f, end ? (int) (end - f) : -1, &features[n]))
-              {
-                features[n].start = 0;
-                features[n].end = (unsigned) -1;
-                n++;
-              }
-            f = end ? end + 1 : NULL;
-          }
-      }
-  }
+          if (hb_feature_from_string (f, end ? (int) (end - f) : -1, &features[n]))
+            {
+              features[n].start = 0;
+              features[n].end = (unsigned) -1;
+              n++;
+            }
+          f = end ? end + 1 : NULL;
+        }
+    }
 
   return n;
 }
@@ -1002,8 +1003,29 @@ hb_shape_item (const char *paragraph_text, int paragraph_length, const NtItem *i
     }
 
   hb_buffer_add_utf8 (buffer, paragraph_text, item_offset, (unsigned) item_offset, 0);
-  hb_buffer_add_utf8 (buffer, paragraph_text, item_offset + item_length,
-                      (unsigned) item_offset, item_length);
+  if (!(item->flags & NT_ITEM_UPPERCASE))
+    hb_buffer_add_utf8 (buffer, paragraph_text, item_offset + item_length,
+                        (unsigned) item_offset, item_length);
+  else
+    {
+      const char *p;
+
+      /* Synthesized small caps: the letters and numbers uppercased, each
+       * into its own cluster (Pango's text transform). */
+      for (p = paragraph_text + item_offset; p < paragraph_text + item_offset + item_length;
+           p = nt_utf8_next_char (p))
+        {
+          unsigned int index = (unsigned) (p - paragraph_text);
+          nt_unichar ch = nt_utf8_get_char (p), upper[3];
+          int n = 1, k;
+
+          upper[0] = ch;
+          if (nt_unichar_isalnum (ch))
+            n = nt_unichar_to_upper_full (ch, upper);
+          for (k = 0; k < n; k++)
+            hb_buffer_add (buffer, upper[k], index);
+        }
+    }
   hb_buffer_add_utf8 (buffer, paragraph_text, paragraph_length,
                       (unsigned) (item_offset + item_length), 0);
 
@@ -1233,9 +1255,9 @@ shape_key (NtString *key, const char *paragraph_text, int paragraph_length,
   int post = NT_MIN (paragraph_length - item->offset - item->length, SHAPE_CONTEXT_BYTES);
   int i;
 
-  nt_string_printf (key, "%s|%d|%u|%s|%u|%d|%d|%d|", item->font->key, item->level,
+  nt_string_printf (key, "%s|%d|%u|%s|%u|%d|%d|%d|%d|", item->font->key, item->level,
                     (unsigned) item->script, item->language ? item->language->tag : "",
-                    item->flags & NT_ITEM_NEED_HYPHEN,
+                    item->flags & (NT_ITEM_NEED_HYPHEN | NT_ITEM_UPPERCASE), item->variant,
                     log_attrs && (item->flags & NT_ITEM_NEED_HYPHEN)
                       ? log_attrs[item->num_chars].break_removes_preceding : 0,
                     pre, post);
@@ -1250,8 +1272,6 @@ shape_key (NtString *key, const char *paragraph_text, int paragraph_length,
                             ? (unsigned) -1 : a->base.end_index - (unsigned) item->offset);
       else if (a->base.type == NT_ATTR_LETTER_SPACING)
         nt_string_append (key, "L|");
-      else if (a->base.type == NT_ATTR_VARIANT)
-        nt_string_printf (key, "V%d|", a->v.i);
     }
   nt_string_append_len (key, paragraph_text + item->offset - pre,
                         (size_t) (pre + item->length + post));

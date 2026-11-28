@@ -88,6 +88,8 @@ int         nt_unichar_isspace (nt_unichar c);
 int         nt_unichar_iswide  (nt_unichar c);
 int         nt_unichar_iszerowidth (nt_unichar c);
 int         nt_unichar_isalnum (nt_unichar c);
+/* The full uppercase mapping (U+00DF is "SS"): the count put in out. */
+int         nt_unichar_to_upper_full (nt_unichar c, nt_unichar out[3]);
 
 /* Line_Break classes, numbered as GLib's GUnicodeBreakType. */
 typedef enum
@@ -364,6 +366,10 @@ NtFont    *nt_fontset_get_font (NtFontset *fontset, nt_unichar wc, int *position
 NtFont    *nt_font_map_load_font (NsPangoFontMap *fontmap,
                                   const NsPangoFontDescription *desc,
                                   NsPangoLanguage *language);
+/* The font described from its pattern at scale times its size, loaded
+ * for the context (Pango's apply_scale_to_item); referenced, or NULL. */
+NtFont    *nt_context_load_scaled_font (NsPangoContext *context, NtFont *font,
+                                        NsPangoVariant variant, double scale);
 
 /* Glyph flags, as Pango's. */
 #define NT_GLYPH_EMPTY         0x0FFFFFFFu
@@ -465,7 +471,9 @@ void           nt_glyph_string_extents_range (const NtGlyphString *gs, int start
 enum
 {
   NT_ITEM_NEED_HYPHEN = 1 << 0,
-  NT_ITEM_IS_ELLIPSIS = 1 << 1
+  NT_ITEM_IS_ELLIPSIS = 1 << 1,
+  NT_ITEM_UPPERCASE   = 1 << 2, /* synthesized small caps: shaped uppercased */
+  NT_ITEM_SMALL_CAPS  = 1 << 3  /* synthesized small caps: at a smaller size */
 };
 
 typedef struct
@@ -478,6 +486,9 @@ typedef struct
   uint8_t          level;      /* bidi embedding level */
   hb_script_t      script;
   NsPangoLanguage *language;
+  NsPangoVariant   variant;    /* the font description's */
+  NtFont          *size_font;  /* referenced: the font before small caps
+                                  scaled it, for the line height */
   unsigned         flags;
   NtAttr         **extra_attrs;/* copies, owned */
   int              n_extra;
@@ -511,6 +522,11 @@ void nt_itemize (NsPangoContext *context, NsPangoDirection base_dir,
  * breaking, features) covering each item to it, splitting items where
  * they change. */
 void nt_apply_attrs_to_items (NtItemList *items, const NsPangoAttrList *attrs);
+/* After the log attributes: small caps the fonts lack are synthesized,
+ * splitting items into lowercase and uppercase runs (Pango's
+ * pango_itemize_post_process_items). */
+void nt_itemize_post_process (NsPangoContext *context, const char *text,
+                              const NsPangoLogAttr *log_attrs, NtItemList *items);
 
 /* Shapes the item's text (the paragraph around it is context). */
 void nt_shape_item (const char *paragraph_text, int paragraph_length,

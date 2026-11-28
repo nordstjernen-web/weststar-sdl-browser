@@ -19,6 +19,7 @@
 #endif
 
 #include "nstext-linebreak-table.h"
+#include "nstext-case-table.h"
 
 /* ---- memory ------------------------------------------------------------ */
 
@@ -436,6 +437,56 @@ nt_unichar_isspace (nt_unichar c)
                t == HB_UNICODE_GENERAL_CATEGORY_PARAGRAPH_SEPARATOR;
       }
     }
+}
+
+/* The full uppercase of a lowercase letter, as g_utf8_strup gives it for
+ * one character (outside the Turkic and Lithuanian locales): up to three
+ * characters into out, their count returned. */
+int
+nt_unichar_to_upper_full (nt_unichar c, nt_unichar out[3])
+{
+  int lo = 0, hi = NS_TEXT_UPPER_MULTI - 1;
+
+  while (lo <= hi)
+    {
+      int mid = (lo + hi) / 2;
+
+      if (ns_text_upper_multi[mid][0] == c)
+        {
+          int n = 0;
+
+          while (n < 3 && ns_text_upper_multi[mid][n + 1])
+            {
+              out[n] = ns_text_upper_multi[mid][n + 1];
+              n++;
+            }
+          return n;
+        }
+      if (ns_text_upper_multi[mid][0] < c)
+        lo = mid + 1;
+      else
+        hi = mid - 1;
+    }
+
+  lo = 0;
+  hi = NS_TEXT_UPPER_SINGLE - 1;
+  while (lo <= hi)
+    {
+      int mid = (lo + hi) / 2;
+
+      if (ns_text_upper_single[mid][0] == c)
+        {
+          out[0] = ns_text_upper_single[mid][1];
+          return 1;
+        }
+      if (ns_text_upper_single[mid][0] < c)
+        lo = mid + 1;
+      else
+        hi = mid - 1;
+    }
+
+  out[0] = c;
+  return 1;
 }
 
 int

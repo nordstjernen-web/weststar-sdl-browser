@@ -2022,3 +2022,82 @@ nt_context_load_fontset (NsPangoContext *context, const NsPangoFontDescription *
   return font_map_load_fontset_scaled (context->fontmap, desc, language,
                                        context->scale_x, context->scale_y);
 }
+
+static NsPangoStretch
+fc_width_to_stretch (int width)
+{
+  switch (width)
+    {
+    case FC_WIDTH_ULTRACONDENSED: return NS_PANGO_STRETCH_ULTRA_CONDENSED;
+    case FC_WIDTH_EXTRACONDENSED: return NS_PANGO_STRETCH_EXTRA_CONDENSED;
+    case FC_WIDTH_CONDENSED: return NS_PANGO_STRETCH_CONDENSED;
+    case FC_WIDTH_SEMICONDENSED: return NS_PANGO_STRETCH_SEMI_CONDENSED;
+    case FC_WIDTH_SEMIEXPANDED: return NS_PANGO_STRETCH_SEMI_EXPANDED;
+    case FC_WIDTH_EXPANDED: return NS_PANGO_STRETCH_EXPANDED;
+    case FC_WIDTH_EXTRAEXPANDED: return NS_PANGO_STRETCH_EXTRA_EXPANDED;
+    case FC_WIDTH_ULTRAEXPANDED: return NS_PANGO_STRETCH_ULTRA_EXPANDED;
+    case FC_WIDTH_NORMAL:
+    default: return NS_PANGO_STRETCH_NORMAL;
+    }
+}
+
+/* The font described as pangofc describes it (font_description_from_pattern:
+ * the family, slant, weight and width the font's pattern was rendered with,
+ * its point size, which includes the context's scale, and its variations),
+ * scaled, and loaded again through the context in its language, as Pango's
+ * apply_scale_to_item does for a font scale. */
+NtFont *
+nt_context_load_scaled_font (NsPangoContext *context, NtFont *font, NsPangoVariant variant,
+                             double scale)
+{
+  NsPangoFontDescription *desc = ns_pango_font_description_new ();
+  FcChar8 *s;
+  FcMatrix *fc_matrix;
+  int i;
+  double d;
+  NtFontset *fs;
+  NtFont *scaled = NULL;
+
+  if (FcPatternGetString (font->pattern, FC_FAMILY, 0, &s) == FcResultMatch)
+    ns_pango_font_description_set_family (desc, (const char *) s);
+  if (FcPatternGetInteger (font->pattern, FC_SLANT, 0, &i) == FcResultMatch)
+    ns_pango_font_description_set_style (desc, i == FC_SLANT_ITALIC ? NS_PANGO_STYLE_ITALIC
+                                               : i == FC_SLANT_OBLIQUE ? NS_PANGO_STYLE_OBLIQUE
+                                               : NS_PANGO_STYLE_NORMAL);
+  else
+    ns_pango_font_description_set_style (desc, NS_PANGO_STYLE_NORMAL);
+  if (FcPatternGetDouble (font->pattern, FC_WEIGHT, 0, &d) == FcResultMatch)
+    ns_pango_font_description_set_weight (desc, (NsPangoWeight) FcWeightToOpenTypeDouble (d));
+  else
+    ns_pango_font_description_set_weight (desc, NS_PANGO_WEIGHT_NORMAL);
+  if (FcPatternGetInteger (font->pattern, FC_WIDTH, 0, &i) == FcResultMatch)
+    ns_pango_font_description_set_stretch (desc, fc_width_to_stretch (i));
+  else
+    ns_pango_font_description_set_stretch (desc, NS_PANGO_STRETCH_NORMAL);
+  ns_pango_font_description_set_variant (desc, variant);
+
+  if (FcPatternGetDouble (font->pattern, FC_SIZE, 0, &d) == FcResultMatch)
+    {
+      double scale_factor = 1, sx;
+      volatile double scaled_size;
+
+      if (FcPatternGetMatrix (font->pattern, FC_MATRIX, 0, &fc_matrix) == FcResultMatch)
+        matrix_font_scale_factors (fc_matrix->xx, fc_matrix->yx, fc_matrix->xy, fc_matrix->yy,
+                                   &sx, &scale_factor);
+      scaled_size = scale_factor * d * NS_PANGO_SCALE;
+      ns_pango_font_description_set_size (desc, (int) scaled_size);
+      ns_pango_font_description_set_size (desc, (int) (scale * desc->size));
+    }
+
+  if (FcPatternGetString (font->pattern, FC_FONT_VARIATIONS, 0, &s) == FcResultMatch &&
+      s && *s)
+    ns_pango_font_description_set_variations (desc, (const char *) s);
+
+  fs = nt_context_load_fontset (context, desc, context->language);
+  for (i = 0; i < 4 && !scaled; i++)
+    scaled = nt_fontset_get_font_at (fs, i);
+  nt_font_ref (scaled);
+  nt_fontset_unref (fs);
+  ns_pango_font_description_free (desc);
+  return scaled;
+}

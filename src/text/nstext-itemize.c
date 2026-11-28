@@ -2,7 +2,8 @@
  * items of one bidi level, script, emoji presentation and set of font
  * attributes, and each character gets the first font of its fontset that
  * covers it, as Pango's itemize.c does; bidi levels come from FriBidi as
- * in pango-bidi-type.c.
+ * in pango-bidi-type.c. Small caps a font lacks are synthesized as in
+ * itemize.c's post-processing.
  *
  * Copyright (C) 2000, 2006 Red Hat Software
  * Copyright 2026 Andreas Røsdal
@@ -191,6 +192,7 @@ typedef struct
   int             font_position;
   const char     *first_space;
   int             char_offset;
+  NsPangoVariant  variant;
 } State;
 
 /* The extra attributes of a range: everything that is not a font field,
@@ -314,6 +316,7 @@ add_character (State *st, NtFont *font, int font_position, int force_break,
   st->item->level = level;
   st->item->script = script;
   st->item->language = lang;
+  st->item->variant = st->variant;
   if (n_extra)
     {
       int i;
@@ -419,6 +422,7 @@ nt_itemize (NsPangoContext *context, NsPangoDirection base_dir,
         }
 
       fontset = nt_context_load_fontset (context, font_desc, derived);
+      st.variant = font_desc->variant;
       ns_pango_font_description_free (font_desc);
 
       for (q = p, run_ci = ci; q < run_end; q = nt_utf8_next_char (q), run_ci++)
@@ -527,4 +531,207 @@ nt_apply_attrs_to_items (NtItemList *items, const NsPangoAttrList *attrs)
           item->extra_attrs[item->n_extra++] = nt_attr_copy (a);
         }
     }
+}
+
+/* ---- synthesized small caps -------------------------------------------- */
+
+/* Pango 1.50's post-processing of items (itemize.c, "Handling Casing
+ * variants" and "Handling font scale"): where the font has no glyphs for
+ * a variant, the item is split into runs of lowercase and of uppercase
+ * letters; the lowercase are shaped uppercased (and, for all-small-caps,
+ * the uppercase too) with a font at the size that makes the cap height
+ * the x-height. The engine sets no text-transform or font-scale
+ * attributes, so an item has no transform of its own and one scale at
+ * most. */
+
+static int
+all_features_supported (const NtItem *item, const hb_tag_t *features, unsigned int n_features)
+{
+  hb_face_t *face = item->font->hb_face;
+  unsigned int script_count = HB_OT_MAX_TAGS_PER_SCRIPT;
+  hb_tag_t script_tags[HB_OT_MAX_TAGS_PER_SCRIPT];
+  unsigned int language_count = HB_OT_MAX_TAGS_PER_LANGUAGE;
+  hb_tag_t language_tags[HB_OT_MAX_TAGS_PER_LANGUAGE];
+  hb_tag_t chosen_script;
+  unsigned int script_index, language_index, index, i;
+  hb_language_t language = hb_language_from_string (item->language ? item->language->tag
+                                                                    : NULL, -1);
+
+  hb_ot_tags_from_script_and_language (item->script, language,
+                                       &script_count, script_tags,
+                                       &language_count, language_tags);
+  hb_ot_layout_table_select_script (face, HB_OT_TAG_GSUB, script_count, script_tags,
+                                    &script_index, &chosen_script);
+  hb_ot_layout_script_select_language (face, HB_OT_TAG_GSUB, script_index,
+                                       language_count, language_tags, &language_index);
+  for (i = 0; i < n_features; i++)
+    if (!hb_ot_layout_language_find_feature (face, HB_OT_TAG_GSUB, script_index,
+                                             language_index, features[i], &index))
+      return FALSE;
+  return TRUE;
+}
+
+static int
+variant_supported (const NtItem *item, NsPangoVariant variant)
+{
+  hb_tag_t features[2];
+  unsigned int n = 0;
+
+  switch (variant)
+    {
+    case NS_PANGO_VARIANT_SMALL_CAPS:
+      features[n++] = HB_TAG ('s', 'm', 'c', 'p');
+      break;
+    case NS_PANGO_VARIANT_ALL_SMALL_CAPS:
+      features[n++] = HB_TAG ('s', 'm', 'c', 'p');
+      features[n++] = HB_TAG ('c', '2', 's', 'c');
+      break;
+    case NS_PANGO_VARIANT_PETITE_CAPS:
+      features[n++] = HB_TAG ('p', 'c', 'a', 'p');
+      break;
+    case NS_PANGO_VARIANT_ALL_PETITE_CAPS:
+      features[n++] = HB_TAG ('p', 'c', 'a', 'p');
+      features[n++] = HB_TAG ('c', '2', 'p', 'c');
+      break;
+    case NS_PANGO_VARIANT_UNICASE:
+      features[n++] = HB_TAG ('u', 'n', 'i', 'c');
+      break;
+    case NS_PANGO_VARIANT_NORMAL:
+    case NS_PANGO_VARIANT_TITLE_CAPS:
+    default:
+      return TRUE;
+    }
+  return all_features_supported (item, features, n);
+}
+
+static int
+needs_synthesis (const NtItem *item)
+{
+  return item->font && item->variant != NS_PANGO_VARIANT_NORMAL &&
+         !variant_supported (item, item->variant);
+}
+
+static int
+is_lowercase (nt_unichar wc)
+{
+  return nt_unichar_type (wc) == HB_UNICODE_GENERAL_CATEGORY_LOWERCASE_LETTER;
+}
+
+/* Appends to out the item cut into its lowercase and uppercase runs, each
+ * flagged for how it is to appear (split_item_for_variant). */
+static void
+split_item_for_variant (const char *text, NsPangoVariant variant, NtItem *item,
+                        NtItemList *out)
+{
+  unsigned lowercase_flags = 0, uppercase_flags = 0;
+  const char *p, *p0, *end;
+
+  switch (variant)
+    {
+    case NS_PANGO_VARIANT_ALL_SMALL_CAPS:
+    case NS_PANGO_VARIANT_ALL_PETITE_CAPS:
+      uppercase_flags = NT_ITEM_SMALL_CAPS;
+      /* fall through */
+    case NS_PANGO_VARIANT_SMALL_CAPS:
+    case NS_PANGO_VARIANT_PETITE_CAPS:
+      lowercase_flags = NT_ITEM_UPPERCASE | NT_ITEM_SMALL_CAPS;
+      break;
+    case NS_PANGO_VARIANT_UNICASE:
+      uppercase_flags = NT_ITEM_SMALL_CAPS;
+      break;
+    case NS_PANGO_VARIANT_NORMAL:
+    case NS_PANGO_VARIANT_TITLE_CAPS:
+    default:
+      nt_item_list_append (out, item);
+      return;
+    }
+
+  p = text + item->offset;
+  end = p + item->length;
+  while (p < end)
+    {
+      int pass;
+
+      /* A lowercase run, then an uppercase one; spaces go with either. */
+      for (pass = 0; pass < 2; pass++)
+        {
+          NtItem *piece;
+
+          p0 = p;
+          while (p < end)
+            {
+              nt_unichar wc = nt_utf8_get_char (p);
+
+              if (!consider_as_space (wc) && is_lowercase (wc) != (pass == 0))
+                break;
+              p = nt_utf8_next_char (p);
+            }
+          if (p0 == p)
+            continue;
+          if (p < end)
+            piece = nt_item_split (item, (int) (p - p0), nt_utf8_strlen (p0, (int) (p - p0)));
+          else
+            piece = item;
+          piece->flags |= pass == 0 ? lowercase_flags : uppercase_flags;
+          nt_item_list_append (out, piece);
+        }
+    }
+}
+
+/* The font scale of a small-caps run: the x-height over the cap height. */
+static double
+small_caps_scale (const NtItem *item)
+{
+  hb_position_t cap_height, x_height;
+
+  if (hb_ot_metrics_get_position (item->font->hb_font, HB_OT_METRICS_TAG_CAP_HEIGHT,
+                                  &cap_height) &&
+      hb_ot_metrics_get_position (item->font->hb_font, HB_OT_METRICS_TAG_X_HEIGHT,
+                                  &x_height))
+    return x_height / (double) cap_height;
+  return 0.8;
+}
+
+void
+nt_itemize_post_process (NsPangoContext *context, const char *text,
+                         const NsPangoLogAttr *log_attrs NT_UNUSED, NtItemList *items)
+{
+  NtItemList out = { 0 };
+  int i;
+
+  for (i = 0; i < items->n; i++)
+    if (needs_synthesis (items->items[i]))
+      break;
+  if (i == items->n)
+    return;
+
+  for (i = 0; i < items->n; i++)
+    {
+      NtItem *item = items->items[i];
+
+      if (needs_synthesis (item))
+        split_item_for_variant (text, item->variant, item, &out);
+      else
+        nt_item_list_append (&out, item);
+    }
+
+  for (i = 0; i < out.n; i++)
+    {
+      NtItem *item = out.items[i];
+      NtFont *scaled;
+
+      if (!(item->flags & NT_ITEM_SMALL_CAPS))
+        continue;
+      scaled = nt_context_load_scaled_font (context, item->font, item->variant,
+                                            small_caps_scale (item));
+      if (!scaled)
+        continue;
+      /* The line keeps the height of the font before scaling. */
+      nt_font_unref (item->size_font);
+      item->size_font = item->font;
+      item->font = scaled;
+    }
+
+  free (items->items);
+  *items = out;
 }

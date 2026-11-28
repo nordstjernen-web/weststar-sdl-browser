@@ -2042,6 +2042,7 @@ nt_layout_check_lines (NsPangoLayout *layout)
             nt_attr_break (start, para_len, shape_attrs, items.items[0]->offset,
                            layout->log_attrs + start_offset, layout->n_chars + 1 - start_offset);
         }
+      nt_itemize_post_process (layout->context, layout->text, layout->log_attrs, &items);
 
       state.items = items.items;
       state.head = 0;
@@ -2158,7 +2159,8 @@ nt_run_get_extents (const NtRun *run, NsPangoRectangle *run_ink, NsPangoRectangl
 static int
 run_height (const NtRun *run)
 {
-  NsPangoFontMetrics *m = nt_font_get_metrics (run->item->font);
+  NsPangoFontMetrics *m = nt_font_get_metrics (run->item->size_font ? run->item->size_font
+                                                                    : run->item->font);
   int h = m->height;
 
   ns_pango_font_metrics_unref (m);
