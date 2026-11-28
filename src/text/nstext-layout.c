@@ -1423,6 +1423,18 @@ line_reorder (NtLine *line)
       }
 }
 
+/* Where a run's characters start in the layout's log attrs, as Pango
+ * reads the item's character offset. The ellipsis item keeps the one its
+ * own itemization gave it, 0 (ellipsize.c fixes up the text it covers but
+ * not that), so its cluster is measured against the layout's first
+ * characters: this keeps carets and justification where the fork puts
+ * them. */
+static int
+run_log_attrs_offset (const NtRun *run)
+{
+  return (run->item->flags & NT_ITEM_IS_ELLIPSIS) ? 0 : run->item->char_offset;
+}
+
 /* Pango's distribute_letter_spacing: half before, the rest after, whole
  * pixels when the space is. */
 static void
@@ -1471,7 +1483,7 @@ justify_clusters (NtLine *line, ParaBreakState *state)
           int have_cluster, dir, offset;
 
           dir = run->item->level % 2 == 0 ? +1 : -1;
-          offset = run->item->char_offset;
+          offset = run_log_attrs_offset (run);
 
           for (have_cluster = dir > 0 ? nt_cluster_iter_init_start (&cluster_iter, run, text)
                                       : nt_cluster_iter_init_end (&cluster_iter, run, text);
@@ -2581,15 +2593,8 @@ ns_pango_layout_line_index_to_x (NsPangoLayoutLine *pline, int index, int traili
                   index = (int) (nt_utf8_prev_char (layout->text + index) - layout->text);
                 }
             }
-          if (run->item->flags & NT_ITEM_IS_ELLIPSIS)
-            {
-              if (x_pos)
-                *x_pos = width + ((run->item->level & 1) ? (trailing ? 0 : nt_glyph_string_get_width (run->glyphs))
-                                                        : (trailing ? nt_glyph_string_get_width (run->glyphs) : 0));
-              return;
-            }
           nt_glyph_index_to_x (run->glyphs, layout->text, run->item,
-                               layout->log_attrs + run->item->char_offset,
+                               layout->log_attrs + run_log_attrs_offset (run),
                                index - run->item->offset, trailing, x_pos);
           if (x_pos)
             *x_pos += width;
@@ -2715,11 +2720,8 @@ ns_pango_layout_line_x_to_index (NsPangoLayoutLine *pline, int x_pos, int *index
           int offset, char_trailing = 0, grapheme_start_index, grapheme_start_offset;
           int grapheme_end_offset, pos = 0, char_index;
 
-          if (run->item->flags & NT_ITEM_IS_ELLIPSIS)
-            pos = 0;
-          else
-            nt_glyph_x_to_index (run->glyphs, layout->text, run->item, x_pos - start_pos,
-                                 &pos, &char_trailing);
+          nt_glyph_x_to_index (run->glyphs, layout->text, run->item, x_pos - start_pos,
+                               &pos, &char_trailing);
           char_index = run->item->offset + pos;
           offset = nt_utf8_pointer_to_offset (layout->text, layout->text + char_index);
 
@@ -2962,20 +2964,12 @@ ns_pango_layout_line_get_x_ranges (NsPangoLayoutLine *pline, int start_index, in
               int run_start_x = 0, run_end_x = 0;
 
               run_end_index = (int) (nt_utf8_prev_char (layout->text + run_end_index) - layout->text);
-              if (run->item->flags & NT_ITEM_IS_ELLIPSIS)
-                {
-                  run_start_x = 0;
-                  run_end_x = nt_glyph_string_get_width (run->glyphs);
-                }
-              else
-                {
-                  nt_glyph_index_to_x (run->glyphs, layout->text, run->item,
-                                       layout->log_attrs + run->item->char_offset,
-                                       run_start_index - run->item->offset, FALSE, &run_start_x);
-                  nt_glyph_index_to_x (run->glyphs, layout->text, run->item,
-                                       layout->log_attrs + run->item->char_offset,
-                                       run_end_index - run->item->offset, TRUE, &run_end_x);
-                }
+              nt_glyph_index_to_x (run->glyphs, layout->text, run->item,
+                                   layout->log_attrs + run_log_attrs_offset (run),
+                                   run_start_index - run->item->offset, FALSE, &run_start_x);
+              nt_glyph_index_to_x (run->glyphs, layout->text, run->item,
+                                   layout->log_attrs + run_log_attrs_offset (run),
+                                   run_end_index - run->item->offset, TRUE, &run_end_x);
               (*ranges)[2 * range_count] = x_offset + accumulated_width + NT_MIN (run_start_x, run_end_x);
               (*ranges)[2 * range_count + 1] = x_offset + accumulated_width + NT_MAX (run_start_x, run_end_x);
             }
