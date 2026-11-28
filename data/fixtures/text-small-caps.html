@@ -1,0 +1,90 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Small caps and text under a canvas transform</title>
+<!-- Compares the two text libraries (docs/text-layout.md): run with
+     --dump=layout and --dump=png against -Dtext=pango and -Dtext=native.
+     1. font-variant: small-caps in a font that has the smcp and c2sc
+        features (Calibri, Linux Libertine G, where installed) and in fonts
+        that lack them (DejaVu Sans, DejaVu Serif): there the lowercase
+        letters are synthesized, uppercased at the x-height's share of the
+        cap height (U+00DF becomes "SS"), and the line keeps the height of
+        the unscaled font.
+     2. Canvas text under scale(), a scale unequal in x and y, and
+        setTransform(): glyph metrics are hinted at the device size and
+        divided back into user space, which shows in the ink ascent and
+        descent measureText reports (the lines under the canvas: width,
+        ascent, descent) and, under the unequal scale, in the width. -->
+<style>
+body { margin: 8px; font: 16px "DejaVu Sans", sans-serif; }
+p { margin: 4px 0; }
+.sc { font-variant: small-caps; }
+.has { font-family: Calibri, "Linux Libertine G", "Linux Libertine O", serif; }
+.lacks { font-family: "DejaVu Sans", sans-serif; }
+.lacks-serif { font-family: "DejaVu Serif", serif; }
+.big { font-size: 28px; line-height: 1.5; }
+.ls { letter-spacing: 2px; }
+.narrow { width: 220px; }
+canvas { display: block; margin-top: 6px; }
+</style>
+
+<!-- The engine sets font-variant on inline boxes, so the small caps are
+     spans. -->
+<p class="has"><span class="sc">Small Caps With The Font's Own: Quick brown fox, 1984.</span></p>
+<p class="lacks"><span class="sc">Small Caps Synthesized: Quick brown fox, 1984.</span></p>
+<p class="lacks-serif"><span class="sc">Straße, ÆON, déjà vu, Ångström, ﬁne ﬂow, ǆ.</span></p>
+<p class="lacks big"><span class="sc">Mixed <b>bold</b> and <i>italic</i> words, x-height.</span></p>
+<p class="lacks ls"><span class="sc">Letter spaced small caps</span></p>
+<p class="lacks">Normal <span class="sc">small caps inside</span> normal.</p>
+<p class="lacks narrow"><span class="sc">Small caps wrapping over several lines in a narrow box of text.</span></p>
+<p class="lacks"><span class="sc">Greek αβγ Ελλάδα, Cyrillic абв Москва.</span></p>
+<p class="lacks big" style="text-decoration: underline"><span class="sc">Underlined small caps</span></p>
+
+<canvas id="c" width="600" height="260"></canvas>
+<div id="out"></div>
+<script>
+var c = document.getElementById("c"), x = c.getContext("2d"), r = [];
+var s = "Hinting under a transform: Wavy iiii llll";
+/* One short line each: the layout dump shows the first 40 characters. */
+function fmt(m) {
+  return m.width.toFixed(3) + " " + m.actualBoundingBoxAscent.toFixed(3) + " " +
+         m.actualBoundingBoxDescent.toFixed(3);
+}
+x.fillStyle = "#123";
+x.font = "13px sans-serif";
+x.fillText(s, 4, 18);
+r.push("1 " + fmt(x.measureText(s)));
+x.save();
+x.scale(1.5, 1.5);
+x.fillText(s, 4, 30);
+r.push("1.5 " + fmt(x.measureText(s)));
+x.restore();
+x.save();
+x.scale(2.25, 2.25);
+x.font = "9px serif";
+x.fillText(s, 2, 34);
+r.push("2.25 serif " + fmt(x.measureText(s)));
+x.restore();
+x.save();
+x.setTransform(0.75, 0, 0, 0.75, 10, 0);
+x.font = "17px sans-serif";
+x.fillText(s, 4, 220);
+r.push("set 0.75 " + fmt(x.measureText(s)));
+x.restore();
+x.save();
+x.scale(1.2, 2);
+x.font = "11px sans-serif";
+x.fillText(s, 250, 60);
+r.push("1.2x2 " + fmt(x.measureText(s)));
+x.restore();
+x.save();
+x.setTransform(3, 0, 0, 3, 0, 0);
+x.font = "7px monospace";
+x.fillText("mono 7px x3", 4, 84);
+r.push("set 3 mono " + fmt(x.measureText("mono 7px x3")));
+x.restore();
+r.forEach(function (line) {
+  var d = document.createElement("div");
+  d.textContent = line;
+  document.getElementById("out").appendChild(d);
+});
+</script>
