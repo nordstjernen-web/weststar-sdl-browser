@@ -114,7 +114,9 @@ The native file `scripts/winxp-i686.ini` is the whole configuration:
   browser and needs no DLL beside it.
 - HTTPS through curl's Mbed TLS backend (XP's own Schannel has no TLS
   1.2), with the certificates `-Dca_bundle` compiles in, as XP's root
-  store is long out of date. No HTTP/2 and no IDN.
+  store is long out of date. No HTTP/2 and no IDN, and none of curl's
+  protocols but HTTP(S), WebSocket and FTP, nor its authentication
+  schemes but Basic.
 - A PE header that asks for Windows 5.1 (OS and subsystem version).
 - No link-time optimisation.
 

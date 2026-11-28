@@ -325,6 +325,44 @@ So the shell goes first, and Cairo after it:
       those for public suffixes are refused. libcurl still links libpsl
       itself: the cookies the browser keeps are in curl's cookie engine,
       which refuses a `Set-Cookie` for a public suffix through it.
+
+      What else is linked, outside SDL and the tree (read from the
+      executables' import tables: the default MSYS2 UCRT64 build, which
+      takes every library from the system; the Linux portable profile;
+      the Windows XP build, every library from its subproject, linked
+      statically). Images are decoded by Wuffs (PNG, APNG, GIF, BMP,
+      JPEG, WebP) and in the tree (ICO); AVIF is the one decoder that is
+      a library of its own, and optional.
+
+      | Library | For | Default | Portable / XP | Plan |
+      |---------|-----|---------|---------------|------|
+      | libcurl | HTTP(S), WebSocket, FTP, cookies, HSTS, Alt-Svc, DoH, proxies | system | system / subproject | keep; for XP built with only what the browser uses |
+      | OpenSSL (libcrypto) / Mbed TLS | Web Crypto, random numbers; curl's TLS | OpenSSL | Mbed TLS | keep both, Mbed TLS for the portable builds |
+      | GLib | containers, strings, Unicode | system (or bundled) | none: nscore | nscore everywhere once the Pango fork is gone |
+      | HarfBuzz, FriBidi, FreeType | shaping, bidi, glyphs | system | system / subproject | keep |
+      | fontconfig | finding fonts | system | none: nsfc | optional (done) |
+      | SQLite | IndexedDB, history, bookmarks | system | system / subproject | keep |
+      | zlib | gzip and deflate, `CompressionStream`, PNG output | system | system / subproject | keep |
+      | Brotli, zstd | `Content-Encoding` | system, when found | system / subproject | optional (done) |
+      | libpsl | — (curl's cookie engine) | through curl | through curl | gone from the browser (done); curl's while its cookie engine is used |
+      | libseccomp | the engine's sandbox | Linux only | Linux only | keep |
+      | libavif (dav1d, aom...) | AVIF images | when found | off | optional (done) |
+      | libvorbisfile, libopusfile | Ogg audio | when found | off | optional (done) |
+      | libthai | Thai word breaks | when found | when found / off | optional (done) |
+      | Enchant | spell checking | when found | off (links GLib) | optional; a GLib-free one later |
+      | winpthreads, libgcc, libstdc++ | MinGW's runtime (HarfBuzz is C++) | DLLs | static | keep |
+
+      A system libcurl brings what its distribution built it with (on
+      MSYS2: nghttp2, nghttp3, ngtcp2, libssh2, libidn2, libpsl, OpenSSL);
+      the XP build's curl has HTTP/1.1 over Mbed TLS, WebSocket, FTP,
+      cookies with libpsl, HSTS, Alt-Svc, DoH, proxies, Basic
+      authentication and gzip, deflate, Brotli and zstd, and none of the
+      other protocols (DICT, FILE, Gopher, IMAP, IPFS, MQTT, POP3, RTSP,
+      SMB, SMTP, Telnet, TFTP), authentication schemes (NTLM, Kerberos
+      and Negotiate through SSPI, Digest, AWS, bearer tokens) or APIs
+      (MIME forms, `.netrc`, option and header lookups) that it had
+      before; the executable is 200 KB smaller. HTTPS, WebSocket over TLS
+      and an FTP listing were tried with it.
    Windows XP is the realistic floor on Windows (2000 and 95 lack too much
    of the API a browser needs today, and their hardware the memory); on
    the Amiga, the PowerPC and x86 systems, not the 68k classics, whose few
