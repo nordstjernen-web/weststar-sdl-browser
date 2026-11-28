@@ -9,4 +9,12 @@
 
 #include <glib.h>
 
+/* What GLib's glib-unix.h brings with it, which the engine relies on
+ * (_exit, close, read and write). */
+#include <errno.h>
+#include <fcntl.h>
+#include <pwd.h>
+#include <sys/types.h>
+#include <unistd.h>
+
 #endif
