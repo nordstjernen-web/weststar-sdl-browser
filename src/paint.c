@@ -2077,7 +2077,12 @@ ns_paint_css_line_height_px(const ns_style *s)
     }
 }
 
-/* Sets layout line spacing so lines match the CSS line-height in px. */
+/* Sets layout line spacing so lines match the CSS line-height in px.
+ * Pango places each baseline line_spacing * the font's metrics height below
+ * the last (pango-layout.c), so the factor is taken against that height: the
+ * hinted height can differ from ascent + descent (18 vs 19 px for a 15.2px
+ * monospace), and a factor against the sum drifts every line by the
+ * difference, which on a long <pre> moved the text hundreds of px. */
 void
 ns_paint_apply_css_line_spacing(NsPangoLayout *layout, const ns_style *s)
 {
@@ -2087,8 +2092,7 @@ ns_paint_apply_css_line_spacing(NsPangoLayout *layout, const ns_style *s)
     const NsPangoFontDescription *fd = ns_pango_layout_get_font_description(layout);
     NsPangoFontMetrics *fm = ns_pango_context_get_metrics(ctx, fd, NULL);
     if (!fm) return;
-    double natural = (ns_pango_font_metrics_get_ascent(fm) +
-                      ns_pango_font_metrics_get_descent(fm)) / (double)NS_PANGO_SCALE;
+    double natural = ns_pango_font_metrics_get_height(fm) / (double)NS_PANGO_SCALE;
     ns_pango_font_metrics_unref(fm);
     if (natural <= 0) return;
     ns_pango_layout_set_line_spacing(layout, (float)(lh_px / natural));

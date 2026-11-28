@@ -1620,6 +1620,33 @@ inspect_prop_line(GString *out, const ns_style *s, ns_css_prop p,
     g_string_append_printf(out, "    %-15s %s\n", label, b);
 }
 
+/* Gathers the painted line extents of the text boxes under a box, to 64 levels. */
+static void
+inspect_collect_text_lines(const ns_box *b, GArray *lines, int depth)
+{
+    if (!b || depth >= 64) return;
+    if (b->text && *b->text)
+        ns_paint_inline_line_extents(b, lines);
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+        inspect_collect_text_lines(c, lines, depth + 1);
+}
+
+/* Prints where paint draws the box's text lines: how many, the top of the
+ * first and the bottom of the last. They must sit inside the content box,
+ * as layout spaced them. */
+static void
+inspect_print_text_lines(const ns_box *box, GString *out)
+{
+    GArray *lines = g_array_new(FALSE, FALSE, sizeof(double));
+    inspect_collect_text_lines(box, lines, 0);
+    if (lines->len >= 2) {
+        const double *e = (const double *)(void *)lines->data;
+        g_string_append_printf(out, "    text lines      %u  painted %.1f..%.1f\n",
+                               lines->len / 2, e[0], e[lines->len - 1]);
+    }
+    g_array_free(lines, TRUE);
+}
+
 /* Prints a box's geometry, key computed properties, children and ancestor path. */
 static void
 inspect_print_box(const ns_box *box, GString *out)
@@ -1687,6 +1714,8 @@ inspect_print_box(const ns_box *box, GString *out)
                 idx, c->x, c->y, c->content_width, c->content_height, cl, grow);
         }
     }
+
+    inspect_print_text_lines(box, out);
 
     GPtrArray *chain = g_ptr_array_new();
     for (const ns_box *p = box; p; p = p->parent)

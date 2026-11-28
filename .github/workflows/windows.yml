@@ -207,6 +207,16 @@ jobs:
           grep -q '^PASS' webcrypto.txt
           ! grep -q '^FAIL' webcrypto.txt
 
+      - name: Text lines are painted where layout put them
+        # 600 lines of a <pre> 22.8px apart in a box 13680px tall: paint
+        # must draw the first at its top and the last at its bottom.
+        run: |
+          set -o pipefail
+          ./builddir/src/sdl/weststar.exe --headless --inspect=pre \
+            "file:///$(cygpath -m "$PWD")/data/fixtures/pre-line-pitch.html" > pitch.txt
+          grep 'text lines' pitch.txt
+          awk '/text lines/ { split($5, r, /\.\./); n = $3 + 0; t = r[1] + 0; b = r[2] + 0; ok = (n == 600 && t >= -1 && t <= 4 && b >= 13676 && b <= 13681) } END { exit !ok }' pitch.txt
+
       # The binary with the UCRT64 DLLs it links and fontconfig's
       # configuration: what a Windows package would hold.
       - name: Bundle
