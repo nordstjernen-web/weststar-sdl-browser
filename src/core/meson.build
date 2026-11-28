@@ -43,19 +43,24 @@ nscore_dep = declare_dependency(
   include_directories: include_directories('.'),
 )
 
+# As for the browser: no -pie on Windows, where clang rejects it as unused
+# at link time (src/sdl/meson.build).
+nscore_test_pie = host_machine.system() != 'windows'
+
 # Known answers for the unicode part; with NS_UCD_DIR set to a directory
 # holding the UCD's NormalizationTest.txt (gen-unicode-tables.py downloads
 # it), also the normalization conformance test.
 test('nscore-unicode',
   executable('test-unicode', 'test-unicode.c', link_with: nscore_lib,
-             build_by_default: false),
+             pie: nscore_test_pie, build_by_default: false),
   suite: 'nscore')
 
 # The rest of nscore: known answers, and round trips of what is written
 # (doubles, key files).
 test('nscore',
   executable('test-nscore', 'test-nscore.c', link_with: nscore_lib,
-             c_args: nscore_c_args, build_by_default: false),
+             c_args: nscore_c_args, pie: nscore_test_pie,
+             build_by_default: false),
   suite: 'nscore')
 
 # The same tests compared with the system GLib's answers, where GLib is
@@ -71,7 +76,7 @@ if ns_core_glib_dep.found()
                c_args: ['-DNS_TEST_VS_GLIB'],
                dependencies: ns_core_glib_dep,
                implicit_include_directories: false,
-               build_by_default: false),
+               pie: nscore_test_pie, build_by_default: false),
     args: [meson.project_source_root() / 'data'],
     suite: 'nscore',
     timeout: 600)
@@ -80,6 +85,6 @@ if ns_core_glib_dep.found()
                c_args: nscore_c_args + ['-DNS_TEST_VS_GLIB'],
                dependencies: ns_core_glib_dep,
                implicit_include_directories: false,
-               build_by_default: false),
+               pie: nscore_test_pie, build_by_default: false),
     suite: 'nscore')
 endif
