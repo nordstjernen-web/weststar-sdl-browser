@@ -1423,62 +1423,140 @@ line_reorder (NtLine *line)
       }
 }
 
-/* Extra space between clusters, for lines without spaces to widen. */
+/* Pango's distribute_letter_spacing: half before, the rest after, whole
+ * pixels when the space is. */
+static void
+distribute_letter_spacing (int letter_spacing, int *space_left, int *space_right)
+{
+  *space_left = letter_spacing / 2;
+  if ((letter_spacing & (NS_PANGO_SCALE - 1)) == 0)
+    *space_left = NS_PANGO_UNITS_ROUND (*space_left);
+  *space_right = letter_spacing - *space_left;
+}
+
+/* Extra space between clusters, for lines without spaces to widen
+ * (Pango's justify_clusters): each grapheme cluster with a width gets an
+ * equal share, carrying the rounding residual on, split before and after
+ * it; none before the line's first cluster or after its last. */
 static void
 justify_clusters (NtLine *line, ParaBreakState *state)
 {
   const char *text = line->pub.layout->text;
-  int total_remaining_width = state->remaining_width, total_gaps = 0, gaps_so_far = 0;
-  int added_so_far = 0, is_hinted, mode, i;
+  const NsPangoLogAttr *log_attrs = line->pub.layout->log_attrs;
+  int total_remaining_width, total_gaps = 0;
+  int added_so_far = 0, gaps_so_far, is_hinted, mode, r;
 
+  total_remaining_width = state->remaining_width;
   if (total_remaining_width <= 0)
     return;
+
+  /* hint to full pixel if total remaining width was so */
   is_hinted = (total_remaining_width & (NS_PANGO_SCALE - 1)) == 0;
 
-  for (mode = 0; mode < 2; mode++)
+  for (mode = 0; mode < 2; mode++) /* measure, then adjust */
     {
-      int seen = 0;
+      int leftedge = TRUE;
+      NtGlyphString *rightmost_glyphs = NULL;
+      int rightmost_space = 0;
+      int residual = 0;
 
+      added_so_far = 0;
       gaps_so_far = 0;
-      for (i = 0; i < line->n_runs; i++)
-        {
-          NtRun *run = line->runs[i];
-          int g;
 
-          for (g = 0; g < run->glyphs->num_glyphs; g++)
+      for (r = 0; r < line->n_runs; r++)
+        {
+          NtRun *run = line->runs[r];
+          NtGlyphString *glyphs = run->glyphs;
+          NtClusterIter cluster_iter;
+          int have_cluster, dir, offset;
+
+          dir = run->item->level % 2 == 0 ? +1 : -1;
+          offset = run->item->char_offset;
+
+          for (have_cluster = dir > 0 ? nt_cluster_iter_init_start (&cluster_iter, run, text)
+                                      : nt_cluster_iter_init_end (&cluster_iter, run, text);
+               have_cluster;
+               have_cluster = dir > 0 ? nt_cluster_iter_next (&cluster_iter)
+                                      : nt_cluster_iter_prev (&cluster_iter))
             {
-              if (!run->glyphs->glyphs[g].is_cluster_start)
+              int i, width = 0;
+
+              /* don't expand in the middle of graphemes */
+              if (!log_attrs[offset + cluster_iter.start_char].is_cursor_position)
                 continue;
-              if (seen++ == 0)
-                continue; /* no gap before the first cluster */
+
+              for (i = cluster_iter.start_glyph; i != cluster_iter.end_glyph; i += dir)
+                width += glyphs->glyphs[i].width;
+
+              /* also don't expand zero-width clusters. */
+              if (width == 0)
+                continue;
+
               gaps_so_far++;
+
               if (mode == 1)
                 {
-                  int adjustment = (int) (((int64_t) gaps_so_far * total_remaining_width) /
-                                          total_gaps) - added_so_far;
+                  int leftmost, rightmost;
+                  int adjustment, space_left, space_right;
 
+                  adjustment = total_remaining_width / total_gaps + residual;
                   if (is_hinted)
-                    adjustment = NS_PANGO_UNITS_ROUND (adjustment);
-                  /* Before this cluster: on the glyph before it. */
-                  if (g > 0)
-                    run->glyphs->glyphs[g - 1].width += adjustment;
+                    {
+                      int old_adjustment = adjustment;
+
+                      adjustment = NS_PANGO_UNITS_ROUND (adjustment);
+                      residual = old_adjustment - adjustment;
+                    }
+                  /* distribute to before/after */
+                  distribute_letter_spacing (adjustment, &space_left, &space_right);
+
+                  if (cluster_iter.start_glyph < cluster_iter.end_glyph)
+                    {
+                      /* LTR */
+                      leftmost = cluster_iter.start_glyph;
+                      rightmost = cluster_iter.end_glyph - 1;
+                    }
                   else
                     {
-                      run->glyphs->glyphs[g].x_offset += adjustment;
-                      run->glyphs->glyphs[g].width += adjustment;
+                      /* RTL */
+                      leftmost = cluster_iter.end_glyph + 1;
+                      rightmost = cluster_iter.start_glyph;
                     }
-                  added_so_far += adjustment;
+                  /* Don't add to left-side of left-most glyph of left-most non-zero run. */
+                  if (leftedge)
+                    leftedge = FALSE;
+                  else
+                    {
+                      glyphs->glyphs[leftmost].width += space_left;
+                      glyphs->glyphs[leftmost].x_offset += space_left;
+                      added_so_far += space_left;
+                    }
+                  /* Don't add to right-side of right-most glyph of right-most
+                   * non-zero run: saved so we can undo it later. */
+                  rightmost_glyphs = glyphs;
+                  rightmost_space = space_right;
+
+                  glyphs->glyphs[rightmost].width += space_right;
+                  added_so_far += space_right;
                 }
             }
         }
+
       if (mode == 0)
         {
-          total_gaps = gaps_so_far;
+          total_gaps = gaps_so_far - 1;
+
           if (total_gaps == 0)
-            return;
+            return; /* a single cluster, can't really justify it */
+        }
+      else if (rightmost_glyphs)
+        {
+          /* As Pango: off the run's last glyph. */
+          rightmost_glyphs->glyphs[rightmost_glyphs->num_glyphs - 1].width -= rightmost_space;
+          added_so_far -= rightmost_space;
         }
     }
-  (void) text;
+
   state->remaining_width -= added_so_far;
 }
 
