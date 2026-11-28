@@ -226,6 +226,8 @@ ns_win32_args_need_console(int argc, char **argv)
         if (g_strcmp0(argv[i], "--headless")     == 0 ||
             g_strcmp0(argv[i], "--print-config") == 0 ||
             g_strcmp0(argv[i], "--version")      == 0 ||
+            g_strcmp0(argv[i], "--help")         == 0 ||
+            g_strcmp0(argv[i], "-h")             == 0 ||
             g_strcmp0(argv[i], "--wpt")          == 0 ||
             g_str_has_prefix(argv[i], "--dump=") ||
             g_str_has_prefix(argv[i], "--url=")  ||
@@ -512,6 +514,49 @@ ns_args_apply_end_of_options(int *argc, char **argv)
     *argc = n - 1;
 }
 
+/* --help: the options a person would use. (The watchdog's own options,
+ * which it passes to the browser it starts, are left out.) */
+static void
+ns_print_usage(void)
+{
+    g_print(
+        "Usage: weststar [OPTION...] [URL]\n"
+        "\n"
+        "Weststar SDL Browser %s: a small, independent web browser.\n"
+        "\n"
+        "Window:\n"
+        "  --private                     open a private window\n"
+        "  --window-size=WxH             size of the first window\n"
+        "  --render-driver=NAME          SDL renderer to use (e.g. direct3d11,\n"
+        "                                opengl, software)\n"
+        "  --proxy=URL                   send requests through this proxy\n"
+        "  --ignore-certificate-errors   load pages with untrusted TLS\n"
+        "                                certificates (servers you control only)\n"
+        "  --no-watchdog                 run without the crash/hang supervisor\n"
+        "\n"
+        "Without a window (--headless):\n"
+        "  --headless                    load the page without a window\n"
+        "  --url=URL                     the page to load\n"
+        "  --dump=KIND                   print text, dom or layout; none; or\n"
+        "                                png:FILE to save a picture of the page\n"
+        "  --viewport=W[xH]              viewport size in CSS pixels\n"
+        "  --viewport-height=H           viewport height\n"
+        "  --settle-ms=N                 wait N ms after loading for scripts\n"
+        "  --time-ms=N                   advance animations to N ms\n"
+        "  --eval=JS                     run a script in the page, print result\n"
+        "  --inspect=SELECTOR            print an element's computed layout\n"
+        "  --inspect-at=X,Y              print the element at a point\n"
+        "  --act=ACTIONS                 simulate input before dumping\n"
+        "  --debug[=LEVELS]              print engine diagnostics\n"
+        "  --wpt  --wpt-timeout-ms=N     run a web-platform-tests page\n"
+        "\n"
+        "Other:\n"
+        "  --print-config                print the settings and exit\n"
+        "  --version                     print the version and exit\n"
+        "  -h, --help                    print this help and exit\n",
+        NS_VERSION);
+}
+
 /* Entry point: watchdog supervision, sandbox setup, argument parsing, then GUI or headless. */
 int
 main(int argc, char **argv)
@@ -524,6 +569,10 @@ main(int argc, char **argv)
     for (int i = 1; i < argc; i++) {
         if (g_strcmp0(argv[i], "--version") == 0) {
             g_print("Weststar SDL Browser %s\n", NS_VERSION);
+            return 0;
+        }
+        if (g_strcmp0(argv[i], "--help") == 0 || g_strcmp0(argv[i], "-h") == 0) {
+            ns_print_usage();
             return 0;
         }
     }
