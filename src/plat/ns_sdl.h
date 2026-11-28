@@ -288,6 +288,37 @@ static inline bool ns_sdl2_RenderClear(SDL_Renderer *r)
 bool ns_sdl2_RenderTexture(SDL_Renderer *renderer, SDL_Texture *texture,
                            const SDL_FRect *src, const SDL_FRect *dst);
 #define SDL_RenderTexture ns_sdl2_RenderTexture
+/* SDL3's affine draw, as two triangles through SDL_RenderGeometry. */
+bool ns_sdl2_RenderTextureAffine(SDL_Renderer *renderer, SDL_Texture *texture,
+                                 const SDL_FRect *src, const SDL_FPoint *origin,
+                                 const SDL_FPoint *right, const SDL_FPoint *down);
+#define SDL_RenderTextureAffine ns_sdl2_RenderTextureAffine
+static inline Uint8 ns_sdl2_unit_to_u8(float v)
+{ return (Uint8)(v <= 0.0f ? 0 : v >= 1.0f ? 255 : (int)(v * 255.0f + 0.5f)); }
+static inline bool ns_sdl2_SetTextureAlphaModFloat(SDL_Texture *t, float a)
+{ return SDL_SetTextureAlphaMod(t, ns_sdl2_unit_to_u8(a)) == 0; }
+static inline bool ns_sdl2_SetTextureColorModFloat(SDL_Texture *t, float r,
+                                                   float g, float b)
+{
+    return SDL_SetTextureColorMod(t, ns_sdl2_unit_to_u8(r), ns_sdl2_unit_to_u8(g),
+                                  ns_sdl2_unit_to_u8(b)) == 0;
+}
+#define SDL_SetTextureAlphaModFloat ns_sdl2_SetTextureAlphaModFloat
+#define SDL_SetTextureColorModFloat ns_sdl2_SetTextureColorModFloat
+static inline const char *ns_sdl2_GetRendererName(SDL_Renderer *r)
+{
+    SDL_RendererInfo info;
+    return SDL_GetRendererInfo(r, &info) == 0 ? info.name : NULL;
+}
+#define SDL_GetRendererName ns_sdl2_GetRendererName
+#define SDL_SOFTWARE_RENDERER "software"
+/* SDL3's form: the pixels in a new surface. */
+SDL_Surface *ns_sdl2_RenderReadPixels(SDL_Renderer *r, const SDL_Rect *rect);
+#define SDL_RenderReadPixels ns_sdl2_RenderReadPixels
+static inline bool ns_sdl2_SaveBMP(SDL_Surface *s, const char *file)
+{ return SDL_SaveBMP_RW(s, SDL_RWFromFile(file, "wb"), 1) == 0; }
+#undef SDL_SaveBMP
+#define SDL_SaveBMP ns_sdl2_SaveBMP
 
 /* SDL2 has premultiplied blending only as a custom mode, which its
  * software renderer lacks; there the texture blends as straight alpha. */
@@ -483,6 +514,7 @@ typedef struct NsSdl2MouseWheelEvent {
     float x, y; /* SDL2's precise amounts */
     SDL_MouseWheelDirection direction;
     float mouse_x, mouse_y;
+    Sint32 integer_x, integer_y; /* whole notches */
 } NsSdl2MouseWheelEvent;
 typedef struct NsSdl2DropEvent {
     Uint32 type;

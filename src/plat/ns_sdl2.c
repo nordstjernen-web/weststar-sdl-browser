@@ -713,6 +713,74 @@ ns_sdl2_RenderTexture(SDL_Renderer *renderer, SDL_Texture *texture,
     return SDL_RenderCopyF(renderer, texture, src ? &s : NULL, dst) == 0;
 }
 
+/* SDL3's SDL_RenderTextureAffine: src (or the whole texture) drawn into the
+ * parallelogram with corners origin, right (top right) and down (bottom
+ * left); a NULL corner is the render target's. The texture's colour and
+ * alpha modulation go into the vertex colours, and are set aside for the
+ * draw so that no renderer applies them twice. */
+bool
+ns_sdl2_RenderTextureAffine(SDL_Renderer *renderer, SDL_Texture *texture,
+                            const SDL_FRect *src, const SDL_FPoint *origin,
+                            const SDL_FPoint *right, const SDL_FPoint *down)
+{
+    int tw = 0, th = 0, ow = 0, oh = 0;
+    if (SDL_QueryTexture(texture, NULL, NULL, &tw, &th) != 0 || tw <= 0 || th <= 0)
+        return false;
+    if ((!origin || !right || !down) &&
+        SDL_GetRendererOutputSize(renderer, &ow, &oh) != 0)
+        return false;
+    SDL_FPoint o = origin ? *origin : (SDL_FPoint){ 0.0f, 0.0f };
+    SDL_FPoint r = right ? *right : (SDL_FPoint){ (float)ow, 0.0f };
+    SDL_FPoint d = down ? *down : (SDL_FPoint){ 0.0f, (float)oh };
+    SDL_FPoint br = { r.x + d.x - o.x, r.y + d.y - o.y };
+    float u0 = 0.0f, v0 = 0.0f, u1 = 1.0f, v1 = 1.0f;
+    if (src) {
+        u0 = src->x / (float)tw;
+        v0 = src->y / (float)th;
+        u1 = (src->x + src->w) / (float)tw;
+        v1 = (src->y + src->h) / (float)th;
+    }
+    Uint8 cr = 255, cg = 255, cb = 255, ca = 255;
+    SDL_GetTextureColorMod(texture, &cr, &cg, &cb);
+    SDL_GetTextureAlphaMod(texture, &ca);
+    SDL_Color c = { cr, cg, cb, ca };
+    SDL_Vertex v[4] = {
+        { o,  c, { u0, v0 } },
+        { r,  c, { u1, v0 } },
+        { d,  c, { u0, v1 } },
+        { br, c, { u1, v1 } },
+    };
+    static const int idx[6] = { 0, 1, 2, 1, 3, 2 };
+    SDL_SetTextureColorMod(texture, 255, 255, 255);
+    SDL_SetTextureAlphaMod(texture, 255);
+    bool ok = SDL_RenderGeometry(renderer, texture, v, 4, idx, 6) == 0;
+    SDL_SetTextureColorMod(texture, cr, cg, cb);
+    SDL_SetTextureAlphaMod(texture, ca);
+    return ok;
+}
+
+#undef SDL_RenderReadPixels /* SDL2's own, below */
+SDL_Surface *
+ns_sdl2_RenderReadPixels(SDL_Renderer *r, const SDL_Rect *rect)
+{
+    int w, h;
+    if (rect) {
+        w = rect->w;
+        h = rect->h;
+    } else if (SDL_GetRendererOutputSize(r, &w, &h) != 0) {
+        return NULL;
+    }
+    SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32,
+                                                    SDL_PIXELFORMAT_ARGB8888);
+    if (!s) return NULL;
+    if (SDL_RenderReadPixels(r, rect, SDL_PIXELFORMAT_ARGB8888, s->pixels,
+                             s->pitch) != 0) {
+        SDL_FreeSurface(s);
+        return NULL;
+    }
+    return s;
+}
+
 bool
 ns_sdl2_SetTextureBlendMode(SDL_Texture *texture, SDL_BlendMode mode)
 {
@@ -836,6 +904,8 @@ translate(const SDL_Event *in, NsSdl2Event *out)
         out->wheel.x = in->wheel.preciseX;
         out->wheel.y = in->wheel.preciseY;
         out->wheel.direction = (SDL_MouseWheelDirection)in->wheel.direction;
+        out->wheel.integer_x = in->wheel.x;
+        out->wheel.integer_y = in->wheel.y;
 #if SDL_VERSION_ATLEAST(2, 26, 0)
         out->wheel.mouse_x = (float)in->wheel.mouseX;
         out->wheel.mouse_y = (float)in->wheel.mouseY;
@@ -905,6 +975,29 @@ ns_sdl2_PushEvent(NsSdl2Event *event)
         out.user.code = event->user.code;
         out.user.data1 = event->user.data1;
         out.user.data2 = event->user.data2;
+    } else if (event->type == SDL_KEYDOWN || event->type == SDL_KEYUP) {
+        /* Synthetic input, as the GUI test driver sends it. */
+        out.key.windowID = event->key.windowID;
+        out.key.state = event->key.down ? SDL_PRESSED : SDL_RELEASED;
+        out.key.repeat = event->key.repeat;
+        out.key.keysym.scancode = event->key.scancode;
+        out.key.keysym.sym = event->key.key;
+        out.key.keysym.mod = (Uint16)event->key.mod;
+    } else if (event->type == SDL_MOUSEWHEEL) {
+        out.wheel.windowID = event->wheel.windowID;
+        out.wheel.x = event->wheel.integer_x;
+        out.wheel.y = event->wheel.integer_y;
+        out.wheel.preciseX = event->wheel.x;
+        out.wheel.preciseY = event->wheel.y;
+        out.wheel.direction = (Uint32)event->wheel.direction;
+#if SDL_VERSION_ATLEAST(2, 26, 0)
+        out.wheel.mouseX = (Sint32)event->wheel.mouse_x;
+        out.wheel.mouseY = (Sint32)event->wheel.mouse_y;
+#endif
+    } else if (event->type == SDL_EVENT_WINDOW_EXPOSED) {
+        out.type = SDL_WINDOWEVENT;
+        out.window.windowID = event->window.windowID;
+        out.window.event = SDL_WINDOWEVENT_EXPOSED;
     }
     return SDL_PushEvent(&out) == 1;
 }
