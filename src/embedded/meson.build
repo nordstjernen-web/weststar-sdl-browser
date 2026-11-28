@@ -12,20 +12,9 @@ if have_pdfjs
   )
 endif
 
-# With a C23 #embed compiler (GCC 15, Clang 19 and later) each header is a
-# two-line #embed written at configure time: no generator runs, the compiler
-# reads the file itself and records it in the dependency file, so editing it
-# rebuilds only what includes it. Older compilers get the same array spelled
-# out byte by byte by scripts/embed-text.py at build time.
-ns_have_embed = cc.compiles('''
-static const char ns_embed_probe[] = {
-#embed "@0@" suffix(, 0) if_empty(0)
-};
-int ns_embed_probe_len(void);
-int ns_embed_probe_len(void) { return (int)sizeof ns_embed_probe; }
-'''.format((meson.project_source_root() / 'LICENSE').replace('\\', '/')),
-  werror: true,
-  name: 'C23 #embed')
+# With a C23 #embed compiler each header is a two-line #embed written at
+# configure time, else scripts/embed-text.py writes it at build time
+# (ns_have_embed, in the top-level meson.build).
 ns_embedded_headers = []
 foreach e : ns_embeds
   if ns_have_embed

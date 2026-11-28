@@ -313,6 +313,21 @@ jobs:
             test -s "$HOME/.cache/weststar/fonts.cache"
           done
 
+      - name: Text is drawn from the bundled fonts alone
+        run: |
+          # NS_NO_SYSTEM_FONTS hides the system's fonts from nsfc, as on a
+          # system with none; Latin, Greek and Cyrillic in sans-serif, serif
+          # and monospace must still have ink, from the DejaVu fonts the
+          # build compiled in (-Dbundled_fonts, auto with nsfc). Without
+          # them no font is found and each letter is an empty box, about
+          # 300 pixels of ink for a word here; drawn, it is 900 to 1500.
+          grep -q 'Bundled fallback fonts *: DejaVu' builddir/meson-logs/meson-log.txt
+          NS_NO_SYSTEM_FONTS=1 ./builddir/src/sdl/weststar --headless --dump=text --settle-ms=300 \
+            'data:text/html,<canvas id="c" width="400" height="60"></canvas><p id="o"></p><script>var c=document.getElementById("c"),x=c.getContext("2d"),r=[];function ink(f,t){x.clearRect(0,0,400,60);x.font="30px "+f;x.fillText(t,5,40);var d=x.getImageData(0,0,400,60).data,n=0;for(var i=3;i<d.length;i+=4)if(d[i])n++;return n>600?"ok":"none:"+n;}r.push("latin="+ink("sans-serif","Weststar"));r.push("greek="+ink("sans-serif","\u0395\u03bb\u03bb\u03b7\u03bd\u03b9\u03ba\u03ac"));r.push("cyrillic="+ink("serif","\u041a\u0438\u0440\u0438\u043b\u043b\u0438\u0446\u0430"));r.push("mono="+ink("monospace","Monospace"));document.getElementById("o").textContent=r.join(" ");</script>' \
+            > bundled.txt
+          cat bundled.txt
+          grep -q 'latin=ok greek=ok cyrillic=ok mono=ok' bundled.txt
+
       - name: Web Crypto checks
         run: |
           set -o pipefail

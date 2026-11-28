@@ -84,8 +84,10 @@ So the shell goes first, and Cairo after it:
       platform's font folders, with a small bundled fallback set), TLS and
       Web Crypto through mbedTLS instead of OpenSSL, and a bundled CA
       certificate set for systems whose root store is too old. Fonts are
-      done but for the bundled set: with `-Dfontconfig=disabled`, or
-      where fontconfig is not installed, they are found by nsfc (see
+      done: with `-Dfontconfig=disabled`, or where fontconfig is not
+      installed, they are found by nsfc, which then also carries DejaVu
+      Sans, Sans Bold, Serif and Sans Mono compiled in
+      (`-Dbundled_fonts`) for a system with few fonts or none (see
       Fonts below). Crypto is
       done: Web Crypto, random numbers and Safe Browsing go through
       `src/plat/ns_crypto.h`, with OpenSSL (the default) or Mbed TLS
@@ -353,16 +355,40 @@ the callers are unchanged and either can be chosen at build time
   weight through its `wght` axis; otherwise a bold that is missing is
   emboldened and an italic that is missing slanted, as fontconfig's
   rules do.
+- **Bundled fonts** (`nsfc-bundled.c`, `-Dbundled_fonts`, on by default
+  wherever nsfc is built): DejaVu Sans, Sans Bold, Serif and Sans Mono
+  2.37, 2.1 MB together (Latin, Greek, Cyrillic, box drawing and many
+  symbols), fetched from the release pinned in
+  `subprojects/dejavu-fonts.wrap` and compiled into the binary, so that a
+  fresh Windows XP, an Amiga or a bare container still draws pages and
+  the chrome. They are read from memory: their file names are
+  `nsfc-bundled:DejaVuSans.ttf` and so on, which the font map hands to
+  `NsFcBundledFontData` instead of opening a file, and they are scanned
+  at every start (a few milliseconds) rather than cached. A face the
+  system has itself, by family and style, is left out. The rest rank
+  last: after a system font of a family the page named, and after every
+  system font standing in for the same generic family, though before the
+  stand-ins for the next one, so that a system with no monospace font
+  gets DejaVu Sans Mono rather than its sans-serif. After the best font
+  of a list they come after all the system's, and so give only the
+  characters no system font has.
 
 Not in nsfc: bitmap-only fonts other than colour emoji, the languages a
 font declares (the font map then asks nothing of them), and any
-configuration by the user beyond `NS_FONT_PATH`.
+configuration by the user beyond `NS_FONT_PATH`. For tests,
+`NS_NO_SYSTEM_FONTS=1` skips the platform's folders and the `fonts`
+folder beside the executable, leaving `NS_FONT_PATH` and the bundled
+fonts, as on a system with no fonts at all; the list it gives is not
+written to the cache.
 
 `meson test -C builddir --suite nsfc` checks patterns, character sets,
-the rules and the order with a handful of made-up fonts, in both CI
-workflows; the Linux `portable` job builds the browser with
+the rules and the order with a handful of made-up fonts, and the bundled
+fonts of the build with the system's turned off, in both CI workflows;
+the Linux `portable` job builds the browser with
 `-Dfontconfig=disabled -Dcrypto=mbedtls` on a machine without
-fontconfig's headers and checks that text is drawn.
+fontconfig's headers and checks that text is drawn, both with the
+system's fonts and with `NS_NO_SYSTEM_FONTS=1`, from the bundled ones
+alone.
 
 ## The chrome: Nuklear
 

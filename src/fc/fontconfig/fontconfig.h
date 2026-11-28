@@ -14,6 +14,7 @@
 #define NSFC_FONTCONFIG_H
 
 #include <stdarg.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -243,6 +244,11 @@ void       FcStrListDone(FcStrList *list);
 void   FcMatrixMultiply(FcMatrix *result, const FcMatrix *a, const FcMatrix *b);
 double FcWeightFromOpenTypeDouble(double ot_weight);
 double FcWeightToOpenTypeDouble(double fc_weight);
+
+/* Not fontconfig's: the bytes of a font compiled into the browser
+ * (-Dbundled_fonts), whose FC_FILE names no file on disk; NULL for any
+ * other file name. They last as long as the process. */
+const void *NsFcBundledFontData(const FcChar8 *file, size_t *len);
 
 #ifdef __cplusplus
 }

@@ -131,11 +131,15 @@ add_family_value(FcPattern *p, const char *family, NsFcBinding binding)
         true);
 }
 
+/* The stand-ins for a generic name; the last is marked, for the bundled
+ * fonts, which come after all of them (score_font). */
 static void
 add_alias_families(FcPattern *p, const Alias *alias)
 {
-    for (size_t i = 0; i < MAX_NAMES && alias->families[i]; i++)
-        add_family_value(p, alias->families[i], NSFC_WEAK);
+    for (size_t i = 0; i < MAX_NAMES && alias->families[i]; i++) {
+        bool last = i + 1 == MAX_NAMES || !alias->families[i + 1];
+        add_family_value(p, alias->families[i], last ? NSFC_WEAK_LAST : NSFC_WEAK);
+    }
 }
 
 /* Rewrites the request's families: a generic name becomes the fonts it
@@ -252,6 +256,7 @@ enum {
     SCORE_COLOR,
     SCORE_FAMILY_STRONG,
     SCORE_FAMILY_WEAK,
+    SCORE_BUNDLED,
     SCORE_LANG,
     SCORE_SPACING,
     SCORE_SLANT,
@@ -264,6 +269,7 @@ enum {
 typedef struct Scored {
     double     score[N_SCORES];
     int        index;
+    bool       bundled;
     FcPattern *font;
 } Scored;
 
@@ -356,6 +362,26 @@ score_font(Scored *s, const Request *r, FcPattern *font)
         }
     }
 
+    /* A font compiled into the browser is a last resort: after a system
+     * font of the same family the page named, and after every system font
+     * standing in for the same generic name, but before the stand-ins for
+     * the next one (monospace, then sans-serif), so that a system without
+     * a monospace font gets the bundled one rather than its sans-serif.
+     * Among the fonts the request did not name, after the system's. */
+    s->bundled = FcPatternGetBool(font, NSFC_BUNDLED, 0, &b) == FcResultMatch && b;
+    if (s->bundled) {
+        s->score[SCORE_BUNDLED] = 1;
+        if (s->score[SCORE_FAMILY_STRONG] != NO_FAMILY)
+            s->score[SCORE_FAMILY_STRONG] += 0.5;
+        if (s->score[SCORE_FAMILY_WEAK] != NO_FAMILY) {
+            int i = (int)s->score[SCORE_FAMILY_WEAK];
+            while (i + 1 < r->families->n &&
+                   r->families->values[i].binding != NSFC_WEAK_LAST)
+                i++;
+            s->score[SCORE_FAMILY_WEAK] = i + 0.5;
+        }
+    }
+
     if (r->exemplar &&
         (FcPatternGetCharSet(font, FC_CHARSET, 0, &chars) != FcResultMatch ||
          !FcCharSetHasChar(chars, r->exemplar)))
@@ -441,6 +467,22 @@ FcFontSetSort(FcConfig *config, FcFontSet **sets, int nsets, FcPattern *p,
     Scored *scored = score_sets(sets, nsets, p, &n);
     if (!scored) return out;
     qsort(scored, (size_t)n, sizeof *scored, cmp_scored);
+
+    /* After the best font, the fonts compiled into the browser come after
+     * every system font, so that they give only the characters no system
+     * font has: the scores have already let one be the best where the
+     * system has no font of the kind asked for. */
+    Scored *tmp = n > 2 ? SDL_malloc((size_t)n * sizeof *tmp) : NULL;
+    if (tmp) {
+        int k = 1;
+        tmp[0] = scored[0];
+        for (int pass = 0; pass < 2; pass++)
+            for (int i = 1; i < n; i++)
+                if (scored[i].bundled == (pass == 1))
+                    tmp[k++] = scored[i];
+        SDL_free(scored);
+        scored = tmp;
+    }
 
     /* Trimmed, the list keeps the best font and after it only fonts with
      * characters none before them has. */

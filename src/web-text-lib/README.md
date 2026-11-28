@@ -124,7 +124,9 @@ utilities, documentation and GObject-introspection. What remains is the
 core text layer with the fontconfig/FreeType backend. Weststar replaced
 the cairo backend (`pangocairo-*`) with `pangogfx-*`, which rasterizes
 glyphs with FreeType into gfx and keeps pangocairo's hinted metrics, so
-layout is unchanged.
+layout is unchanged. Built over nsfc (`src/fc/`) instead of fontconfig, the
+font map reads a font compiled into the browser (`-Dbundled_fonts`), which
+has no file, from memory (`NsFcBundledFontData`).
 
 `BROWSER-COMPARISON.md` sets all of this against the equivalent code in Firefox
 and Chrome — what each caches and how it bounds it, where the performance comes

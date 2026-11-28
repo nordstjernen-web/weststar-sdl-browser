@@ -1,0 +1,7 @@
+/* generated from src/fc/nsfc_bundled_fonts.h.in by meson — do not edit */
+@BUNDLED_FONT_INCLUDES@
+
+const NsFcBundledFont nsfc_bundled_fonts[] = {
+@BUNDLED_FONT_ROWS@
+    { NULL, NULL, 0 },
+};

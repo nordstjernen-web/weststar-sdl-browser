@@ -36,7 +36,7 @@ build.ninja
 compile_commands.json
 
 # Meson auto-downloaded subprojects (wrap files only are committed).
-# lexbor, quickjs-ng, quickjs, pdfjs-dist, WAMR, Wuffs, mbedTLS, GLib and SDL2 are fetched at setup
+# lexbor, quickjs-ng, quickjs, pdfjs-dist, WAMR, Wuffs, mbedTLS, GLib, SDL2 and DejaVu are fetched at setup
 # from their upstream releases.
 /subprojects/packagecache/
 /subprojects/lexbor/
@@ -48,6 +48,7 @@ compile_commands.json
 /subprojects/mbedtls-*/
 /subprojects/glib-*/
 /subprojects/SDL2-*/
+/subprojects/dejavu-fonts-*/
 
 # Editor / OS
 *~

@@ -250,6 +250,25 @@ if not have_system_fontconfig
 endif
 libfreetype = dependency('freetype2')
 
+# Fallback fonts compiled into the browser for nsfc to offer after the
+# system's (src/fc/nsfc-bundled.c): auto wherever nsfc is built, from the
+# DejaVu release pinned in subprojects/dejavu-fonts.wrap.
+nsfc_bundled_fonts = []
+bundled_fonts_source = 'none'
+bundled_fonts_opt = get_option('bundled_fonts')
+if have_system_fontconfig and bundled_fonts_opt.enabled()
+  error('-Dbundled_fonts=enabled: the bundled fonts are offered by nsfc, ' +
+        'which the system fontconfig replaces; set -Dfontconfig=disabled')
+endif
+if not have_system_fontconfig and bundled_fonts_opt.allowed()
+  dejavu_sub = subproject('dejavu-fonts', required: bundled_fonts_opt)
+  if dejavu_sub.found()
+    nsfc_bundled_fonts = dejavu_sub.get_variable('dejavu_fonts')
+    bundled_fonts_source = ('DejaVu ' + dejavu_sub.get_variable('dejavu_version') +
+                            ' (subprojects/dejavu-fonts.wrap)')
+  endif
+endif
+
 # A CA certificate file compiled into the browser as its own trust store,
 # for systems without one or with one that is too old (src/net.c).
 have_ca_bundle = get_option('ca_bundle') != ''
@@ -518,7 +537,25 @@ summary({
   'Built-in CA certificates': have_ca_bundle ? get_option('ca_bundle') : 'none',
   'GLib': get_option('glib') == 'bundled' ? 'bundled ' + glib.version() : 'system ' + glib.version(),
   'Fonts found by': have_system_fontconfig ? 'fontconfig ' + libfontconfig.version() : 'nsfc (in tree)',
+  'Bundled fallback fonts': bundled_fonts_source,
 }, section: 'Features')
+
+# Files are compiled into the binary (src/embedded/, and nsfc's bundled
+# fonts in src/fc/) with C23 #embed where the compiler has it (GCC 15,
+# Clang 19 and later): each header is a two-line #embed written at configure
+# time, no generator runs, and the compiler records the file in the
+# dependency file, so editing it rebuilds only what includes it. Older
+# compilers get the same array spelled out byte by byte by
+# scripts/embed-text.py at build time.
+ns_have_embed = cc.compiles('''
+static const char ns_embed_probe[] = {
+#embed "@0@" suffix(, 0) if_empty(0)
+};
+int ns_embed_probe_len(void);
+int ns_embed_probe_len(void) { return (int)sizeof ns_embed_probe; }
+'''.format((meson.project_source_root() / 'LICENSE').replace('\\', '/')),
+  werror: true,
+  name: 'C23 #embed')
 
 # Text is shaped through web-text-lib (src/web-text-lib/), the in-tree Pango
 # fork that caches finished glyph strings across layouts; every symbol in it

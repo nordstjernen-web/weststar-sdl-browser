@@ -3553,8 +3553,18 @@ ns_pango_fc_font_map_get_hb_face (NsPangoFcFontMap *fcfontmap,
 
   if (!data->hb_face)
     {
-      hb_blob_t *blob;
+      hb_blob_t *blob = NULL;
 
+#ifdef NS_FC_INTREE
+      /* Weststar: a font compiled into the browser has no file. */
+      size_t bundled_len = 0;
+      const void *bundled = NsFcBundledFontData ((const FcChar8 *) data->filename,
+                                                 &bundled_len);
+      if (bundled)
+        blob = hb_blob_create ((const char *) bundled, (unsigned int) bundled_len,
+                               HB_MEMORY_MODE_READONLY, NULL, NULL);
+      else
+#endif
       blob = hb_blob_create_from_file (data->filename);
       data->hb_face = hb_face_create (blob, data->id);
       hb_blob_destroy (blob);

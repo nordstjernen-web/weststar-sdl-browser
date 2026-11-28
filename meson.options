@@ -16,6 +16,8 @@ option('glib', type: 'combo', choices: ['system', 'bundled'], value: 'system',
        description: 'Where GLib and GObject come from: the system (default), or bundled: the part of them the browser uses, built statically from the release pinned in subprojects/glib.wrap, for a browser that needs no GLib installed. Not yet for macOS.')
 option('fontconfig', type: 'feature', value: 'auto',
        description: 'Find fonts through the system fontconfig library (auto: when it is installed). Disabled, or where fontconfig is missing, fonts are found by nsfc (src/fc/), built into the browser: it reads the font folders of the platform itself, with FreeType, and needs no configuration files. For portable builds, and platforms without fontconfig.')
+option('bundled_fonts', type: 'feature', value: 'auto',
+       description: 'Compile a small set of fallback fonts into the browser (DejaVu Sans, Sans Bold, Serif and Sans Mono, about 2.1 MB, fetched from the release pinned in subprojects/dejavu-fonts.wrap), for systems with no font of a kind or none at all. nsfc offers them after the system\'s own fonts. Auto: wherever nsfc is built (fontconfig disabled or missing); with the system fontconfig they are never used, and enabled is then an error.')
 option('ca_bundle', type: 'string', value: '',
        description: 'A file of CA certificates in PEM format (such as curl.se/ca/cacert.pem, Mozilla\'s set) to compile into the browser as its own trust store for HTTPS. It is used where the system has no certificate file, and wherever NS_CA_BUNDLE=builtin is set, for systems whose own root certificates are too old. Empty (the default): none is compiled in.')
 option('pdfjs', type: 'feature', value: 'auto',

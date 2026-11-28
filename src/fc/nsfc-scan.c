@@ -4,7 +4,8 @@
  *
  * The fonts are the files in the platform's font folders, opened with
  * FreeType once and remembered in a cache file, so that later starts only
- * list the folders.
+ * list the folders. After them come the fonts compiled into the browser
+ * (-Dbundled_fonts, nsfc-bundled.c), if any.
  */
 
 #include "nsfc-private.h"
@@ -432,11 +433,26 @@ add_path_list(StrList *dirs, const char *value, const char *suffix)
     }
 }
 
+/* Whether NS_NO_SYSTEM_FONTS is set (and not empty, 0, false, no or off):
+ * then only NS_FONT_PATH and the bundled fonts are used, which is how a
+ * test sees what the browser does on a system without fonts. */
+static bool
+no_system_fonts(void)
+{
+    const char *v = ns_getenv("NS_NO_SYSTEM_FONTS");
+    return v && *v && strcmp(v, "0") != 0 && SDL_strcasecmp(v, "false") != 0 &&
+           SDL_strcasecmp(v, "no") != 0 && SDL_strcasecmp(v, "off") != 0;
+}
+
 /* Where the platform keeps its fonts, then a "fonts" folder beside the
- * executable (a bundled set), then the folders named in NS_FONT_PATH. */
+ * executable, then the folders named in NS_FONT_PATH. */
 static void
 font_dirs(StrList *dirs)
 {
+    if (no_system_fonts()) {
+        add_path_list(dirs, ns_getenv("NS_FONT_PATH"), NULL);
+        return;
+    }
 #if defined(_WIN32)
     const char *windir = ns_getenv("WINDIR");
     if (!windir) windir = ns_getenv("SystemRoot");
@@ -690,7 +706,8 @@ scan_system_locked(FcFontSet *set)
     if (reused != cache.n)
         dirty = true; /* fonts that went away */
 
-    if (dirty && !out.failed) {
+    /* A list without the system's fonts is not one to keep. */
+    if (dirty && !out.failed && !no_system_fonts()) {
         char *path = cache_path();
         if (path) {
             char *slash = strrchr(path, '/');
@@ -705,6 +722,57 @@ scan_system_locked(FcFontSet *set)
     cache_free(&cache);
     str_list_clear(&dirs);
     str_list_clear(&files);
+}
+
+/* ---- the bundled fonts ---- */
+
+/* Whether the first `n` fonts of the set have a face of the same family
+ * and style as `p`. */
+static bool
+has_face(const FcFontSet *set, int n, FcPattern *p)
+{
+    FcChar8 *family, *style, *f, *s;
+    if (FcPatternGetString(p, FC_FAMILY, 0, &family) != FcResultMatch ||
+        FcPatternGetString(p, FC_STYLE, 0, &style) != FcResultMatch)
+        return false;
+    for (int i = 0; i < n; i++) {
+        if (FcPatternGetString(set->fonts[i], FC_FAMILY, 0, &f) == FcResultMatch &&
+            FcPatternGetString(set->fonts[i], FC_STYLE, 0, &s) == FcResultMatch &&
+            nsfc_family_cmp((const char *)f, (const char *)family) == 0 &&
+            SDL_strcasecmp((const char *)s, (const char *)style) == 0)
+            return true;
+    }
+    return false;
+}
+
+/* Appends the fonts compiled into the browser, marked as bundled, but for
+ * the faces the system has itself. They are read from memory on every
+ * start; the cache is for the files. Called with the lock held. */
+static void
+scan_bundled_locked(FcFontSet *set)
+{
+    int n_system = set->nfont;
+    if (!nsfc_bundled_fonts[0].name || !ensure_freetype())
+        return;
+    for (const NsFcBundledFont *b = nsfc_bundled_fonts; b->name; b++) {
+        char *path = NULL;
+        long count = 1;
+        if (SDL_asprintf(&path, "%s%s", NSFC_BUNDLED_PREFIX, b->name) < 0)
+            continue;
+        for (long i = 0; i < count && i <= 0xffff; i++) {
+            FT_Face face = NULL;
+            if (FT_New_Memory_Face(g_ft, b->data, (FT_Long)b->len, i, &face) != 0)
+                break;
+            count = face->num_faces;
+            FcPattern *p = scan_face(face, path, (int)i);
+            FT_Done_Face(face);
+            if (p && !has_face(set, n_system, p) &&
+                FcPatternAddBool(p, NSFC_BUNDLED, FcTrue) && FcFontSetAdd(set, p))
+                continue;
+            FcPatternDestroy(p);
+        }
+        SDL_free(path);
+    }
 }
 
 /* ---- the configuration ---- */
@@ -723,6 +791,7 @@ default_config(void)
             config->sets[FcSetApplication] = FcFontSetCreate();
             if (config->sets[FcSetSystem] && config->sets[FcSetApplication]) {
                 scan_system_locked(config->sets[FcSetSystem]);
+                scan_bundled_locked(config->sets[FcSetSystem]);
                 g_config = config;
             } else {
                 FcFontSetDestroy(config->sets[FcSetSystem]);

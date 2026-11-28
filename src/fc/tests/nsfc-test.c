@@ -9,6 +9,8 @@
 
 #include "nsfc-private.h"
 
+#include "plat/ns_env.h"
+
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -465,6 +467,124 @@ test_listing(void)
     FcFontSetDestroy(fonts);
 }
 
+/* Marks the last font of the set as one compiled into the browser. */
+static void
+mark_bundled(FcFontSet *set)
+{
+    FcPatternAddBool(set->fonts[set->nfont - 1], NSFC_BUNDLED, FcTrue);
+}
+
+/* The bundled fonts come after the system's of their kind, and before the
+ * system's of another kind. */
+static void
+test_bundled_order(void)
+{
+    FcFontSet *fonts = FcFontSetCreate();
+    FcFontSet *list;
+    add_font(fonts, "DejaVu Sans", "Book", 80, 0, 0x20, 0x52f, false, false);
+    mark_bundled(fonts);
+    add_font(fonts, "DejaVu Sans Mono", "Book", 80, 0, 0x20, 0x52f, false, true);
+    mark_bundled(fonts);
+    add_font(fonts, "DejaVu Serif", "Book", 80, 0, 0x20, 0x52f, false, false);
+    mark_bundled(fonts);
+    add_font(fonts, "Tahoma", "Regular", 80, 0, 0x20, 0x24f, false, false);
+    add_font(fonts, "Greek Text", "Regular", 80, 0, 0x370, 0x3ff, false, false);
+
+    /* DejaVu Sans is the first stand-in for sans-serif, but the system's
+     * Tahoma, the seventh, comes first; after it every system font, and
+     * then the bundled ones. */
+    list = sorted(fonts, "sans-serif", 80, 0, "en", false, FcFalse);
+    CHECK(is_font(list->fonts[0], "Tahoma", NULL));
+    CHECK(is_font(list->fonts[1], "Greek Text", NULL));
+    CHECK(is_font(list->fonts[2], "DejaVu Sans", NULL));
+    FcFontSetDestroy(list);
+    /* With no monospace font on the system, the bundled one, not Tahoma. */
+    list = sorted(fonts, "monospace", 80, 0, "en", false, FcFalse);
+    CHECK(is_font(list->fonts[0], "DejaVu Sans Mono", NULL));
+    CHECK(is_font(list->fonts[1], "Tahoma", NULL));
+    FcFontSetDestroy(list);
+    list = sorted(fonts, "serif", 80, 0, "en", false, FcFalse);
+    CHECK(is_font(list->fonts[0], "DejaVu Serif", NULL));
+    FcFontSetDestroy(list);
+    /* Trimmed: Greek from the system's Greek font, not the bundled sans,
+     * which then adds only what no system font has. */
+    list = sorted(fonts, "sans-serif", 80, 0, "en", false, FcTrue);
+    CHECK(list->nfont == 3);
+    CHECK(is_font(list->fonts[0], "Tahoma", NULL));
+    CHECK(is_font(list->fonts[1], "Greek Text", NULL));
+    CHECK(is_font(list->fonts[2], "DejaVu Sans", NULL));
+    FcFontSetDestroy(list);
+
+    /* A family the page names: the system's copy before the bundled one,
+     * which still comes before a family named after it. */
+    add_font(fonts, "DejaVu Sans", "Book", 80, 0, 0x20, 0x24f, false, false);
+    list = sorted(fonts, "DejaVu Sans", 80, 0, "en", false, FcFalse);
+    CHECK(is_font(list->fonts[0], "DejaVu Sans", NULL) &&
+          FcPatternGetBool(list->fonts[0], NSFC_BUNDLED, 0, &(FcBool){ 0 }) ==
+              FcResultNoMatch);
+    FcFontSetDestroy(list);
+    list = sorted(fonts, "DejaVu Sans Mono,Tahoma", 80, 0, "en", false, FcFalse);
+    CHECK(is_font(list->fonts[0], "DejaVu Sans Mono", NULL));
+    FcFontSetDestroy(list);
+    FcFontSetDestroy(fonts);
+}
+
+/* The fonts compiled into this build, if any, found with the system's
+ * folders turned off, as on a system without fonts. */
+static void
+test_bundled(void)
+{
+    FcResult result;
+    FcChar8 *file = NULL;
+    FcCharSet *chars = NULL;
+    size_t len = 0;
+    int n = 0;
+    if (!nsfc_bundled_fonts[0].name) {
+        printf("no bundled fonts in this build\n");
+        return;
+    }
+    ns_setenv("NS_NO_SYSTEM_FONTS", "1", true);
+    ns_unsetenv("NS_FONT_PATH");
+    Uint64 start = SDL_GetPerformanceCounter();
+    FcFontSet *system = FcConfigGetFonts(NULL, FcSetSystem);
+    double ms = (double)(SDL_GetPerformanceCounter() - start) * 1000.0 /
+                (double)SDL_GetPerformanceFrequency();
+    CHECK(system && system->nfont > 0);
+    for (int i = 0; system && i < system->nfont; i++) {
+        FcBool bundled = FcFalse;
+        CHECK(FcPatternGetBool(system->fonts[i], NSFC_BUNDLED, 0, &bundled) ==
+                  FcResultMatch && bundled);
+        CHECK(FcPatternGetString(system->fonts[i], FC_FILE, 0, &file) ==
+                  FcResultMatch &&
+              NsFcBundledFontData(file, &len) != NULL && len > 1000);
+        n++;
+    }
+    CHECK(NsFcBundledFontData((const FcChar8 *)"nsfc-bundled:nothing.ttf", &len) == NULL);
+    CHECK(NsFcBundledFontData((const FcChar8 *)"/fonts/DejaVuSans.ttf", &len) == NULL);
+
+    static const struct { const char *request; int weight; const char *family; }
+    expect[] = {
+        { "sans-serif", 80, "DejaVu Sans" },
+        { "Nowhere Sans", 200, "DejaVu Sans" },
+        { "serif", 80, "DejaVu Serif" },
+        { "monospace", 80, "DejaVu Sans Mono" },
+        { "system-ui", 80, "DejaVu Sans" },
+    };
+    for (size_t i = 0; i < SDL_arraysize(expect); i++) {
+        FcPattern *p = make_request(expect[i].request, expect[i].weight, 0, "en", false);
+        FcPattern *match = FcFontMatch(NULL, p, &result);
+        CHECK(result == FcResultMatch && is_font(match, expect[i].family, NULL));
+        if (match && expect[i].weight == 200)
+            CHECK(strcmp(style_of(match), "Bold") == 0);
+        if (match && FcPatternGetCharSet(match, FC_CHARSET, 0, &chars) == FcResultMatch)
+            CHECK(FcCharSetHasChar(chars, 'A') && FcCharSetHasChar(chars, 0x3b1) &&
+                  FcCharSetHasChar(chars, 0x430) && FcCharSetHasChar(chars, 0x2500));
+        FcPatternDestroy(match);
+        FcPatternDestroy(p);
+    }
+    printf("bundled: %d face(s), found in %.1f ms\n", n, ms);
+}
+
 /* A real font file, when the environment names one. */
 static void
 test_scan(const char *path)
@@ -511,6 +631,8 @@ main(void)
     test_sorting();
     test_matching();
     test_listing();
+    test_bundled_order();
+    test_bundled();
     const char *font = getenv("NSFC_TEST_FONT");
     if (font && *font)
         test_scan(font);

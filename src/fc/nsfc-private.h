@@ -18,11 +18,19 @@
 #define NSFC_WEIGHT_MIN "nsfcweightmin"
 #define NSFC_WEIGHT_MAX "nsfcweightmax"
 
+/* And on a font compiled into the browser (-Dbundled_fonts): true. Such a
+ * font comes after the system's of its kind (nsfc-match.c). */
+#define NSFC_BUNDLED "nsfcbundled"
+
+/* The file name of a bundled font: this, then its name in the table. */
+#define NSFC_BUNDLED_PREFIX "nsfc-bundled:"
+
 /* How firmly a family name in a request was asked for: named by the
  * caller, or added by nsfc as a stand-in for a generic name. */
 typedef enum {
     NSFC_STRONG = 0,
     NSFC_WEAK = 1,
+    NSFC_WEAK_LAST = 2, /* weak, and the last stand-in for its generic name */
 } NsFcBinding;
 
 typedef struct NsFcValue {
@@ -89,6 +97,15 @@ void nsfc_value_clear(NsFcValue *v);
 int  nsfc_family_cmp(const char *a, const char *b);
 void nsfc_charset_set_constant(FcCharSet *fcs);
 bool nsfc_str_set_add(FcStrSet *set, const char *s);
+
+/* nsfc-bundled.c: the fonts compiled into the browser, ending with an
+ * entry without a name, which is all there is without -Dbundled_fonts. */
+typedef struct NsFcBundledFont {
+    const char          *name; /* the font file's name */
+    const unsigned char *data;
+    unsigned             len;
+} NsFcBundledFont;
+extern const NsFcBundledFont nsfc_bundled_fonts[];
 
 /* nsfc-scan.c */
 /* The patterns of the faces in a font file, appended to `set`; returns how

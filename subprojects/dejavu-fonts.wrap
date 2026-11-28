@@ -1,0 +1,6 @@
+[wrap-file]
+directory = dejavu-fonts-ttf-2.37
+source_url = https://github.com/dejavu-fonts/dejavu-fonts/releases/download/version_2_37/dejavu-fonts-ttf-2.37.tar.bz2
+source_filename = dejavu-fonts-ttf-2.37.tar.bz2
+source_hash = fa9ca4d13871dd122f61258a80d01751d603b4d3ee14095d65453b4e846e17d7
+patch_directory = dejavu-fonts
