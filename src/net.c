@@ -24,6 +24,7 @@
 #include "ext.h"
 #include "html.h"
 #include "image.h"
+#include "psl.h"
 #include "safebrowsing.h"
 #include "safebrowsing_google.h"
 #include "security.h"
@@ -42,7 +43,6 @@
 #include <lexbor/unicode/idna.h>
 #include <lexbor/url/url.h>
 
-#include <libpsl.h>
 #include <sqlite3.h>
 #include "ns_pango.h"
 #include "plat/ns_crypto.h"
@@ -1077,8 +1077,7 @@ ns_url_site_from(const char *url)
     g_autoptr(ns_url_parts) p = ns_url_parts_new(url);
     if (!p || !p->protocol || !p->hostname) return NULL;
     g_autofree char *lower = g_ascii_strdown(p->hostname, -1);
-    const psl_ctx_t *psl = psl_builtin();
-    const char *reg = psl ? psl_registrable_domain(psl, lower) : NULL;
+    const char *reg = ns_psl_registrable_domain(lower);
     const char *site_host = (reg && *reg) ? reg : p->hostname;
     if (p->port && *p->port)
         return g_strdup_printf("%s://%s:%s", p->protocol, site_host, p->port);
@@ -1936,8 +1935,7 @@ ns_net_cookie_store_from_js(const char *url, const char *top_url,
             g_free(domain_attr); g_free(path_attr); return;
         }
         g_autofree char *d_lower = g_ascii_strdown(d, -1);
-        const psl_ctx_t *psl = psl_builtin();
-        if (psl && psl_is_public_suffix(psl, d_lower)) {
+        if (ns_psl_is_public_suffix(d_lower)) {
             g_free(domain_attr); g_free(path_attr); return;
         }
         file_domain = g_strconcat(".", d, NULL);
@@ -5128,9 +5126,7 @@ synthesize_about_response(const char *url, const char *top_url,
         g_autofree char *engine_host_lower = NULL;
         if (engine_host && *engine_host) {
             engine_host_lower = g_ascii_strdown(engine_host, -1);
-            const psl_ctx_t *psl = psl_builtin();
-            const char *reg =
-                psl ? psl_registrable_domain(psl, engine_host_lower) : NULL;
+            const char *reg = ns_psl_registrable_domain(engine_host_lower);
             search_name = (reg && *reg) ? reg
                 : (g_str_has_prefix(engine_host, "www.") ? engine_host + 4
                                                          : engine_host);

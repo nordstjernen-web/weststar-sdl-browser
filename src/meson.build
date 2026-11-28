@@ -172,6 +172,7 @@ northstar_engine_sources = files(
   'content_decode.c',
   'paint.c',
   'pdf.c',
+  'psl.c',
   'plat/ns_env.c',
   'plat/ns_fs.c',
   'plat/ns_job.c',
@@ -195,6 +196,26 @@ northstar_engine_sources = files(
   'ws.c',
   'html_lexbor.c',
   'xml.c',
+)
+
+# The Public Suffix List, compiled in (psl.c, psl-table.h): its known
+# answers, and where libpsl is installed, every rule and many names around
+# them asked of both, from the same rules. libpsl is needed for nothing
+# else, and is not fetched for this: the system's, or the subproject a
+# build already has for curl (the Windows XP build's, libpsl 0.23).
+ns_psl_libpsl = dependency('libpsl', required: false, allow_fallback: false)
+test(
+  'psl',
+  executable(
+    'psl-test',
+    files('psl-test.c', 'psl.c'),
+    dependencies: ns_psl_libpsl,
+    c_args: ns_psl_libpsl.found() ? ['-DNS_PSL_TEST_LIBPSL'] : [],
+    pie: host_machine.system() != 'windows',
+  ),
+  args: ns_psl_libpsl.found() ? [meson.current_build_dir() / 'psl-test-rules.dat'] : [],
+  suite: 'psl',
+  timeout: 300,
 )
 
 # Toolkit-free helpers used by the desktop executable but not the engine UI:
@@ -237,7 +258,6 @@ northstar_deps = [
   libcurl,
   libcrypto,
   libm,
-  libpsl,
   libquickjs,
   libwuffs,
   libplmpeg,

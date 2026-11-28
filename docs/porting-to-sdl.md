@@ -299,6 +299,27 @@ So the shell goes first, and Cairo after it:
       runner, and uploads the executable. Not yet done: a run on XP itself (in a virtual machine;
       the GitHub runners cannot), and with it whatever XP does differently
       at run time that an import table cannot show.
+   8. *Fewer libraries*, so that a portable build is mostly SDL and code
+      in the tree. The Public Suffix List is compiled in (`src/psl.c`), in
+      place of libpsl: the browser asks it whether a cookie's domain is a
+      public suffix and what a host's registrable domain (its site) is,
+      and it answers as libpsl 0.23's `psl_builtin()` does — both sections
+      of the list, wildcard and exception rules, the implicit `*` rule,
+      names matched byte for byte (lowercased by the caller; a rule with
+      non-ASCII labels is kept in UTF-8 and as A-labels), a trailing dot
+      ignored. Its table (`src/psl-table.h`, 87 KB: the 10,968 names
+      byte-reversed, sorted and front-coded in blocks of 16, found by a
+      binary search over the blocks) is made by `scripts/gen-psl-table.py`
+      from the list of a pinned commit, checked by its SHA-256; the
+      header is committed, so a build needs no network. `meson test
+      --suite psl` checks known answers and, where libpsl is installed,
+      writes the table out as a list for libpsl to load and asks both
+      about every rule, names around each, edge cases and 200,000 names
+      made of the rules' labels: all alike (libpsl before 0.23 differs on
+      names with a trailing dot, which it took for an empty label, and
+      is not compared on them). libcurl still links libpsl
+      itself: the cookies the browser keeps are in curl's cookie engine,
+      which refuses a `Set-Cookie` for a public suffix through it.
    Windows XP is the realistic floor on Windows (2000 and 95 lack too much
    of the API a browser needs today, and their hardware the memory); on
    the Amiga, the PowerPC and x86 systems, not the 68k classics, whose few

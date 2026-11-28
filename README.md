@@ -123,7 +123,6 @@ Libraries the build needs from the system:
 | HarfBuzz ≥ 8.3, FriBidi ≥ 1.0.6 | text shaping, bidirectional text |
 | FreeType | font metrics and rasterizing glyphs |
 | fontconfig ≥ 2.15, optional | finding fonts; without it (`-Dfontconfig=disabled`) the browser finds them itself |
-| libpsl | public-suffix rules for cookies |
 | SQLite | IndexedDB storage |
 | zlib | gzip, deflate, PNG output |
 | libseccomp (Linux only) | the engine's system-call sandbox |
@@ -139,7 +138,10 @@ Vendored in the tree or fetched by meson as subprojects:
 (WebAssembly), [Wuffs](https://github.com/google/wuffs) (PNG, APNG, GIF,
 BMP, JPEG and WebP decoding), [Nuklear](https://github.com/Immediate-Mode-UI/Nuklear)
 (the chrome), [pl_mpeg](https://github.com/phoboslab/pl_mpeg) and
-[minimp3](https://github.com/lieff/minimp3) (audio decoding). SDL2,
+[minimp3](https://github.com/lieff/minimp3) (audio decoding), and the
+[Public Suffix List](https://publicsuffix.org/) (which cookies a site may
+set, and which hosts are one site; `src/psl-table.h`, generated from a
+pinned version of the list). SDL2,
 Mbed TLS, libcurl, GLib, the DejaVu fonts and the other libraries in
 `subprojects/` are also fetched this way when a build asks for them or
 the system lacks them. GTK, Cairo, Pango
@@ -154,7 +156,7 @@ Weststar builds with meson and ninja. On Debian/Ubuntu:
 sudo apt install build-essential pkg-config meson ninja-build \
     libsdl3-dev libcurl4-openssl-dev libssl-dev libharfbuzz-dev \
     libfribidi-dev libfontconfig-dev libfreetype-dev \
-    libpsl-dev libsqlite3-dev libseccomp-dev libglib2.0-dev zlib1g-dev
+    libsqlite3-dev libseccomp-dev libglib2.0-dev zlib1g-dev
 meson setup builddir
 meson compile -C builddir
 ./builddir/src/sdl/weststar https://example.org

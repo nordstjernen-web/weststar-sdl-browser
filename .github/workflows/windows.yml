@@ -77,7 +77,6 @@ jobs:
             mingw-w64-ucrt-x86_64-curl
             mingw-w64-ucrt-x86_64-openssl
             mingw-w64-ucrt-x86_64-ca-certificates
-            mingw-w64-ucrt-x86_64-libpsl
             mingw-w64-ucrt-x86_64-sqlite3
             mingw-w64-ucrt-x86_64-zlib
             mingw-w64-ucrt-x86_64-brotli
@@ -143,6 +142,14 @@ jobs:
         run: |
           NSFC_TEST_FONT="C:/Windows/Fonts/arial.ttf" \
             meson test -C builddir --suite nsfc --suite plat --print-errorlogs
+
+      - name: Public Suffix List, against libpsl
+        # The list is compiled in (src/psl.c): the browser imports no
+        # libpsl, which is here as curl's, and which this test asks the
+        # same of the same rules.
+        run: |
+          ! objdump -p builddir/src/sdl/weststar.exe | grep -i 'DLL Name: libpsl'
+          meson test -C builddir --suite psl --print-errorlogs
 
       - name: Upload the gfx test images
         if: failure()
@@ -403,10 +410,10 @@ jobs:
           python3 scripts/check-xp-imports.py --cache "$RUNNER_TEMP/xp-exports" \
             builddir-xp/src/sdl/weststar.exe
 
-      - name: Rasterizer, platform, font finder and nscore tests
+      - name: Rasterizer, platform, font finder, nscore and PSL tests
         run: |
           NSFC_TEST_FONT="C:/Windows/Fonts/arial.ttf" \
-            meson test -C builddir-xp --suite gfx --suite nsfc --suite plat --suite nscore --print-errorlogs
+            meson test -C builddir-xp --suite gfx --suite nsfc --suite plat --suite nscore --suite psl --print-errorlogs
 
       - name: Headless smoke (about:start)
         run: |

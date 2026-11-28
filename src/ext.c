@@ -19,7 +19,7 @@
 
 #include <glib-object.h>
 #include "mime_guess.h"
-#include <libpsl.h>
+#include "psl.h"
 
 #include "config.h"
 
@@ -1596,10 +1596,8 @@ ns_ext_third_party(const char *req_host, const char *init_host)
     g_autofree char *ih = ns_ext_strip_port(init_host);
     if (!*rh || !*ih) return -1;
     if (strcmp(rh, ih) == 0) return 0;
-    const psl_ctx_t *psl = psl_builtin();
-    if (!psl) return strcmp(rh, ih) == 0 ? 0 : 1;
-    const char *rr = psl_registrable_domain(psl, rh);
-    const char *ir = psl_registrable_domain(psl, ih);
+    const char *rr = ns_psl_registrable_domain(rh);
+    const char *ir = ns_psl_registrable_domain(ih);
     if (!rr || !ir) return strcmp(rh, ih) == 0 ? 0 : 1;
     return strcmp(rr, ir) == 0 ? 0 : 1;
 }

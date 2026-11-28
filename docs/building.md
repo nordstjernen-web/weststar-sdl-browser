@@ -13,7 +13,7 @@ Debian 13 / Ubuntu 25.04 or newer:
 sudo apt install build-essential git pkg-config meson ninja-build \
     libsdl3-dev libcurl4-openssl-dev libssl-dev \
     libharfbuzz-dev libfribidi-dev libfontconfig-dev \
-    libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev \
+    libfreetype-dev libsqlite3-dev libseccomp-dev \
     libglib2.0-dev zlib1g-dev
 ```
 
@@ -22,11 +22,15 @@ Fedora:
 ```sh
 sudo dnf install gcc git pkgconf meson ninja-build SDL3-devel \
     libcurl-devel openssl-devel harfbuzz-devel fribidi-devel \
-    fontconfig-devel freetype-devel libpsl-devel \
+    fontconfig-devel freetype-devel \
     sqlite-devel libseccomp-devel glib2-devel zlib-devel
 ```
 
 `libseccomp` is required on Linux — `meson setup` fails without it.
+The Public Suffix List is compiled in (`src/psl.c`), so the browser needs
+no libpsl; a distribution's libcurl may link it for its own cookie
+engine, and its package brings it. Where libpsl's headers are installed,
+`meson test --suite psl` compares the two.
 
 The text stack has version floors set by web-text-lib: GLib ≥ 2.80,
 HarfBuzz ≥ 8.3, fontconfig ≥ 2.15 and FriBidi ≥ 1.0.6, with FreeType;
@@ -69,7 +73,7 @@ Weststar builds natively on Windows in an [MSYS2](https://www.msys2.org)
 **UCRT64** shell, with GCC or Clang. Install the toolchain and libraries:
 
 ```sh
-pacman -S --needed git mingw-w64-ucrt-x86_64-{gcc,clang,lld,pkgconf,meson,ninja}     mingw-w64-ucrt-x86_64-{sdl3,glib2,harfbuzz,fribidi,fontconfig,freetype}     mingw-w64-ucrt-x86_64-{curl,openssl,ca-certificates,libpsl,sqlite3,zlib,brotli,zstd}     mingw-w64-ucrt-x86_64-{libavif,opusfile,libvorbis}
+pacman -S --needed git mingw-w64-ucrt-x86_64-{gcc,clang,lld,pkgconf,meson,ninja}     mingw-w64-ucrt-x86_64-{sdl3,glib2,harfbuzz,fribidi,fontconfig,freetype}     mingw-w64-ucrt-x86_64-{curl,openssl,ca-certificates,sqlite3,zlib,brotli,zstd}     mingw-w64-ucrt-x86_64-{libavif,opusfile,libvorbis}
 ```
 
 then build as below; the binary is `builddir/src/sdl/weststar.exe`. To run
@@ -105,8 +109,9 @@ The native file `scripts/winxp-i686.ini` is the whole configuration:
 - Every library from its subproject, built for XP and linked
   statically (`force_fallback_for`): SDL2, Mbed TLS, and from
   WrapDB curl, FreeType, HarfBuzz, FriBidi, SQLite, zlib, Brotli, zstd
-  and libpsl. libgcc, libstdc++ and winpthreads are linked statically
-  too, so `weststar.exe` is the whole browser and needs no DLL beside it.
+  and libpsl (curl's, for its cookie engine). libgcc, libstdc++ and
+  winpthreads are linked statically too, so `weststar.exe` is the whole
+  browser and needs no DLL beside it.
 - HTTPS through curl's Mbed TLS backend (XP's own Schannel has no TLS
   1.2), with the certificates `-Dca_bundle` compiles in, as XP's root
   store is long out of date. No HTTP/2 and no IDN.

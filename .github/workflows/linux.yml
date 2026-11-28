@@ -43,10 +43,10 @@ jobs:
             build-essential pkg-config meson ninja-build git \
             libsdl3-dev libcurl4-openssl-dev libssl-dev \
             libharfbuzz-dev libfribidi-dev libfontconfig-dev \
-            libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev \
+            libfreetype-dev libsqlite3-dev libseccomp-dev \
             libglib2.0-dev zlib1g-dev libbrotli-dev libzstd-dev \
             libopusfile-dev libvorbis-dev xvfb xauth fonts-dejavu-core \
-            libsdl2-dev
+            libsdl2-dev libpsl-dev
 
       - name: Configure and build
         run: |
@@ -80,11 +80,16 @@ jobs:
           meson test -C builddir --list | grep -q 'ns_sys-sdl2'
           meson test -C builddir --list | grep -q 'nsfc-sdl2'
 
+      - name: Public Suffix List, against libpsl
+        # The list is compiled in (src/psl.c); libpsl-dev is installed
+        # only for this test, which asks libpsl the same of the same rules.
+        run: meson test -C builddir --suite psl --print-errorlogs
+
       - name: No GTK, Cairo or GIO in the binary
         run: |
           test -x builddir/src/sdl/weststar
           ! ldd builddir/src/sdl/weststar | grep -i -E 'libgtk|libgdk|libcairo|libpixman'
-          ! objdump -p builddir/src/sdl/weststar | grep -E 'NEEDED +libgio'
+          ! objdump -p builddir/src/sdl/weststar | grep -E 'NEEDED +(libgio|libpsl)'
           ldd builddir/src/sdl/weststar | grep -i libSDL3
 
       - name: Headless smoke (about:start)
@@ -203,7 +208,7 @@ jobs:
             build-essential pkg-config meson ninja-build git \
             libcurl4-openssl-dev libssl-dev \
             libharfbuzz-dev libfribidi-dev libfontconfig-dev \
-            libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev \
+            libfreetype-dev libsqlite3-dev libseccomp-dev \
             libglib2.0-dev zlib1g-dev libbrotli-dev libzstd-dev \
             libopusfile-dev libvorbis-dev xvfb xauth fonts-dejavu-core \
             libx11-dev libxext-dev libxi-dev libxrandr-dev libxfixes-dev \
@@ -285,7 +290,7 @@ jobs:
             build-essential pkg-config meson ninja-build git \
             libsdl3-dev libcurl4-openssl-dev \
             libharfbuzz-dev libfribidi-dev \
-            libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev \
+            libfreetype-dev libsqlite3-dev libseccomp-dev \
             zlib1g-dev libbrotli-dev libzstd-dev \
             fonts-dejavu-core ca-certificates
 
@@ -391,7 +396,7 @@ jobs:
             build-essential pkg-config meson ninja-build git \
             libsdl3-dev libcurl4-openssl-dev libssl-dev \
             libharfbuzz-dev libfribidi-dev libfontconfig-dev \
-            libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev \
+            libfreetype-dev libsqlite3-dev libseccomp-dev \
             libglib2.0-dev zlib1g-dev libbrotli-dev libzstd-dev \
             libthai-dev fonts-dejavu-core fonts-noto-core
 
@@ -518,7 +523,7 @@ jobs:
             build-essential pkg-config meson ninja-build git \
             libsdl3-dev libcurl4-openssl-dev libssl-dev \
             libharfbuzz-dev libfribidi-dev libfontconfig-dev \
-            libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev \
+            libfreetype-dev libsqlite3-dev libseccomp-dev \
             libglib2.0-dev zlib1g-dev libbrotli-dev libzstd-dev \
             libthai-dev fonts-dejavu-core fonts-noto-core
 

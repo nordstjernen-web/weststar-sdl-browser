@@ -250,8 +250,6 @@ else
 endif
 libm = cc.find_library('m', required: false)
 
-libpsl = dependency('libpsl')
-
 sqlite3 = dependency('sqlite3')
 
 # Fonts are found through fontconfig where it is installed, and otherwise
@@ -447,7 +445,6 @@ libzstd = dependency('libzstd', required: false)
 # library's do, so that the browser's own warnings stay off them.
 # (libcurl's subproject hands on the compression libraries' headers as its
 # own, unmarked: they are named first, so they are system headers there.)
-libpsl = libpsl.as_system()
 sqlite3 = sqlite3.as_system()
 libfreetype = libfreetype.as_system()
 zlib = zlib.as_system()
