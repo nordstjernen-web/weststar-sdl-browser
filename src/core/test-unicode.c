@@ -499,9 +499,14 @@ compare_string(const char *s, size_t len)
     same_str("strup", s, l, ns_utf8_strup(s, l), g_utf8_strup(s, l));
     same_str("strdown", s, l, ns_utf8_strdown(s, l), g_utf8_strdown(s, l));
     same_str("casefold", s, l, ns_utf8_casefold(s, l), g_utf8_casefold(s, l));
-    for (m = 0; m < 4; m++)
-      same_str("normalize", s, l, ns_utf8_normalize(s, l, (NsNormalizeMode)modes[m]),
-               g_utf8_normalize(s, l, (GNormalizeMode)modes[m]));
+    /* On invalid UTF-8, GLib releases differ: 2.90 returns NULL, older
+     * ones (the CI's MSYS2 GLib) decode a surrogate such as ED A0 80 and
+     * pass it through. nscore returns NULL (tested above); compare only
+     * valid input. */
+    if (g_utf8_validate(s, l, NULL))
+      for (m = 0; m < 4; m++)
+        same_str("normalize", s, l, ns_utf8_normalize(s, l, (NsNormalizeMode)modes[m]),
+                 g_utf8_normalize(s, l, (GNormalizeMode)modes[m]));
     {
       long r1 = -7, w1 = -7;
       glong r2 = -7, w2 = -7;

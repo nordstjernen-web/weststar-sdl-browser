@@ -500,7 +500,7 @@ char *
 ns_strstr_len(const char *haystack, ptrdiff_t haystack_len, const char *needle)
 {
     if (!haystack || !needle) return NULL;
-    if (haystack_len < 0) return strstr(haystack, needle);
+    if (haystack_len < 0) return (char *)strstr(haystack, needle);
     size_t m = strlen(needle);
     if (m == 0) return (char *)haystack;
     if ((size_t)haystack_len < m) return NULL;
