@@ -528,6 +528,8 @@ ns_log(const char *log_domain, NsLogLevelFlags log_level, const char *format, ..
     va_end(ap);
 }
 
+static void ns_print_to(FILE *stream, const char *format, va_list args) NS_PRINTF(2, 0);
+
 static void
 ns_print_to(FILE *stream, const char *format, va_list args)
 {
