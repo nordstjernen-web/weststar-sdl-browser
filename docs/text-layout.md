@@ -107,7 +107,9 @@ that pages lay out the same; the rest is written anew.
 | `nstext-font.c` | The font map (one per thread), fontsets (FcFontSetMatch for the first font, FcFontSetSort for fallbacks, over the SFNT fonts of fontconfig's system and application sets), fonts (a HarfBuzz font at the pattern's pixel size with variations, synthetic slant and emboldening; nsfc's bundled fonts from memory), hinted metrics and glyph extents from FreeType, the hex boxes of missing glyphs, glyph rasterization with a per-font cache, outlines, contexts. |
 | `nstext-itemize.c` | Bidi levels (FriBidi, with Pango's fast paths), paragraph boundaries, items of one level, script, emoji presentation and font attributes, the font of each character from its fontset (spaces take their neighbours'), colour emoji fonts. |
 | `nstext-shape.c` | Items, glyph strings, HarfBuzz shaping with the paragraph as context, OpenType features, ligatures off under letter spacing, small caps by the font's features, a shape cache per thread, letter and word spacing, caret positions inside clusters (ligature carets). |
-| `nstext-layout.c` | Layouts: paragraphs, Pango's greedy line breaker (`process_item`, `process_line`), tabs, hyphens, trailing spaces, rise, ellipsis, bidi reordering, justification, extents, line spacing, alignment and indent, hit testing, iterators, the context's metrics. |
+| `nstext-glyph-item.c` | Runs as Pango's glyph items: the cluster iterator and the split of a run (`pango-glyph-item.c`). |
+| `nstext-layout.c` | Layouts: paragraphs, Pango's greedy line breaker (`process_item`, `process_line`), tabs, hyphens, trailing spaces, rise, bidi reordering, justification between words and between clusters (`justify_words`, `justify_clusters`), extents, line spacing, alignment and indent, hit testing, iterators, the context's metrics. |
+| `nstext-ellipsize.c` | Ellipsis: Pango's `ellipsize.c`, a gap grown from the start, the middle or the end of the line, balanced around that position, with the ellipsis (U+2026, U+22EF before wide characters, or "...") shaped in the gap's font, and the line's runs rebuilt around it. |
 | `nstext-render.c` | Drawing: backgrounds, glyphs and decorations run by run as Pango's renderer does, glyphs as the fork's gfx backend draws them (bitmaps at quarter-pixel phases, colour glyphs, outlines when rotated). |
 
 Line breaking uses Pango's rules on a table generated from the Unicode
@@ -143,16 +145,15 @@ with fontconfig or nsfc (and its bundled fonts), with gcc and with clang
 ThinLTO under `--werror`; the default stays `pango` until the comparison
 below is clean everywhere. Measured on Windows (MSYS2 UCRT64, system
 fontconfig) with `--headless --viewport=800x1000`, comparing `--dump=png`
-byte for byte and `--dump=layout` line by line, 74 pages:
+byte for byte and `--dump=layout` line by line, 76 pages:
 
 | Pages | Pictures | Layout |
 |-------|----------|--------|
-| `data/fixtures/*.html`, 19 pages besides text-layout | identical | identical |
+| `data/fixtures/*.html`, 22 pages | identical | identical |
 | `data/render-tests/*.html`, 51 pages | identical | identical |
 | about:license | identical | identical |
 | about:start | the animated logo only (it differs between two runs of the same build too) | identical |
 | about:weststar | the line naming the text library | that line |
-| `data/fixtures/text-layout.html` | 63 px, one line (below) | identical |
 
 canvas-2d gives 21 PASS and webcrypto 57 PASS with either library. The
 WPT checkout's testharness tests under `css/css-text`, `css/css-text-decor`
@@ -166,14 +167,22 @@ Latin with wrapping and justification, mixed fonts, sizes and weights,
 spacing, decorations, Arabic and Hebrew with embedded numbers and Latin,
 Devanagari, Thai (dictionary breaks), CJK, colour emoji with modifiers,
 flags and ZWJ sequences, combining marks, tabs, the white-space values,
-hyphens, overflow-wrap, inline boxes, indent and line-height are the
-same, and so are their pixels. What differs is the right-to-left line with
-`text-overflow: ellipsis`: the fork cuts the start of the line after the
-space before "cut", nstext before it (its rule finds the cut by summing
-character widths from the kept end, the fork's by growing a gap from the
-start), so the ellipsis sits a space's width apart. Both are valid cuts.
-(The fixture's caret probe reads Range rectangles, which the headless
-engine reports as empty with either library.)
+hyphens, overflow-wrap, inline boxes, indent, line-height and the
+ellipsis are the same, and so are their pixels. `text-ellipsis.html`
+cuts lines at the end (ltr) and at the start (rtl): Latin, Hebrew,
+Arabic and mixed bidi, letter spacing, a font change and combining
+marks at the cut, CJK (the midline ellipsis), and justifies CJK, Korean
+and Thai paragraphs that have no spaces. (The fixture's caret probe
+reads Range rectangles, which the headless engine reports as empty with
+either library.)
+
+The middle ellipsis, which no CSS asks for, and carets and hits inside
+an ellipsis are compared by `text-layout-dump`, a small program built
+with either library (`ninja -C build-X text-layout-dump`): it prints the
+lines, extents, every character's position, hits across the width, x
+ranges and a hash of the pixels of a set of ellipsized and justified
+layouts, and writes their pictures to a directory given as argument.
+The two builds print the same.
 
 Differences found and fixed on the way, each visible in the pictures:
 decorations pending when a colour changes are drawn in the old colour
@@ -185,12 +194,6 @@ emoji font (the height of a line with emoji).
 
 ### What is left before the fork can go
 
-- The ellipsis is cut by a simpler rule than Pango's `ellipsize.c` (at a
-  grapheme boundary from the cut end, without Pango's gap balancing);
-  `NS_PANGO_ELLIPSIZE_MIDDLE` cuts at the end. The engine uses only start
-  and end.
-- Justification between clusters (lines with no spaces, such as CJK)
-  spreads the space before each cluster rather than Pango's split of it.
 - Small caps use the font's `smcp`/`c2sc`; Pango also synthesizes them
   for fonts without the feature.
 - Glyph metrics are measured at the user-space size; Pango hints them at
@@ -200,5 +203,6 @@ emoji font (the height of a line with emoji).
 - Vertical text and gravity are not implemented (the engine sets none).
 - The comparison has been run on Windows only; the `text-native` job of
   the Linux workflow builds both libraries and requires the same
-  `--dump=layout` for every fixture there.
+  `--dump=layout` for every fixture there, and the same
+  `text-layout-dump` but for its pixel hashes.
 - Of the fork's cache statistics only the shape cache's are reported.

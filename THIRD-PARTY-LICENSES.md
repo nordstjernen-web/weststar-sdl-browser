@@ -64,8 +64,9 @@ library and rebuild the binary against it.
 > Weststar's text layout without Pango, in `src/text/`. Ported from
 > Pango and pangogfx, keeping their LGPL-2.0-or-later headers: line
 > breaking (`nstext-break.c`), fonts (`nstext-font.c`), itemization,
-> shaping, line layout and rendering (`nstext-itemize.c`,
-> `nstext-shape.c`, `nstext-layout.c`, `nstext-render.c`), emoji
+> shaping, line layout, ellipsizing and rendering (`nstext-itemize.c`,
+> `nstext-shape.c`, `nstext-glyph-item.c`, `nstext-layout.c`,
+> `nstext-ellipsize.c`, `nstext-render.c`), emoji
 > handling (`nstext-emoji.c`, Copyright Google, Inc.) and Pango's
 > generated tables (`nstext-break-table.h`, `nstext-emoji-table.h`,
 > `nstext-language-sample-table.h`, `nstext-script-lang-table.h`). The
