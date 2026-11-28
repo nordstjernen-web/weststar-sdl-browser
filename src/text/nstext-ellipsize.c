@@ -598,9 +598,11 @@ fixup_ellipsis_run (EllipsizeState *state, int extra_width)
       glyphs->glyphs[i].is_cluster_start = FALSE;
     }
 
-  glyphs->glyphs[0].is_cluster_start = TRUE;
-
-  glyphs->glyphs[glyphs->num_glyphs - 1].width += extra_width;
+  if (glyphs->num_glyphs > 0)
+    {
+      glyphs->glyphs[0].is_cluster_start = TRUE;
+      glyphs->glyphs[glyphs->num_glyphs - 1].width += extra_width;
+    }
 
   /* Fix up the item to point to the entire elided text */
   item->offset = state->gap_start_iter.run_iter.start_index;
