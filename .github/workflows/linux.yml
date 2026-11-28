@@ -142,9 +142,10 @@ jobs:
           set -o pipefail
           ./builddir/src/sdl/weststar --headless --dump=text --settle-ms=3000 \
             "file://$PWD/data/fixtures/webcrypto.html" > webcrypto.txt
-          grep -E '^(PASS|FAIL|SKIP)' webcrypto.txt
+          cat webcrypto.txt
           grep -q '^PASS' webcrypto.txt
           ! grep -q '^FAIL' webcrypto.txt
+          grep -q '^END' webcrypto.txt
 
       - name: Text lines are painted where layout put them
         # 600 lines of a <pre> 22.8px apart in a box 13680px tall: paint
@@ -246,6 +247,7 @@ jobs:
             "file://$PWD/data/fixtures/webcrypto.html" > webcrypto.txt
           grep -q '^PASS' webcrypto.txt
           ! grep -q '^FAIL' webcrypto.txt
+          grep -q '^END' webcrypto.txt
 
       - name: GUI smoke (SDL2 window under Xvfb)
         run: |
@@ -359,6 +361,7 @@ jobs:
           set -o pipefail
           ./builddir/src/sdl/weststar --headless --dump=text --settle-ms=3000 \
             "file://$PWD/data/fixtures/webcrypto.html" > webcrypto.txt
-          grep -E '^(PASS|FAIL|SKIP)' webcrypto.txt
+          cat webcrypto.txt
           grep -q '^PASS' webcrypto.txt
           ! grep -q '^FAIL' webcrypto.txt
+          grep -q '^END' webcrypto.txt

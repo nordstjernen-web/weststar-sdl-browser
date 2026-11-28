@@ -1,6 +1,7 @@
 <!doctype html>
 <!-- Web Crypto checks: each prints PASS, FAIL or SKIP. Run headless with
-     --dump=text; CI fails on any FAIL. An algorithm the build's crypto
+     --dump=text; CI fails on any FAIL, or without the END line a finished
+     run prints. An algorithm the build's crypto
      library lacks (Ed25519 and Ed448 in a -Dcrypto=mbedtls build) must be
      refused with NotSupportedError and prints SKIP. -->
 <html><body style="margin:6px">
@@ -165,7 +166,10 @@ t("Ed448 generate/sign/verify",function(){var kp;return S.generateKey("Ed448",tr
   return s.byteLength==114&&S.verify("Ed448",kp.publicKey,s,abc);});});
 t("unknown algorithm is NotSupportedError",function(){return S.digest("MD5",abc).then(function(){return "accepted";},function(e){return e.name=="NotSupportedError"||e.name;});});
 
-function next(i){if(i>=tests.length){document.getElementById("out").textContent=r.join("\n");return;}
+/* Results are shown as they come, so a slow or stuck run shows how far it
+   got; END marks a finished run. */
+function show(){document.getElementById("out").textContent=r.join("\n");}
+function next(i){show();if(i>=tests.length){r.push("END "+tests.length+" checks");show();return;}
   var n=tests[i][0],v;
   function done(v){if(v===true)r.push("PASS "+n);else r.push("FAIL "+n+" got "+v);next(i+1);}
   function fail(e){if(e&&e.name=="NotSupportedError")r.push("SKIP "+n+" NotSupportedError");else r.push("FAIL "+n+" threw "+(e&&e.name)+": "+(e&&e.message));next(i+1);}

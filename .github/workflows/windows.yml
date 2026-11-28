@@ -203,9 +203,10 @@ jobs:
           set -o pipefail
           ./builddir/src/sdl/weststar.exe --headless --dump=text --settle-ms=3000 \
             "file:///$(cygpath -m "$PWD")/data/fixtures/webcrypto.html" > webcrypto.txt
-          grep -E '^(PASS|FAIL|SKIP)' webcrypto.txt
+          cat webcrypto.txt
           grep -q '^PASS' webcrypto.txt
           ! grep -q '^FAIL' webcrypto.txt
+          grep -q '^END' webcrypto.txt
 
       - name: Text lines are painted where layout put them
         # 600 lines of a <pre> 22.8px apart in a box 13680px tall: paint
@@ -372,11 +373,12 @@ jobs:
       - name: Web Crypto checks
         run: |
           set -o pipefail
-          ./builddir-xp/src/sdl/weststar.exe --headless --dump=text --settle-ms=3000 \
+          ./builddir-xp/src/sdl/weststar.exe --headless --dump=text --settle-ms=60000 \
             "file:///$(cygpath -m "$PWD")/data/fixtures/webcrypto.html" > webcrypto.txt
-          grep -E '^(PASS|FAIL|SKIP)' webcrypto.txt
+          cat webcrypto.txt
           grep -q '^PASS' webcrypto.txt
           ! grep -q '^FAIL' webcrypto.txt
+          grep -q '^END' webcrypto.txt
 
       # Linked statically: the executable alone (the import check above
       # has already refused any DLL but the system's).
