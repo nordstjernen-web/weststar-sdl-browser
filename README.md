@@ -35,7 +35,7 @@ built and tested it on Linux and Windows:
 | 5 | Composite with SDL textures: scrolling, fixed boxes and `transform`/`opacity` animations moved by the GPU | done for fixed boxes and animations; `sticky` boxes, canvases and animated images are left |
 | 6 | SDL as the platform: threads, the main loop, files, fonts, crypto, SDL2, Windows XP | done, except for a run on XP itself and an Amiga-family build |
 | 6a | Replace Pango with Weststar's own text layout (nstext) | done: Pango and GObject are not used, and the Pango fork it replaced is removed |
-| 6b | Replace GLib with a small in-tree core library (nscore, `src/core/`) | done, opt-in with `-Dglib=native`: no GLib is linked, and pages come out identical; the default stays the system's GLib for now |
+| 6b | Replace GLib with a small in-tree core library (nscore, `src/core/`) | done: GLib is not used, and pages come out as they did on GLib |
 
 See [docs/porting-to-sdl.md](docs/porting-to-sdl.md) for the plan, what
 has been removed and why, and what is left.
@@ -54,6 +54,10 @@ The main in-tree parts are:
   - It replaced web-text-lib, an in-tree Pango fork, once it laid out
     and painted every page as the fork did; CI compared the two until
     the fork was removed. See [docs/text-layout.md](docs/text-layout.md).
+- **`src/core/`** (nscore) is Weststar's own core library in GLib's
+  place: containers, strings, Unicode, key files, logging. The engine's
+  sources still spell GLib's names (`g_string_new`, `#include <glib.h>`);
+  `src/core/glib.h` maps them onto nscore's `ns_` functions.
 - **`src/plat/`** is the platform layer over SDL: threads, locks, the
   event loop, files, the environment, system information and crypto.
 - **`src/fc/`** (nsfc) finds fonts where fontconfig is not available. It
@@ -99,8 +103,9 @@ included), on 28 November 2026:
 | 2D rasterizer | `src/gfx/` | 5,536 |
 | Audio | `src/audio/` | 3,685 |
 | Font finder (nsfc) | `src/fc/` | 3,060 |
+| Core library (nscore), with its Unicode tables and tests | `src/core/` | 19,715 |
 | Tests and benchmark | `src/*/tests/` | 3,673 |
-| **Total** | | **261,657** |
+| **Total** | | **281,372** |
 
 Besides the C, `data/js/` holds 12,820 lines of JavaScript and CSS
 (polyfills, the PDF viewer, internal pages). The vendored libraries below
@@ -113,7 +118,6 @@ Libraries the build needs from the system:
 | Library | For |
 |---------|-----|
 | [SDL3](https://libsdl.org) ≥ 3.2, or SDL2 ≥ 2.0.18 with `-Dsdl=sdl2` | the window, input, audio output, threads, files |
-| GLib ≥ 2.80 | strings, lists, hash tables and Unicode functions; not needed with `-Dglib=native`, which uses nscore (`src/core/`) instead |
 | [libcurl](https://curl.se) ≥ 8.5 | HTTP, HTTPS, WebSocket |
 | OpenSSL (libcrypto), or Mbed TLS with `-Dcrypto=mbedtls` | Web Crypto, random numbers, hashing |
 | HarfBuzz ≥ 8.3, FriBidi ≥ 1.0.6 | text shaping, bidirectional text |
@@ -125,7 +129,8 @@ Libraries the build needs from the system:
 
 Optional, used when found: libavif (AVIF images), libvorbisfile and
 libopusfile (Ogg audio), libbrotlidec and libzstd (compressed responses),
-Enchant (spell checking), and PDF.js (the PDF viewer; `-Dpdfjs`).
+Enchant (spell checking, `-Dspellcheck`; it brings its own GLib), and
+PDF.js (the PDF viewer; `-Dpdfjs`).
 
 Vendored in the tree or fetched by meson as subprojects:
 [lexbor](https://github.com/lexbor/lexbor) (HTML parsing, URLs),
@@ -138,10 +143,12 @@ BMP, JPEG and WebP decoding), [Nuklear](https://github.com/Immediate-Mode-UI/Nuk
 [Public Suffix List](https://publicsuffix.org/) (which cookies a site may
 set, and which hosts are one site; `src/psl-table.h`, generated from a
 pinned version of the list). SDL2,
-Mbed TLS, libcurl, GLib, the DejaVu fonts and the other libraries in
+Mbed TLS, libcurl, the DejaVu fonts and the other libraries in
 `subprojects/` are also fetched this way when a build asks for them or
-the system lacks them. GTK, Cairo, Pango
-and GObject are not used.
+the system lacks them. GTK, Cairo, Pango,
+GObject and GLib are not used. GLib's development files are needed only
+to run nscore's tests against GLib (`meson test --suite nscore`), which
+are skipped without them.
 [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md) has each licence.
 
 ## Building
@@ -152,7 +159,7 @@ Weststar builds with meson and ninja. On Debian/Ubuntu:
 sudo apt install build-essential pkg-config meson ninja-build \
     libsdl3-dev libcurl4-openssl-dev libssl-dev libharfbuzz-dev \
     libfribidi-dev libfontconfig-dev libfreetype-dev \
-    libsqlite3-dev libseccomp-dev libglib2.0-dev zlib1g-dev
+    libsqlite3-dev libseccomp-dev zlib1g-dev
 meson setup builddir
 meson compile -C builddir
 ./builddir/src/sdl/weststar https://example.org
@@ -175,8 +182,6 @@ Options for smaller and older systems:
 | `-Dsdl=sdl2` | builds against SDL2 instead of SDL3 |
 | `-Dcrypto=mbedtls` | Web Crypto without OpenSSL |
 | `-Dfontconfig=disabled` | fonts are found by nsfc, with DejaVu compiled in |
-| `-Dglib=native` | no GLib: nscore, the in-tree core library, takes its place |
-| `-Dglib=bundled` | builds the part of GLib that is used from source |
 | `-Dca_bundle=<file>` | compiles the certificates in that file into the browser |
 
 The Windows XP build uses all of them. It is one 32-bit `weststar.exe`,

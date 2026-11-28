@@ -126,40 +126,34 @@ So the shell goes first, and Cairo after it:
       tables, string and URI functions, logging, and GObject for the
       text library: 318 functions, from 370.
    5. *GLib's data structures and GObject* (318 functions at 21,000
-      call sites, and the Pango fork's type system) come from a trimmed
-      GLib built statically, its few OS calls redirected to the SDL
-      layer — rather than rewriting the call sites. Started: with
-      `-Dglib=bundled` the browser builds the source files of GLib
-      2.80 and GObject that those functions live in, from the release
-      pinned in `subprojects/glib.wrap`, with a build of its own
-      (`subprojects/packagefiles/glib/`) in place of GLib's, and links
-      them statically; with unused sections dropped that is about 1 MB.
-      GIO, GModule, PCRE2, libffi and libintl are not built or needed.
-      It builds for Linux, the BSDs and Windows (where the CI build
-      uses it); macOS is not set up. Its OS calls are moving to SDL: GLib's mutexes, condition variables, read-write
-      locks, thread-local values and threads are SDL's
-      (`glib/ns-gthread-sdl.c` in place of `gthread-posix.c`, so `g_once`
-      and GObject's type system lock with SDL too), and its two clocks
-      are SDL's (`glib/ns-gclock.c`), which lets GLib's main loop and its
-      pipe, poll and wake-up helpers go: 68 files of GLib's own remain.
-      With threads on SDL, Windows needed only its type sizes and two
-      more of GLib's files (`gwin32.c`, `gstdio.c`). What those files
-      still ask the C library for is the environment, the locale's
-      character set, files and folders, and `stderr`; whether that needs
-      changing is for the first platform without them to say (stage 7).
+      call sites, and the Pango fork's type system). Done: the browser
+      links no GLib and no GObject at all. GObject went with the Pango
+      fork, the only thing that used it (Text without Pango, below), and
+      GLib's place is taken by nscore (`src/core/`), a core library of
+      the browser's own in plain C11.
 
-      *GLib replaced: nscore.* With `-Dglib=native` (and `-Dtext=native`,
-      since the Pango fork is built on GLib and GObject) the browser links
-      no GLib or GObject at all: nscore (`src/core/`), a core library of
-      its own in plain C11, takes their place. Its functions carry GLib's
-      names with `ns_` for `g_` (`ns_string_new`, `ns_hash_table_insert`,
-      `ns_key_file_to_data`, `ns_utf8_normalize`...), its containers keep
-      GLib's public fields (`str`/`len`/`allocated_len`, `pdata`/`len`,
-      `data`/`len`), and `src/core/glib.h` (with `glib-object.h`,
-      `glib-unix.h` and `glib/gstdio.h`) maps GLib's types, macros and
-      functions onto it. That directory comes first on the include path,
-      so the engine's `#include <glib.h>` lands there and its sources
-      build unchanged (the diagnostics page alone asks which it has).
+      On the way there, a build option built the part of GLib 2.80 and
+      GObject those functions live in from a pinned release, statically,
+      its threads, locks and clocks redirected to the SDL layer
+      (`-Dglib=bundled`, 68 of GLib's files), and nscore was first an
+      opt-in (`-Dglib=native`) compared against the system's GLib. Once
+      the two laid out and painted every fixture and render test
+      identically on Linux and Windows, the option, the bundled GLib and
+      its patches were removed: nscore is the only way the browser is
+      built.
+
+      nscore's functions carry GLib's names with `ns_` for `g_`
+      (`ns_string_new`, `ns_hash_table_insert`, `ns_key_file_to_data`,
+      `ns_utf8_normalize`...), its containers keep GLib's public fields
+      (`str`/`len`/`allocated_len`, `pdata`/`len`, `data`/`len`), and
+      `src/core/glib.h` (with `glib-unix.h` and `glib/gstdio.h`) maps
+      GLib's types, macros and functions onto it. That directory comes
+      first on the include path, so the engine's `#include <glib.h>`
+      lands there and its sources build unchanged. The `g_` spelling
+      left in the engine's sources (`g_string_new`, `GPtrArray`,
+      `#include <glib.h>`) is therefore the shim's, not GLib's; renaming
+      it to the `ns_` names is a mechanical change that can follow,
+      after which the shim goes too.
       What nscore holds is what the engine imported, 245 functions:
       memory; C strings, string vectors and printf (C99's on every
       platform, MinGW's own on Windows, so `%zu` and `%lld` work on the
@@ -187,18 +181,25 @@ So the shell goes first, and Cairo after it:
       `fatal-criticals` and G_MESSAGES_DEBUG honoured. The tests in
       `src/core/` check known answers and round trips, and, where GLib is
       installed, run each function beside GLib's on the same input
-      (`meson test --suite nscore`). The browser built both ways (each
-      with `-Dtext=native`) lays out and paints every fixture and render
-      test identically, and the CI builds compare them on Linux and
-      Windows and check that no GLib library is linked. Left out:
-      spell checking, since the system's Enchant links GLib. The Windows
-      XP build and the Linux portable profile in CI are built on nscore
-      (against `msvcrt.dll` nscore calls the C runtime's old file
-      functions, `_stati64`, `_lseeki64`, `_wfopen`, `_wutime` and the
-      like, and MinGW's own `printf` and `strtoll`: nothing XP lacks;
-      `scripts/check-xp-imports.py` passes). The bundled GLib is still
-      built by the main Windows CI job, so that it keeps working. Not yet
-      tried: macOS and the Amiga family.
+      (`meson test --suite nscore`: `nscore-vs-glib` and
+      `nscore-unicode-vs-glib`). That is the only use of GLib left: CI
+      installs GLib's development package for these tests alone, and
+      checks that the browser links no GLib library and that none of its
+      sources reads a GLib header. (A system's HarfBuzz or Enchant may
+      still load GLib for its own use.) Against `msvcrt.dll`, for Windows
+      XP, nscore calls the C runtime's old file functions, `_stati64`,
+      `_lseeki64`, `_wfopen`, `_wutime` and the like, and MinGW's own
+      `printf` and `strtoll`: nothing XP lacks
+      (`scripts/check-xp-imports.py` passes).
+
+      Spell checking stays optional (`-Dspellcheck`, on where Enchant 2
+      is installed). The system's Enchant is built on GLib and brings it
+      into the process as its own dependency; the browser hands Enchant
+      only C strings, includes none of GLib's headers (nscore's `glib.h`
+      is found before the GLib directories Enchant's `pkg-config` file
+      adds) and defines no GLib symbol (all of nscore's are `ns_` ones),
+      so the two do not meet. The Windows XP build leaves it out. Not
+      yet tried: macOS and the Amiga family.
    6. *SDL2 as well as SDL3*, since the Amiga-family ports and
       XP-capable builds are SDL2. Done: `meson setup -Dsdl=sdl2` builds
       the whole browser on SDL 2.0.18 or later. The code stays written
@@ -248,10 +249,6 @@ So the shell goes first, and Cairo after it:
         and `execv` elsewhere, and waits for it with
         `WaitForSingleObject` or `waitpid`. The Amiga family has neither,
         and runs without the watchdog.
-      - *The bundled GLib*: its thread and clock files include `ns_sdl.h`
-        too (the browser hands it to the subproject as the `weststar-sdl`
-        dependency), and start threads with
-        `SDL_CreateThreadWithStackSize`.
       SDL2 is the system's when installed; else, or with
       `--force-fallback-for=sdl2`, the release pinned in
       `subprojects/sdl2.wrap` (2.32.8, WrapDB's meson port), built
@@ -286,9 +283,7 @@ So the shell goes first, and Cairo after it:
       their older forms where the runtime is `msvcrt.dll`; and in the
       subprojects, patched only where built for XP, SQLite's slim
       reader/writer locks and `GetTickCount64`, quickjs-ng's one-time
-      initialisation and condition variables, and (for a build with
-      `-Dglib=bundled`; the XP build itself is on nscore) GLib's
-      `SHGetKnownFolderPath` and `GetFileInformationByHandleEx`.
+      initialisation and condition variables.
       `scripts/check-xp-imports.py` reads the executable's import tables
       and fails on anything 32-bit XP SP3 does not export, checked against
       mingw-w64's record of `msvcrt.dll`'s exports by Windows version and
@@ -339,7 +334,7 @@ So the shell goes first, and Cairo after it:
       |---------|-----|---------|---------------|------|
       | libcurl | HTTP(S), WebSocket, FTP, cookies, HSTS, Alt-Svc, DoH, proxies | system | system / subproject | keep; for XP built with only what the browser uses |
       | OpenSSL (libcrypto) / Mbed TLS | Web Crypto, random numbers; curl's TLS | OpenSSL | Mbed TLS | keep both, Mbed TLS for the portable builds |
-      | GLib | containers, strings, Unicode | system (or bundled) | none: nscore | nscore everywhere once the Pango fork is gone |
+      | GLib | — | none: nscore | none: nscore | gone (done); only nscore's comparison tests use it |
       | HarfBuzz, FriBidi, FreeType | shaping, bidi, glyphs | system | system / subproject | keep |
       | fontconfig | finding fonts | system | none: nsfc | optional (done) |
       | SQLite | IndexedDB, history, bookmarks | system | system / subproject | keep |
@@ -350,7 +345,7 @@ So the shell goes first, and Cairo after it:
       | libavif (dav1d, aom...) | AVIF images | when found | off | optional (done) |
       | libvorbisfile, libopusfile | Ogg audio | when found | off | optional (done) |
       | libthai | Thai word breaks | when found | when found / off | optional (done) |
-      | Enchant | spell checking | when found | off (links GLib) | optional; a GLib-free one later |
+      | Enchant | spell checking | when found (brings its own GLib) | off | optional (`-Dspellcheck`); a GLib-free one later |
       | winpthreads, libgcc, libstdc++ | MinGW's runtime (HarfBuzz is C++) | DLLs | static | keep |
 
       A system libcurl brings what its distribution built it with (on

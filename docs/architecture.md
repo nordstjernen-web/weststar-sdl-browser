@@ -57,8 +57,8 @@ space.
   bubble; downloads, session saving and shortcuts. *New Window* opens
   another window in the same process; each window shows one page — there
   are no tabs. Its icons are the bundled SVGs drawn by the in-engine SVG
-  renderer (`src/sdl/icons.c`). `src/sdl/mainloop.c` runs GLib's default
-  context and SDL's event queue together on the main thread.
+  renderer (`src/sdl/icons.c`). `src/sdl/mainloop.c` runs the default NsLoop
+  and SDL's event queue together on the main thread.
 - **Page view** (`src/sdl/pageview.c`) — shows a page in part of a
   window. It turns SDL input into typed requests (`REQ_LOAD`,
   `REQ_RENDER`, `REQ_CLICK`, `REQ_KEY`, `REQ_SCROLL`, …), posts each as a

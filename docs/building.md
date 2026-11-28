@@ -13,8 +13,7 @@ Debian 13 / Ubuntu 25.04 or newer:
 sudo apt install build-essential git pkg-config meson ninja-build \
     libsdl3-dev libcurl4-openssl-dev libssl-dev \
     libharfbuzz-dev libfribidi-dev libfontconfig-dev \
-    libfreetype-dev libsqlite3-dev libseccomp-dev \
-    libglib2.0-dev zlib1g-dev
+    libfreetype-dev libsqlite3-dev libseccomp-dev zlib1g-dev
 ```
 
 Fedora:
@@ -23,7 +22,7 @@ Fedora:
 sudo dnf install gcc git pkgconf meson ninja-build SDL3-devel \
     libcurl-devel openssl-devel harfbuzz-devel fribidi-devel \
     fontconfig-devel freetype-devel \
-    sqlite-devel libseccomp-devel glib2-devel zlib-devel
+    sqlite-devel libseccomp-devel zlib-devel
 ```
 
 `libseccomp` is required on Linux — `meson setup` fails without it.
@@ -32,7 +31,14 @@ no libpsl; a distribution's libcurl may link it for its own cookie
 engine, and its package brings it. Where libpsl's headers are installed,
 `meson test --suite psl` compares the two.
 
-The text stack has version floors: GLib ≥ 2.80,
+GLib is not needed either: the browser is built on nscore (`src/core/`),
+its own core library, under GLib's names. Where GLib's development files
+are installed (`libglib2.0-dev`, `glib2-devel`, MSYS2's `glib2`), `meson
+test --suite nscore` also runs nscore's functions beside GLib's and
+compares the answers; without them those two tests are skipped. A
+distribution's HarfBuzz, or Enchant, may still load GLib for its own use.
+
+The text stack has version floors:
 HarfBuzz ≥ 8.3, fontconfig ≥ 2.15 and FriBidi ≥ 1.0.6, with FreeType;
 fontconfig is optional (see `fontconfig` under Build options);
 SDL3 must be ≥ 3.2 and libcurl ≥ 8.5. `meson setup` checks every floor
@@ -46,7 +52,8 @@ GTK is not needed. The window chrome is drawn with
 
 **Optional, auto-detected:** `libavif-dev` (AVIF images),
 `libenchant-2-dev` (+ a dictionary such as `hunspell-en-us`) for
-on-screen spell-checking, `libopusfile-dev` / `libvorbis-dev` for native
+on-screen spell-checking (`-Dspellcheck`; Enchant is built on GLib and
+brings it along), `libopusfile-dev` / `libvorbis-dev` for native
 Ogg Opus/Vorbis decode in the audio mixer, `libthai-dev` for Thai word
 breaking, and `libbrotli-dev` and `libzstd-dev` for Brotli and zstd
 `Content-Encoding`. The build works without them.
@@ -73,10 +80,13 @@ Weststar builds natively on Windows in an [MSYS2](https://www.msys2.org)
 **UCRT64** shell, with GCC or Clang. Install the toolchain and libraries:
 
 ```sh
-pacman -S --needed git mingw-w64-ucrt-x86_64-{gcc,clang,lld,pkgconf,meson,ninja}     mingw-w64-ucrt-x86_64-{sdl3,glib2,harfbuzz,fribidi,fontconfig,freetype}     mingw-w64-ucrt-x86_64-{curl,openssl,ca-certificates,sqlite3,zlib,brotli,zstd}     mingw-w64-ucrt-x86_64-{libavif,opusfile,libvorbis}
+pacman -S --needed git mingw-w64-ucrt-x86_64-{gcc,clang,lld,pkgconf,meson,ninja}     mingw-w64-ucrt-x86_64-{sdl3,harfbuzz,fribidi,fontconfig,freetype}     mingw-w64-ucrt-x86_64-{curl,openssl,ca-certificates,sqlite3,zlib,brotli,zstd}     mingw-w64-ucrt-x86_64-{libavif,opusfile,libvorbis}
 ```
 
-then build as below; the binary is `builddir/src/sdl/weststar.exe`. To run
+then build as below; the binary is `builddir/src/sdl/weststar.exe`.
+Add `mingw-w64-ucrt-x86_64-glib2` to run nscore's tests against GLib, and
+`mingw-w64-ucrt-x86_64-enchant` (with a provider and dictionaries) for
+spell checking. To run
 it outside the MSYS2 shell, put it in a folder with the UCRT64 DLLs it
 links (`ldd weststar.exe`) and `/ucrt64/etc/fonts` as `etc/fonts`: the
 `windows` workflow (`.github/workflows/windows.yml`) builds exactly that
@@ -103,9 +113,8 @@ The native file `scripts/winxp-i686.ini` is the whole configuration:
 - `_WIN32_WINNT` and `WINVER` 0x0501 for every file, the subprojects'
   too, so that the Windows headers declare nothing newer than XP; where
   the browser can use a newer function it looks it up at run time.
-- `-Dsdl=sdl2 -Dcrypto=mbedtls -Dglib=native -Dfontconfig=disabled`
-  (nscore, the in-tree core library, in place of GLib),
-  without AVIF and WebAssembly (WAMR has no 32-bit x86 Windows build).
+- `-Dsdl=sdl2 -Dcrypto=mbedtls -Dfontconfig=disabled`,
+  without AVIF, spell checking and WebAssembly (WAMR has no 32-bit x86 Windows build).
 - Every library from its subproject, built for XP and linked
   statically (`force_fallback_for`): SDL2, Mbed TLS, and from
   WrapDB curl, FreeType, HarfBuzz, FriBidi, SQLite, zlib, Brotli, zstd
@@ -122,10 +131,7 @@ The native file `scripts/winxp-i686.ini` is the whole configuration:
 
 Some of the subprojects need a patch for XP, applied only when they are
 built for it: SQLite (`sqlite3-winxp.patch`: critical sections where it
-now takes slim reader/writer locks, and `GetTickCount`), GLib, for a
-build with `-Dglib=bundled` in nscore's place (`glib-winxp.patch`:
-special folders through `SHGetFolderPathW`, file sizes from
-`GetFileInformationByHandle`, none of the CRT's `_s` functions),
+now takes slim reader/writer locks, and `GetTickCount`),
 quickjs-ng (`quickjs-ng-winxp.patch`: one-time
 initialisation and condition variables of its own), Mbed TLS (entropy
 from `RtlGenRandom`, where it took `BCryptGenRandom`) and curl
@@ -248,8 +254,8 @@ Where muon 0.7.1 differs from meson:
   compilation" for each.
 - A muon built with its libpkgconf backend can miss every system library
   on Debian and Ubuntu, because that backend does not search the
-  multiarch `pkg-config` directory: `muon setup` then reports GLib, SDL3
-  and the rest as not found although `pkg-config` finds them. Configure
+  multiarch `pkg-config` directory: `muon setup` then reports SDL3,
+  HarfBuzz and the rest as not found although `pkg-config` finds them. Configure
   with `-Dmuon.pkgconfig=exec`, or build muon with `-Dlibpkgconf=disabled`.
 - `muon install` has no `--skip-subprojects`; muon's meson command-line
   layer accepts the option and ignores it. A muon install therefore also
@@ -339,7 +345,7 @@ once (`apt install ccache` / `dnf install ccache`). Optionally use the
 | `fontconfig` | `auto` | Find fonts through the system's fontconfig. `auto` uses it when it is installed (2.15 or newer); `disabled`, or a system without it, builds nsfc instead (`src/fc/`), which reads the platform's font folders itself with FreeType: `/usr/share/fonts`, `/usr/local/share/fonts`, the `fonts` folder of each `XDG_DATA_DIRS` entry, `~/.local/share/fonts` and `~/.fonts`; `%WINDIR%\Fonts` and the per-user font folder on Windows; the three `Library/Fonts` folders on macOS; then a `fonts` folder beside the executable and the folders named in `NS_FONT_PATH`. It needs no configuration files, and keeps what it found in `fonts.cache` in the browser's cache folder. `enabled` makes fontconfig required. See [porting-to-sdl.md](porting-to-sdl.md). |
 | `bundled_fonts` | `auto` | Compile fallback fonts into the browser for nsfc: DejaVu Sans, Sans Bold, Serif and Sans Mono 2.37, about 2.1 MB, fetched from the release pinned in `subprojects/dejavu-fonts.wrap` (Bitstream Vera licence, in `THIRD-PARTY-LICENSES.md`). They are used only where the system has no font of the kind a page asks for, or none with its characters, so a portable build still draws text on a system with few or no fonts. `auto` builds them in wherever nsfc is built, and leaves them out (they would never be used) where the system's fontconfig is; `disabled` leaves them out; `enabled` requires them, and fails with the system's fontconfig. `NS_NO_SYSTEM_FONTS=1` in the environment hides the system's fonts from nsfc, to see the bundled ones alone. |
 | `ca_bundle` | empty | A file of CA certificates in PEM format, such as [Mozilla's set from curl.se](https://curl.se/docs/caextract.html), to compile into the browser as its own trust store for HTTPS. It is used where the system has no certificate file, and wherever the environment has `NS_CA_BUNDLE=builtin`, for a system whose own root certificates are too old. (`NS_CA_BUNDLE` may also name a certificate file to use, in any build.) The certificates are as old as the build: a browser built this way needs rebuilding to learn of new ones. |
-| `glib` | `system` | Where GLib comes from. `system`: the installed library (2.80 or newer). `bundled`: the part of it the browser uses (containers, strings, the Unicode tables, key files, checksums, logging), built statically from the GLib release pinned in `subprojects/glib.wrap` by `subprojects/packagefiles/glib/meson.build`; the browser then needs no GLib installed, nor PCRE2, libffi or libintl. For Linux, the BSDs and Windows (the Windows CI build uses it); not macOS yet. (A distribution's HarfBuzz may load the system's GLib for its own use all the same.) `native`: no GLib at all, but nscore (`src/core/`), the browser's own core library under GLib's names; it leaves spell checking out (the system's Enchant links GLib). GLib is then needed only for nscore's tests against it, which are skipped without it. See [porting-to-sdl.md](porting-to-sdl.md), stage 6.5. |
+| `spellcheck` | `auto` | Spell checking in editable text through Enchant 2. `auto` builds it where Enchant is installed; `enabled` requires it; `disabled` leaves it out. The browser itself uses no GLib, but the system's Enchant is built on GLib and loads it for itself: the browser hands Enchant only C strings and includes no GLib header. |
 | `avif` | `auto` | Decode AVIF through libavif. Disabling drops a full AV1 decoder; AVIF images then fail to decode. |
 | `pdfjs` | `auto` | The PDF viewer, built on PDF.js and embedded at build time. `auto` builds it when PDF.js is available; `enabled` makes PDF.js a required dependency, so the build fails without it; `disabled` leaves the viewer out, and a PDF shows a link to the file. |
 | `pdfjs_dir` | *(empty)* | Directory of an installed PDF.js to use instead of the pinned release, such as Arch's `/usr/share/pdf.js`. See below. |

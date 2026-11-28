@@ -334,8 +334,6 @@
 <text class="gtitle" x="36" y="1360" text-anchor="start">System libraries</text>
 <rect class="chip" x="36" y="1368" width="49" height="30" rx="6"/>
 <text class="chiptext" x="60.5" y="1388" text-anchor="middle">GTK 4</text>
-<rect class="chip" x="90.3125" y="1368" width="42" height="30" rx="6"/>
-<text class="chiptext" x="111.3125" y="1388" text-anchor="middle">GLib</text>
 <rect class="chip" x="137.625" y="1368" width="49" height="30" rx="6"/>
 <text class="chiptext" x="162.125" y="1388" text-anchor="middle">Cairo</text>
 <rect class="chip" x="191.9375" y="1368" width="70" height="30" rx="6"/>

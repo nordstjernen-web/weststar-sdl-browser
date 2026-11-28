@@ -25,9 +25,12 @@ The first Weststar release: Northstar 1.0.27 ported from GTK 4 to SDL3.
 * A `pattern` attribute whose regular expression backtracks without
   end no longer hangs the page: the match is given up on after a
   quarter of a second.
-* `-Dglib=bundled` builds the part of GLib the browser uses from a pinned
-  release, statically, instead of using the system's GLib (Linux, the
-  BSDs and Windows).
+* Text is laid out by nstext (`src/text/`), Weststar's own library on
+  HarfBuzz, FriBidi and FreeType, in place of the Pango fork; GObject is
+  no longer used.
+* GLib is no longer used: nscore (`src/core/`), Weststar's own core
+  library, takes its place. Spell checking (`-Dspellcheck`) still uses
+  the system's Enchant, which brings its own GLib.
 * Scrolling moves the page's texture with SDL's renderer; only the strip
   that came into view, and fixed boxes, are painted and uploaded.
 * `-Dca_bundle=<file>` compiles a set of CA certificates into the
