@@ -60218,6 +60218,9 @@ ns_script_type_supported(const ns_node *n)
         if (len == 6 && g_ascii_strncasecmp(s, "module", 6) == 0) return TRUE;
         return ns_js_mime_essence_match(s, len);
     }
+    /* No MIME type is this long; the bound also lets the compiler see that
+     * len + 6 does not wrap. */
+    if (len > 4096) return FALSE;
     g_autofree char *joined = g_malloc(len + 6);
     memcpy(joined, "text/", 5);
     memcpy(joined + 5, s, len);
