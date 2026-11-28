@@ -32,6 +32,14 @@ nscore_c_args = []
 if host_machine.system() == 'windows'
   nscore_c_args += ['-D__USE_MINGW_ANSI_STDIO=1']
 endif
+# nscore is compiled outside link-time optimization, so the engine calls
+# it as it called GLib's shared library: through the declared interface.
+# Inlined into the engine under LTO, its allocator's zero-size path and
+# its string helpers set off gcc's -Wstringop-overflow at link time on
+# code that is correct.
+if get_option('b_lto')
+  nscore_c_args += ['-fno-lto']
+endif
 
 nscore_lib = static_library('nscore',
   nscore_sources,
