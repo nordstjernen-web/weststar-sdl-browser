@@ -447,9 +447,13 @@ jobs:
           fail=0
           crashed=""
           for f in data/fixtures/*.html; do
+            # webcrypto.html prints each result as it arrives: let it
+            # finish (settle returns once the page is idle).
+            settle=""
+            case "$f" in *webcrypto.html) settle=--settle-ms=60000 ;; esac
             for lib in pango native; do
               rc=0
-              ./build-$lib/src/sdl/weststar --headless --viewport=800x1000 \
+              ./build-$lib/src/sdl/weststar --headless --viewport=800x1000 $settle \
                 --dump=layout "file://$PWD/$f" > "layout-$lib.txt" 2>/dev/null || rc=$?
               [ "$rc" -ge 128 ] && crashed="$crashed $lib:$f"
               ./build-$lib/src/sdl/weststar --headless --viewport=800x1000 \

@@ -2311,6 +2311,11 @@ break_thai (const char          *text,
 
   if (tis_text != tis_stack)
     free (tis_text);
+#else
+  /* Without libthai, Thai breaks only where the default rules allow. */
+  (void) text;
+  (void) len;
+  (void) attrs;
 #endif
 }
 
