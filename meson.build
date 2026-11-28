@@ -170,7 +170,7 @@ foreach name, floor : ns_floors
     continue
   endif
   # GLib and GObject may come from the pinned subproject instead.
-  if get_option('glib') == 'bundled' and (name == 'glib-2.0' or name == 'gobject-2.0')
+  if get_option('glib') != 'system' and (name == 'glib-2.0' or name == 'gobject-2.0')
     continue
   endif
   if not dependency(name, version: floor, required: false).found()
@@ -212,7 +212,17 @@ endif
 # GLib and GObject: the system's, or with -Dglib=bundled the part of them
 # the browser uses, built statically from the pinned release
 # (subprojects/glib.wrap and packagefiles/glib/).
-if get_option('glib') == 'bundled'
+# With -Dglib=native neither: nscore (src/core/) takes GLib's place under
+# its names, declared further down, once every project argument is set.
+ns_glib = get_option('glib')
+if ns_glib == 'native'
+  if get_option('text') != 'native'
+    error('-Dglib=native needs -Dtext=native: web-text-lib, the Pango fork ' +
+          'of -Dtext=pango, is built on GLib and GObject')
+  endif
+  glib    = dependency('', required: false)
+  gobject = dependency('', required: false)
+elif ns_glib == 'bundled'
   glib_proj = subproject('glib')
   glib    = glib_proj.get_variable('glib_dep')
   gobject = glib_proj.get_variable('gobject_dep')
@@ -411,7 +421,14 @@ endif
 have_audio = get_option('audio').allowed()
 libvorbisfile = dependency('vorbisfile', required: false)
 libopusfile = dependency('opusfile', required: false)
-libenchant = dependency('enchant-2', required: false)
+# Spell checking through Enchant, where it is installed; not with
+# -Dglib=native, since the system Enchant links GLib.
+if ns_glib == 'native'
+  libenchant = dependency('', required: false)
+  message('spell checking (Enchant) left out: -Dglib=native links no GLib')
+else
+  libenchant = dependency('enchant-2', required: false)
+endif
 have_enchant = libenchant.found()
 
 libseccomp = dependency('libseccomp', required: host_system == 'linux')
@@ -564,7 +581,7 @@ summary({
   'JavaScript engine': js_engine + ' ' + libquickjs.version(),
   'Crypto library': crypto_backend + ' ' + libcrypto.version(),
   'Built-in CA certificates': have_ca_bundle ? get_option('ca_bundle') : 'none',
-  'GLib': get_option('glib') == 'bundled' ? 'bundled ' + glib.version() : 'system ' + glib.version(),
+  'GLib': ns_glib == 'native' ? 'none (nscore, in tree)' : ns_glib + ' ' + glib.version(),
   'Fonts found by': have_system_fontconfig ? 'fontconfig ' + libfontconfig.version() : 'nsfc (in tree)',
   'Text layout': get_option('text') == 'native' ? 'nstext (in tree, no Pango or GObject)' : 'web-text-lib (in-tree Pango fork)',
   'Bundled fallback fonts': bundled_fonts_source,
@@ -596,6 +613,11 @@ int ns_embed_probe_len(void) { return (int)sizeof ns_embed_probe; }
 subdir('src/gfx')
 subdir('src/plat')
 subdir('src/fc')
+# nscore, the core library that stands in for GLib with -Dglib=native.
+subdir('src/core')
+if ns_glib == 'native'
+  glib = nscore_dep
+endif
 # -Dtext=native: nstext (src/text/), the same API without Pango or GObject.
 ns_text = get_option('text')
 if ns_text == 'native'

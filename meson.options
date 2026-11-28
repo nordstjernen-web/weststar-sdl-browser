@@ -12,8 +12,8 @@ option('js_engine', type: 'combo', choices: ['quickjs-ng', 'quickjs'], value: 'q
        description: 'JavaScript engine: quickjs-ng (default) or the original QuickJS by Fabrice Bellard, each built from its pinned subproject.')
 option('crypto', type: 'combo', choices: ['openssl', 'mbedtls'], value: 'openssl',
        description: 'Library behind Web Crypto, random numbers and hashing: OpenSSL libcrypto (default), or Mbed TLS 3.6 for portable builds without OpenSSL (the system copy if installed, else the release pinned in subprojects/mbedtls.wrap, built statically). The mbedtls build lacks Ed25519 and Ed448, which Web Crypto then refuses with NotSupportedError. HTTPS is unaffected: it goes through libcurl and its own TLS library.')
-option('glib', type: 'combo', choices: ['system', 'bundled'], value: 'system',
-       description: 'Where GLib and GObject come from: the system (default), or bundled: the part of them the browser uses, built statically from the release pinned in subprojects/glib.wrap, for a browser that needs no GLib installed. Not yet for macOS.')
+option('glib', type: 'combo', choices: ['system', 'bundled', 'native'], value: 'system',
+       description: 'Where GLib and GObject come from: the system (default); bundled: the part of them the browser uses, built statically from the release pinned in subprojects/glib.wrap, for a browser that needs no GLib installed (not yet for macOS); or native: no GLib at all, but nscore (src/core/), the in-tree core library that takes its place under the GLib names. native needs -Dtext=native and leaves out spell checking (the system Enchant links GLib).')
 option('fontconfig', type: 'feature', value: 'auto',
        description: 'Find fonts through the system fontconfig library (auto: when it is installed). Disabled, or where fontconfig is missing, fonts are found by nsfc (src/fc/), built into the browser: it reads the font folders of the platform itself, with FreeType, and needs no configuration files. For portable builds, and platforms without fontconfig.')
 option('text', type: 'combo', choices: ['pango', 'native'], value: 'native',
