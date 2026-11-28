@@ -236,6 +236,10 @@ jobs:
           grep -q 'GLib *: none (nscore' build-nat/meson-logs/meson-log.txt
           objdump -p build-nat/src/sdl/weststar.exe | grep 'DLL Name'
           ! objdump -p build-nat/src/sdl/weststar.exe | grep -i -E 'DLL Name: lib(glib|gobject|gio)-'
+          # Nor does any of its sources read a GLib header: only nscore's
+          # tests against GLib may.
+          ! ninja -C build-nat -t deps |
+            awk '/^[^ ]/ { t = $1 } /glib-2\.0\/glib\.h/ { print t }' | grep -v 'vs-glib'
 
       - name: nscore tests, alone and against GLib
         run: meson test -C build-nat --suite nscore --print-errorlogs
