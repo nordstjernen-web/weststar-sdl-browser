@@ -479,7 +479,7 @@ ns_run_headless(ns_headless_opts *hopts)
 static int
 ns_run_proc_gui(const char *url, const char *render_driver_override,
                 const char *session_path, gboolean recover,
-                gboolean private_mode)
+                gboolean private_mode, gboolean chromeless_window)
 {
     const ns_config *cfg = ns_config_get();
     ns_apply_render_driver(render_driver_override ? render_driver_override
@@ -497,7 +497,7 @@ ns_run_proc_gui(const char *url, const char *render_driver_override,
         g_free(abs_path);
         if (file_url) start = file_url;
     }
-    int status = ns_sdl_app_run(start, session_path, recover, private_mode);
+    int status = ns_sdl_app_run(start, session_path, recover, private_mode, chromeless_window);
     g_free(file_url);
     g_free(g_self_exe);
     g_self_exe = NULL;
@@ -645,6 +645,7 @@ main(int argc, char **argv)
 
     const char *render_driver_override = NULL;
     gboolean private_window = FALSE;
+    gboolean chromeless_window = FALSE;
     ns_headless_opts hopts = {
         .url = NULL,
         .dump = NS_DUMP_TEXT,
@@ -666,6 +667,8 @@ main(int argc, char **argv)
             render_driver_override = argv[i] + 16;
         } else if (g_strcmp0(argv[i], "--private") == 0) {
             private_window = TRUE;
+        } else if (g_strcmp0(argv[i], "--kiosk") == 0) {
+            chromeless_window = TRUE;
         } else if (g_strcmp0(argv[i], "--ignore-certificate-errors") == 0) {
             ns_net_set_ignore_cert_errors(TRUE);
         } else if (g_str_has_prefix(argv[i], "--window-size=")) {
@@ -784,7 +787,7 @@ main(int argc, char **argv)
         const char *session = ns_watchdog_child_session_arg(argc, argv);
         gboolean recover = ns_watchdog_child_is_recovery();
         int gui_rc = ns_run_proc_gui(hopts.url, render_driver_override, session,
-                                     recover, private_window);
+                                     recover, private_window, chromeless_window);
         ns_trace_close();
         return gui_rc;
     }

@@ -18,7 +18,7 @@ void ns_sdl_app_set_window_size(int width, int height);
 
 /* Runs the browser until its last window closes; returns the exit status. */
 int  ns_sdl_app_run(const char *startup_url, const char *session_path,
-                    gboolean recover, gboolean private_mode);
+                    gboolean recover, gboolean private_mode, gboolean chromeless_mode);
 
 G_END_DECLS
 

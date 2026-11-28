@@ -86,6 +86,7 @@ struct NsWindow {
     NsPageView    *view;
     NsNk          *nk;
     gboolean       private_mode;
+    gboolean       chromeless_mode;
 
     int            px_w, px_h;       /* window in pixels */
     double         ui_scale;         /* pixels per UI unit */
@@ -135,7 +136,7 @@ static App g_app;
 static void build_chrome(NsWindow *w);
 
 static void window_close(NsWindow *w);
-static NsWindow *window_new(const char *url, gboolean private_mode);
+static NsWindow *window_new(const char *url, gboolean private_mode, gboolean chromeless_mode);
 
 void
 ns_sdl_app_set_window_size(int width, int height)
@@ -581,7 +582,7 @@ run_action(NsWindow *w, int action)
     case ACT_RELOAD:       ns_page_view_reload(v); break;
     case ACT_STOP:         ns_page_view_stop(v); break;
     case ACT_HOME:         window_load(w, g_app.home_url); break;
-    case ACT_NEW_WINDOW:   window_new(g_app.home_url, w->private_mode); break;
+    case ACT_NEW_WINDOW:   window_new(g_app.home_url, w->private_mode, w->chromeless_mode); break;
     case ACT_CLOSE_WINDOW: window_close(w); break;
     case ACT_QUIT:         ns_sdl_loop_quit(); break;
     case ACT_FIND:         open_find(w); break;
@@ -1109,15 +1110,16 @@ build_chrome(NsWindow *w)
     w->nk_had_press = FALSE;
     w->chrome_dirty = FALSE;
 
-    build_toolbar(w, ctx);
-    if (w->find_open)
-        build_find(w, ctx);
-    build_status(w, ctx);
-    if (w->menu == MENU_APP)
-        build_app_menu(w, ctx);
-    else if (w->menu == MENU_CONTEXT)
-        build_context_menu(w, ctx);
-
+    if (!w->chromeless_mode) {
+      build_toolbar(w, ctx);
+      if (w->find_open)
+          build_find(w, ctx);
+      build_status(w, ctx);
+      if (w->menu == MENU_APP)
+          build_app_menu(w, ctx);
+      else if (w->menu == MENU_CONTEXT)
+          build_context_menu(w, ctx);
+    }
     if (ns_nk_render(w->nk, w->ren, w->px_w, w->px_h, w->ui_scale))
         w->needs_present = TRUE;
 }
@@ -1142,7 +1144,7 @@ update_geometry(NsWindow *w)
     w->px_h = ph;
     w->density = density;
     w->ui_scale = scale;
-    int top = (int)ceil(TB_H * scale);
+    int top = w->chromeless_mode ? 0 : (int)ceil(TB_H * scale);
     ns_page_view_set_area(w->view, 0, top, pw, MAX(1, ph - top), scale);
     w->needs_present = TRUE;
     mark_dirty(w);
@@ -1165,6 +1167,8 @@ point_in_rect(struct nk_rect r, float x, float y)
 static gboolean
 over_chrome(NsWindow *w, float x, float y)
 {
+    if (w->chromeless_mode)
+        return FALSE;
     if (y < TB_H)
         return TRUE;
     if (w->find_open) {
@@ -1418,7 +1422,7 @@ window_event(NsWindow *w, const SDL_Event *ev)
     case SDL_EVENT_DROP_COMPLETE:
         if (w->drop_paths && w->drop_paths->len) {
             float x = ev->drop.x * u, y = ev->drop.y * u;
-            if (y < TB_H) {
+            if (!w->chromeless_mode && y < TB_H) {
                 /* Dropped on the toolbar: open the first file. */
                 char *first = g_strndup(w->drop_paths->str,
                                         strcspn(w->drop_paths->str, "\n"));
@@ -1514,13 +1518,13 @@ window_for_id(SDL_WindowID id)
 }
 
 static NsWindow *
-window_new(const char *url, gboolean private_mode)
+window_new(const char *url, gboolean private_mode, gboolean chromeless_mode)
 {
     int ww = g_app.init_w > 0 ? g_app.init_w : 1200;
     int wh = g_app.init_h > 0 ? g_app.init_h : 820;
-    SDL_Window *win = SDL_CreateWindow(brand_versioned(), ww, wh,
-                                       SDL_WINDOW_RESIZABLE |
-                                       SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    SDL_WindowFlags wflags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    if (chromeless_mode) wflags |= SDL_WINDOW_BORDERLESS;
+    SDL_Window *win = SDL_CreateWindow(brand_versioned(), ww, wh, wflags);
     if (!win) {
         g_printerr("weststar: cannot open a window: %s\n", SDL_GetError());
         return NULL;
@@ -1542,6 +1546,7 @@ window_new(const char *url, gboolean private_mode)
     w->id = SDL_GetWindowID(win);
     w->ren = ren;
     w->private_mode = private_mode;
+    w->chromeless_mode = chromeless_mode;
     w->nk = ns_nk_new();
     w->view = ns_page_view_new(ren);
     ns_page_view_set_private(w->view, private_mode);
@@ -1759,7 +1764,7 @@ clear_http_caches(gboolean at_exit)
 
 int
 ns_sdl_app_run(const char *startup_url, const char *session_path,
-               gboolean recover, gboolean private_mode)
+               gboolean recover, gboolean private_mode, gboolean chromeless_mode)
 {
     clear_http_caches(FALSE);
     setlocale(LC_NUMERIC, "C");
@@ -1789,7 +1794,7 @@ ns_sdl_app_run(const char *startup_url, const char *session_path,
         first = NULL;
         status = 0;
     } else {
-        NsWindow *w = window_new(first, private_mode);
+        NsWindow *w = window_new(first, private_mode, chromeless_mode);
         if (!w) {
             status = 1;
         } else {
