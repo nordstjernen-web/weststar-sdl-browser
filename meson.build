@@ -586,7 +586,8 @@ subdir('src')
 # text (the middle ellipsis too, which CSS does not reach): run before and
 # after a change to nstext and compare (docs/text-layout.md). As a test it
 # only has to lay every case out without failing; what it prints depends
-# on the fonts installed.
+# on the fonts installed. Where nsfc finds the fonts, it is linked in, as
+# it is into the browser.
 text_layout_dump = executable('text-layout-dump',
   files(
     'src/text/tests/text-layout-dump.c',
@@ -595,9 +596,9 @@ text_layout_dump = executable('text-layout-dump',
     'src/plat/ns_plat.c',
     'src/plat/ns_sdl2.c',
     'src/plat/ns_sys.c',
-  ),
+  ) + (have_system_fontconfig ? [] : nsfc_sources),
   dependencies: [nstext_dep, weststar_gfx_dep, sdl_dep, libm] + ns_plat_test_win_libs,
-  include_directories: include_directories('src'),
+  include_directories: include_directories('src', 'src/fc'),
   pie: host_machine.system() != 'windows',
   build_by_default: false,
 )

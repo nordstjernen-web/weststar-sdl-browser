@@ -375,10 +375,10 @@ jobs:
           python3 scripts/check-xp-imports.py --cache "$RUNNER_TEMP/xp-exports" \
             builddir-xp/src/sdl/weststar.exe
 
-      - name: Rasterizer, platform, font finder, nscore and PSL tests
+      - name: Rasterizer, platform, font finder, nscore, PSL and text tests
         run: |
           NSFC_TEST_FONT="C:/Windows/Fonts/arial.ttf" \
-            meson test -C builddir-xp --suite gfx --suite nsfc --suite plat --suite nscore --suite psl --print-errorlogs
+            meson test -C builddir-xp --suite gfx --suite nsfc --suite plat --suite nscore --suite psl --suite text --print-errorlogs
 
       - name: Headless smoke (about:start)
         run: |

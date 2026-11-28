@@ -338,10 +338,10 @@ jobs:
           # libcrypto, fontconfig, or any GLib and GObject.
           ! objdump -p builddir/src/sdl/weststar | grep -E 'NEEDED +(libcrypto|libfontconfig|libglib|libgobject|libgio)'
 
-      - name: nsfc, SDL layer and nscore tests
+      - name: nsfc, SDL layer, nscore and text tests
         run: |
           NSFC_TEST_FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf \
-            meson test -C builddir --suite nsfc --suite plat --suite nscore --print-errorlogs
+            meson test -C builddir --suite nsfc --suite plat --suite nscore --suite text --print-errorlogs
 
       - name: Headless smoke (about:start)
         run: |
