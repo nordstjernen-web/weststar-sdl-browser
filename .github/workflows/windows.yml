@@ -112,6 +112,8 @@ jobs:
           ninja --version
           pkg-config --modversion sdl3 freetype2 libcurl
 
+      # On the bundled GLib (-Dglib=bundled): the one CI build of it, kept
+      # working while the XP and portable builds are on nscore.
       - name: Build (ThinLTO via LLD on main, no LTO on pull requests)
         run: |
           export CC="ccache clang"
@@ -383,6 +385,8 @@ jobs:
           meson setup builddir-xp --werror --native-file scripts/winxp-i686.ini \
             -Dpdfjs=disabled -Dca_bundle=/mingw32/etc/ssl/certs/ca-bundle.crt
           meson compile -C builddir-xp
+          # On nscore, with no GLib built.
+          grep -q 'GLib *: none (nscore' builddir-xp/meson-logs/meson-log.txt
 
       - name: Save the subproject downloads
         if: steps.wraps-restore.outputs.cache-hit != 'true'
@@ -399,10 +403,10 @@ jobs:
           python3 scripts/check-xp-imports.py --cache "$RUNNER_TEMP/xp-exports" \
             builddir-xp/src/sdl/weststar.exe
 
-      - name: Rasterizer, platform and font finder tests
+      - name: Rasterizer, platform, font finder and nscore tests
         run: |
           NSFC_TEST_FONT="C:/Windows/Fonts/arial.ttf" \
-            meson test -C builddir-xp --suite gfx --suite nsfc --suite plat --print-errorlogs
+            meson test -C builddir-xp --suite gfx --suite nsfc --suite plat --suite nscore --print-errorlogs
 
       - name: Headless smoke (about:start)
         run: |

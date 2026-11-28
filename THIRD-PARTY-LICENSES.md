@@ -513,8 +513,9 @@ are met. See:
 > `scripts/winxp-i686.ini` links everything statically into one
 > executable, each library built from its subproject.
 
-Besides the libraries above (libcurl, libpsl, SQLite, zlib and GLib
-among them), that executable includes, each under the license named:
+Besides the libraries above (libcurl, libpsl, SQLite and zlib among
+them, and nscore in place of GLib), that executable includes, each under
+the license named:
 
 - **SDL2** — zlib License, © Sam Lantinga and the SDL contributors, in
   place of SDL3.

@@ -190,8 +190,14 @@ So the shell goes first, and Cairo after it:
       with `-Dtext=native`) lays out and paints every fixture and render
       test identically, and the CI builds compare them on Linux and
       Windows and check that no GLib library is linked. Left out:
-      spell checking, since the system's Enchant links GLib. Not yet
-      tried: the Windows XP build, macOS and the Amiga family.
+      spell checking, since the system's Enchant links GLib. The Windows
+      XP build and the Linux portable profile in CI are built on nscore
+      (against `msvcrt.dll` nscore calls the C runtime's old file
+      functions, `_stati64`, `_lseeki64`, `_wfopen`, `_wutime` and the
+      like, and MinGW's own `printf` and `strtoll`: nothing XP lacks;
+      `scripts/check-xp-imports.py` passes). The bundled GLib is still
+      built by the main Windows CI job, so that it keeps working. Not yet
+      tried: macOS and the Amiga family.
    6. *SDL2 as well as SDL3*, since the Amiga-family ports and
       XP-capable builds are SDL2. Done: `meson setup -Dsdl=sdl2` builds
       the whole browser on SDL 2.0.18 or later. The code stays written
@@ -279,7 +285,8 @@ So the shell goes first, and Cairo after it:
       their older forms where the runtime is `msvcrt.dll`; and in the
       subprojects, patched only where built for XP, SQLite's slim
       reader/writer locks and `GetTickCount64`, quickjs-ng's one-time
-      initialisation and condition variables, and GLib's
+      initialisation and condition variables, and (for a build with
+      `-Dglib=bundled`; the XP build itself is on nscore) GLib's
       `SHGetKnownFolderPath` and `GetFileInformationByHandleEx`.
       `scripts/check-xp-imports.py` reads the executable's import tables
       and fails on anything 32-bit XP SP3 does not export, checked against

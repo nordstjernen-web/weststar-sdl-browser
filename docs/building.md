@@ -99,10 +99,11 @@ The native file `scripts/winxp-i686.ini` is the whole configuration:
 - `_WIN32_WINNT` and `WINVER` 0x0501 for every file, the subprojects'
   too, so that the Windows headers declare nothing newer than XP; where
   the browser can use a newer function it looks it up at run time.
-- `-Dsdl=sdl2 -Dcrypto=mbedtls -Dglib=bundled -Dfontconfig=disabled`,
+- `-Dsdl=sdl2 -Dcrypto=mbedtls -Dglib=native -Dfontconfig=disabled`
+  (nscore, the in-tree core library, in place of GLib),
   without AVIF and WebAssembly (WAMR has no 32-bit x86 Windows build).
 - Every library from its subproject, built for XP and linked
-  statically (`force_fallback_for`): SDL2, Mbed TLS, GLib, and from
+  statically (`force_fallback_for`): SDL2, Mbed TLS, and from
   WrapDB curl, FreeType, HarfBuzz, FriBidi, SQLite, zlib, Brotli, zstd
   and libpsl. libgcc, libstdc++ and winpthreads are linked statically
   too, so `weststar.exe` is the whole browser and needs no DLL beside it.
@@ -114,10 +115,11 @@ The native file `scripts/winxp-i686.ini` is the whole configuration:
 
 Some of the subprojects need a patch for XP, applied only when they are
 built for it: SQLite (`sqlite3-winxp.patch`: critical sections where it
-now takes slim reader/writer locks, and `GetTickCount`), GLib
-(`glib-winxp.patch`: special folders through `SHGetFolderPathW`, file
-sizes from `GetFileInformationByHandle`, none of the CRT's `_s`
-functions), quickjs-ng (`quickjs-ng-winxp.patch`: one-time
+now takes slim reader/writer locks, and `GetTickCount`), GLib, for a
+build with `-Dglib=bundled` in nscore's place (`glib-winxp.patch`:
+special folders through `SHGetFolderPathW`, file sizes from
+`GetFileInformationByHandle`, none of the CRT's `_s` functions),
+quickjs-ng (`quickjs-ng-winxp.patch`: one-time
 initialisation and condition variables of its own), Mbed TLS (entropy
 from `RtlGenRandom`, where it took `BCryptGenRandom`) and curl
 (`curl-mbedtls.patch`, which adds the Mbed TLS backend to WrapDB's

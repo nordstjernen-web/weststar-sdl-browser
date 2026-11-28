@@ -263,9 +263,9 @@ jobs:
     # The portable build profile: mbedTLS (fetched as a meson subproject)
     # instead of OpenSSL, nsfc, the in-tree font finder, instead of
     # fontconfig, which is not even installed, CA certificates compiled
-    # in, the C11 language level older toolchains stop at, and GLib built
-    # from the pinned release instead of taken from the system. Algorithms mbedTLS lacks (EdDSA) must report NotSupportedError
-    # (SKIP), never fail.
+    # in, the C11 language level older toolchains stop at, and nscore
+    # (-Dglib=native, src/core/) in place of GLib. Algorithms mbedTLS
+    # lacks (EdDSA) must report NotSupportedError (SKIP), never fail.
     name: gcc on ubuntu-26.04, portable profile
     runs-on: ubuntu-26.04
     timeout-minutes: 40
@@ -286,7 +286,7 @@ jobs:
             libsdl3-dev libcurl4-openssl-dev \
             libharfbuzz-dev libfribidi-dev \
             libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev \
-            libglib2.0-dev zlib1g-dev libbrotli-dev libzstd-dev \
+            zlib1g-dev libbrotli-dev libzstd-dev \
             fonts-dejavu-core ca-certificates
 
       - name: Configure and build
@@ -294,20 +294,21 @@ jobs:
           meson setup builddir --werror -Db_lto=false -Dpdfjs=disabled \
             -Dcrypto=mbedtls -Dfontconfig=disabled \
             -Dca_bundle=/etc/ssl/certs/ca-certificates.crt -Dc_std=gnu11 \
-            -Dglib=bundled
+            -Dglib=native
           meson compile -C builddir
 
       - name: No libcrypto, fontconfig or GLib in the binary
         run: |
           # curl may bring its own TLS library, and the distribution's
           # HarfBuzz its own GLib; Weststar itself must not link OpenSSL's
-          # libcrypto, fontconfig, or the system's GLib and GObject.
+          # libcrypto, fontconfig, or any GLib and GObject.
+          grep -q 'GLib *: none (nscore' builddir/meson-logs/meson-log.txt
           ! objdump -p builddir/src/sdl/weststar | grep -E 'NEEDED +(libcrypto|libfontconfig|libglib|libgobject)'
 
-      - name: nsfc and SDL layer tests
+      - name: nsfc, SDL layer and nscore tests
         run: |
           NSFC_TEST_FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf \
-            meson test -C builddir --suite nsfc --suite plat --print-errorlogs
+            meson test -C builddir --suite nsfc --suite plat --suite nscore --print-errorlogs
 
       - name: Headless smoke (about:start)
         run: |
