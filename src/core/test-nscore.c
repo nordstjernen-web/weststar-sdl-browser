@@ -288,6 +288,14 @@ test_strings(void)
         char *f = ns_format_size(sizes[i]);
 #ifdef NS_TEST_VS_GLIB
         char *g = g_format_size(sizes[i]);
+        /* Older GLib put a plain space between number and unit where newer
+         * ones (2.90 here, and nscore) put a no-break space. */
+        char *nb = strstr(g, " ");
+        if (nb && sizes[i] >= 1000) {
+            char *fixed = g_strdup_printf("%.*s\xc2\xa0%s", (int)(nb - g), g, nb + 1);
+            g_free(g);
+            g = fixed;
+        }
         check_str("format_size", f, g);
         g_free(g);
 #endif
@@ -858,6 +866,17 @@ test_paths(void)
 #endif
         ns_free(got); ns_free(f); ns_free(host);
     }
+#ifdef NS_TEST_VS_GLIB
+    static const char *const programs[] = { "sh", "cmd", "cmd.exe", "no-such-program-x",
+                                            "./no-such", "/bin/sh", "C:\\Windows\\notepad.exe" };
+    for (size_t i = 0; i < sizeof programs / sizeof programs[0]; i++) {
+        char *p = ns_find_program_in_path(programs[i]);
+        char *gp = g_find_program_in_path(programs[i]);
+        check_str(programs[i], p, gp);
+        ns_free(p);
+        g_free(gp);
+    }
+#endif
 #ifdef _WIN32
     char *u = ns_filename_to_uri("C:\\x y\\a.html", NULL, NULL);
     check_str("to_uri known", u, "file:///C:/x%20y/a.html");

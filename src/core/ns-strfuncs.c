@@ -696,7 +696,7 @@ ns_format_size(uint64_t size)
         factor *= 1000;
         i++;
     }
-    /* A no-break space between number and unit, as GLib 2.82 and later
-     * write it (2.80 wrote a plain space). */
+    /* A no-break space between number and unit, as newer GLib (2.90)
+     * writes it; 2.80 wrote a plain space. */
     return ns_strdup_printf("%.1f\xc2\xa0%s", (double)size / (double)factor, units[i]);
 }

@@ -303,54 +303,84 @@ ns_is_executable_file(const char *path)
 }
 #endif
 
-/* The program as it would be started: a name with a directory in it as it
- * stands, else the first match along PATH (on Windows after the current
- * directory, and with each of PATHEXT's extensions when it has none). */
+#ifdef _WIN32
+static char *
+ns_win32_dir(UINT (WINAPI *get)(LPWSTR, UINT))
+{
+    wchar_t buf[MAX_PATH];
+    UINT n = get(buf, MAX_PATH);
+    return n > 0 && n < MAX_PATH ? ns_win32_wide_to_utf8(buf) : NULL;
+}
+#endif
+
+/* The program as GLib's g_find_program_in_path finds it: a name with a
+ * directory in it as it stands (made absolute against the current
+ * directory) if it is an executable file; otherwise the first executable
+ * dir/name along PATH, an empty entry standing for the current directory.
+ * On Windows the search goes through the program's own folder, the
+ * current one, the system and Windows folders and then PATH. */
 static char *
 ns_find_one(const char *program)
 {
-    if (ns_path_is_absolute(program) || strchr(program, '/')
+    int has_dir = strchr(program, NS_DIR_SEPARATOR) != NULL;
 #ifdef _WIN32
-        || strchr(program, '\\')
+    has_dir = has_dir || strchr(program, '/') != NULL;
 #endif
-    ) {
-        if (!ns_is_executable_file(program)) return NULL;
-        if (ns_path_is_absolute(program)) return ns_strdup(program);
-        char *cwd = ns_get_current_dir();
-        char *r = ns_build_filename(cwd, program, NULL);
-        ns_free(cwd);
-        return r;
+    if (ns_path_is_absolute(program) || has_dir) {
+        if (ns_is_executable_file(program)) {
+            if (ns_path_is_absolute(program)) return ns_strdup(program);
+            char *cwd = ns_get_current_dir();
+            char *r = ns_build_filename(cwd, program, NULL);
+            ns_free(cwd);
+            return r;
+        }
+        if (ns_path_is_absolute(program)) return NULL;
     }
 #ifdef _WIN32
-    char *cwd = ns_get_current_dir();
-    char *here = ns_build_filename(cwd, program, NULL);
-    ns_free(cwd);
-    if (ns_is_executable_file(here)) return here;
-    ns_free(here);
     wchar_t *wpath = NULL;
     DWORD n = GetEnvironmentVariableW(L"PATH", NULL, 0);
     if (n) {
         wpath = ns_malloc_n(n, sizeof(wchar_t));
         GetEnvironmentVariableW(L"PATH", wpath, n);
     }
-    char *path = wpath ? ns_win32_wide_to_utf8(wpath) : NULL;
+    char *env = wpath ? ns_win32_wide_to_utf8(wpath) : NULL;
     ns_free(wpath);
+    char *appdir = NULL;
+    wchar_t exe[MAX_PATH];
+    DWORD en = GetModuleFileNameW(NULL, exe, MAX_PATH);
+    if (en > 0 && en < MAX_PATH) {
+        char *f = ns_win32_wide_to_utf8(exe);
+        appdir = f ? ns_path_get_dirname(f) : NULL;
+        ns_free(f);
+    }
+    char *sysdir = ns_win32_dir(GetSystemDirectoryW);
+    char *windir = ns_win32_dir(GetWindowsDirectoryW);
+    char *path = ns_strconcat(appdir ? appdir : "", appdir ? ";" : "", ".;",
+                              sysdir ? sysdir : "", sysdir ? ";" : "",
+                              windir ? windir : "", windir ? ";" : "",
+                              env ? env : "", NULL);
+    ns_free(appdir);
+    ns_free(sysdir);
+    ns_free(windir);
+    ns_free(env);
 #else
     const char *env = getenv("PATH");
     char *path = ns_strdup(env ? env : "/bin:/usr/bin:.");
 #endif
-    if (!path) return NULL;
     char **dirs = ns_strsplit(path, NS_SEARCHPATH_SEPARATOR_S, 0);
     ns_free(path);
     char *found = NULL;
     for (char **d = dirs; *d && !found; d++) {
-        char *candidate = ns_build_filename(**d ? *d : ".", program, NULL);
+        char *candidate = **d ? ns_strconcat(*d, NS_DIR_SEPARATOR_S, program, NULL)
+                              : ns_strdup(program);
         if (ns_is_executable_file(candidate)) {
             if (ns_path_is_absolute(candidate)) {
                 found = candidate;
                 continue;
             }
-            found = ns_canonicalize_filename(candidate, NULL);
+            char *cwd = ns_get_current_dir();
+            found = ns_build_filename(cwd, candidate, NULL);
+            ns_free(cwd);
         }
         ns_free(candidate);
     }
