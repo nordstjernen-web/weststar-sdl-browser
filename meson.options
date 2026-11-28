@@ -16,6 +16,8 @@ option('glib', type: 'combo', choices: ['system', 'bundled'], value: 'system',
        description: 'Where GLib and GObject come from: the system (default), or bundled: the part of them the browser uses, built statically from the release pinned in subprojects/glib.wrap, for a browser that needs no GLib installed. Not yet for macOS.')
 option('fontconfig', type: 'feature', value: 'auto',
        description: 'Find fonts through the system fontconfig library (auto: when it is installed). Disabled, or where fontconfig is missing, fonts are found by nsfc (src/fc/), built into the browser: it reads the font folders of the platform itself, with FreeType, and needs no configuration files. For portable builds, and platforms without fontconfig.')
+option('text', type: 'combo', choices: ['pango', 'native'], value: 'pango',
+       description: 'The text layout library. pango (the default): web-text-lib, the in-tree Pango fork (src/web-text-lib/), on GLib and GObject. native: nstext (src/text/), the same API on HarfBuzz, FriBidi and FreeType, with no Pango, GObject or GLib in it; opt-in while it is compared against Pango (docs/text-layout.md).')
 option('bundled_fonts', type: 'feature', value: 'auto',
        description: 'Compile a small set of fallback fonts into the browser (DejaVu Sans, Sans Bold, Serif and Sans Mono, about 2.1 MB, fetched from the release pinned in subprojects/dejavu-fonts.wrap), for systems with no font of a kind or none at all. nsfc offers them after the system\'s own fonts. Auto: wherever nsfc is built (fontconfig disabled or missing); with the system fontconfig they are never used, and enabled is then an error.')
 option('ca_bundle', type: 'string', value: '',

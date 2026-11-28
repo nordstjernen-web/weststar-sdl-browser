@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Text layout</title>
+<!-- The text stress page for comparing the text libraries (-Dtext=pango and
+     -Dtext=native; docs/text-layout.md): wrapping, justification, mixed
+     fonts, spacing, decorations, bidi, complex scripts, CJK, emoji,
+     combining marks, tabs, white-space, ellipsis, hyphens and inline boxes.
+     The #probe script reports caret and range geometry for --eval. -->
+<style>
+  body { font: 16px sans-serif; margin: 8px; width: 584px; }
+  p, div { margin: 0 0 6px 0; }
+  .serif { font-family: serif; }
+  .mono { font-family: monospace; }
+  .justify { text-align: justify; }
+  .center { text-align: center; }
+  .right { text-align: right; }
+  .ls { letter-spacing: 2px; }
+  .ws { word-spacing: 6px; }
+  .u { text-decoration: underline; }
+  .s { text-decoration: line-through; }
+  .o { text-decoration: overline; }
+  .uc { text-decoration: underline; text-decoration-color: #c00; }
+  .ell { width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .narrow { width: 120px; }
+  .hy { hyphens: auto; }
+  .ow { overflow-wrap: anywhere; }
+  .box { display: inline-block; width: 40px; height: 12px; background: #8ac; }
+  .indent { text-indent: 24px; }
+  .lh { line-height: 26px; }
+  .sm { font-size: 11px; }
+  .lg { font-size: 22px; }
+</style>
+</head>
+<body>
+<p class="serif">The quick brown fox jumps over the lazy dog. Pack my box with five dozen
+liquor jugs; how vexingly quick daft zebras jump! Sphinx of black quartz, judge my vow.</p>
+<p class="justify">Justified text spreads the words of every line but the last across the
+width of the paragraph, so the right edge is straight; the last line stays at the start.
+Waltz, bad nymph, for quick jigs vex.</p>
+<p class="center">Centred lines of text wrap at the width and every line is centred.</p>
+<p class="right">Right-aligned text, wrapped: its lines end at the right edge of the block.</p>
+<p>Mixed <b>bold</b>, <i>italic</i>, <b><i>both</i></b>, <span class="serif">serif</span>,
+<span class="mono">monospace</span>, <span class="sm">small</span> and
+<span class="lg">large</span> text in one line, with x<sup>2</sup> and H<sub>2</sub>O.</p>
+<p><span class="ls">Letter spacing two pixels</span> and <span class="ws">word spacing of
+six pixels here</span>.</p>
+<p><span class="u">Underlined</span>, <span class="s">struck through</span>,
+<span class="o">overlined</span> and <span class="uc">red-underlined</span> text.</p>
+<p dir="rtl" lang="ar">مرحبا بالعالم، هذا نص عربي فيه رقم 12345 وكلمة English في وسطه.</p>
+<p dir="rtl" lang="he">שלום עולם, זה טקסט בעברית עם המספר 2026 ומילה Latin באמצע.</p>
+<p lang="hi">हिन्दी में लिखा गया यह वाक्य देवनागरी लिपि का उदाहरण है।</p>
+<p lang="th">ภาษาไทยไม่มีการเว้นวรรคระหว่างคำ จึงต้องใช้พจนานุกรมในการตัดคำเมื่อขึ้นบรรทัดใหม่</p>
+<p lang="zh">中文文本没有空格，换行可以发生在几乎任何两个汉字之间，标点符号除外。日本語の文章も同じです。</p>
+<p>Emoji: 😀 👍🏽 🇳🇴 👨‍👩‍👧 ❤️ and text ☺︎ symbols.</p>
+<p>Combining marks: e&#x301; a&#x308; n&#x303; o&#x302;&#x323; and precomposed é ä ñ ộ.</p>
+<pre>tab	stop	here
+a	bb	ccc	end</pre>
+<p style="white-space: pre-wrap">pre-wrap   keeps   spaces   and wraps
+lines at the width of the block when they are long enough to need it.</p>
+<p style="white-space: nowrap">nowrap keeps this whole line on one line even past the edge of the block.</p>
+<div class="ell">This line is too long for its box and ends in an ellipsis.</div>
+<div class="ell" dir="rtl">This RTL line is cut at its start with an ellipsis.</div>
+<p class="narrow hy" lang="en">Incomprehensibilities characterization internationalization.</p>
+<p class="narrow ow">Averyveryverylongwordwithoutanybreakopportunitiesatall.</p>
+<p>Inline <span class="box"></span> boxes <span class="box"></span> between words.</p>
+<p class="indent">An indented first line: text-indent pushes only the first line of the
+paragraph in, the following lines start at the edge.</p>
+<p class="lh">Line height 26px over two lines of wrapped text, so the baselines are
+twenty-six pixels apart from one line to the next one.</p>
+<p id="probe">Caret probe: hello world.</p>
+<script>
+function probe() {
+  var t = document.getElementById('probe').firstChild;
+  var out = [];
+  var r = document.createRange();
+  for (var i = 0; i <= t.length; i += 5) {
+    r.setStart(t, i); r.setEnd(t, Math.min(i + 1, t.length));
+    var b = r.getBoundingClientRect();
+    out.push(i + ':' + Math.round(b.left) + ',' + Math.round(b.top) + ',' +
+             Math.round(b.width) + 'x' + Math.round(b.height));
+  }
+  if (document.caretPositionFromPoint) {
+    var c = document.caretPositionFromPoint(60, b.top + 4);
+    out.push('caret:' + (c ? c.offset : 'null'));
+  }
+  return out.join(' ');
+}
+</script>
+</body>
+</html>

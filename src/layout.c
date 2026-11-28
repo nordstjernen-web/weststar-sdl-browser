@@ -5999,7 +5999,7 @@ measure_inline_ascii_min_width(ns_box *box, const ns_style *parent_style)
     ns_pango_layout_set_text(layout, best, (int)best_len);
     NsPangoRectangle logical;
     ns_pango_layout_get_extents(layout, NULL, &logical);
-    g_object_unref(layout);
+    ns_pango_layout_unref(layout);
     return ceil((double)logical.width / NS_PANGO_SCALE);
 }
 
@@ -6036,7 +6036,7 @@ ns_vertical_measure(ns_box *box, const ns_style *ps,
         *thickness = ph;
         *length = pw;
     }
-    g_object_unref(layout);
+    ns_pango_layout_unref(layout);
 }
 
 /* First in-flow baseline offset from b's top, recursing into children; FALSE if none. */
@@ -6519,7 +6519,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     }
 
     g_free(line_heights);
-    g_object_unref(layout);
+    ns_pango_layout_unref(layout);
 }
 
 static gboolean style_blocks_hit_testing(const ns_style *s);
@@ -6653,7 +6653,7 @@ inline_box_form_hit(const ns_box *box, double local_x, double local_y,
             else if (!field_hit)             field_hit = r->dom;
         }
     }
-    g_object_unref(layout);
+    ns_pango_layout_unref(layout);
     if (atomic_hit) return atomic_hit;
     if (button_hit) return button_hit;
     return field_hit;
@@ -6793,7 +6793,7 @@ layout_multicol_single_inline(ns_box *box, double inner_x, double inner_y,
                                                      child_inherited);
     int line_count = ns_pango_layout_get_line_count(layout);
     if (line_count <= 1) {
-        g_object_unref(layout);
+        ns_pango_layout_unref(layout);
         return FALSE;
     }
 
@@ -6820,7 +6820,7 @@ layout_multicol_single_inline(ns_box *box, double inner_x, double inner_y,
         layout_box(frag, col_w, child_inherited);
         g_ptr_array_add(fragments, frag);
     }
-    g_object_unref(layout);
+    ns_pango_layout_unref(layout);
 
     if (fragments->len < 2) {
         for (guint i = 0; i < fragments->len; i++)
@@ -7412,17 +7412,17 @@ inline_split_below_floats(ns_box *parent, ns_box *run, const GArray *floats,
 
     NsPangoLayout *layout = inline_box_fragment_layout(run, run_width, style);
     int line_count = ns_pango_layout_get_line_count(layout);
-    if (line_count < 2) { g_object_unref(layout); return NULL; }
+    if (line_count < 2) { ns_pango_layout_unref(layout); return NULL; }
     double line_h = run->content_height / line_count;
-    if (line_h <= 0) { g_object_unref(layout); return NULL; }
+    if (line_h <= 0) { ns_pango_layout_unref(layout); return NULL; }
     int tail_line = (int)ceil((band_end - run_y) / line_h - 0.001);
     if (tail_line < 1 || tail_line >= line_count) {
-        g_object_unref(layout);
+        ns_pango_layout_unref(layout);
         return NULL;
     }
     NsPangoLayoutLine *ln = ns_pango_layout_get_line_readonly(layout, tail_line);
     gsize split = ln ? (gsize)ln->start_index : 0;
-    g_object_unref(layout);
+    ns_pango_layout_unref(layout);
 
     gsize text_len = strlen(run->text);
     if (split == 0 || split >= text_len) return NULL;
@@ -8132,7 +8132,7 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
                 if (pw < end) pw = ceil(end);
             }
         }
-        g_object_unref(layout);
+        ns_pango_layout_unref(layout);
         if (cacheable) {
             box->inline_natural_cache_style = parent_style;
             box->inline_natural_cache_width = pw;
@@ -8320,7 +8320,7 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
         inline_layout_apply_attrs(layout, box, parent_style);
         int pw, ph;
         ns_pango_layout_get_pixel_size(layout, &pw, &ph);
-        g_object_unref(layout);
+        ns_pango_layout_unref(layout);
         if (cacheable) {
             box->inline_min_cache_style = parent_style;
             box->inline_min_cache_width = pw;
@@ -13894,7 +13894,7 @@ control_char_cell_px(const ns_style *s)
                NS_PANGO_SCALE;
         ns_pango_font_metrics_unref(fm);
     }
-    g_object_unref(layout);
+    ns_pango_layout_unref(layout);
     return cell;
 }
 

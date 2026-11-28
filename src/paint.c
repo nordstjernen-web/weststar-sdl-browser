@@ -2495,7 +2495,7 @@ font_metrics_measure(const char *family, double size_px, int weight,
     if (w > 0) out->ic_px = w;
 
     ns_pango_font_description_free(fd);
-    g_object_unref(l);
+    ns_pango_layout_unref(l);
 }
 
 /* Font-metrics oracle for CSS font-relative units, cached until the font map changes. */
@@ -2612,7 +2612,7 @@ ns_paint_apply_inline_font(NsPangoLayout *layout, const ns_style *s)
             ns_pango_layout_set_text(probe, " ", 1);
             int sw = 0, sh = 0;
             ns_pango_layout_get_size(probe, &sw, &sh);
-            g_object_unref(probe);
+            ns_pango_layout_unref(probe);
             tab_w = tsv->u.length.v * (sw / (double)NS_PANGO_SCALE);
         } else {
             tab_w = tsv->u.length.v;
@@ -3128,7 +3128,7 @@ void
 ns_paint_drop_box_cache(ns_box *box)
 {
     if (box && box->paint_layout) {
-        g_object_unref(box->paint_layout);
+        ns_pango_layout_unref(box->paint_layout);
         box->paint_layout = NULL;
     }
 }
@@ -3538,7 +3538,7 @@ paint_inline(gfx_t *cr, const ns_box *b, const char *highlight)
             set_source_rgba(cr, color);
             paint_show_layout(cr, b->x, b->y, layout);
             gfx_restore(cr);
-            g_object_unref(layout);
+            ns_pango_layout_unref(layout);
             return;
         }
         NsPangoLayout *layout = paint_inline_make_layout(b, s, highlight);
@@ -3564,7 +3564,7 @@ paint_inline(gfx_t *cr, const ns_box *b, const char *highlight)
             acc += line_h;
         } while (ns_pango_layout_iter_next_line(it));
         ns_pango_layout_iter_free(it);
-        g_object_unref(layout);
+        ns_pango_layout_unref(layout);
         return;
     }
 
@@ -3575,10 +3575,10 @@ paint_inline(gfx_t *cr, const ns_box *b, const char *highlight)
     }
     gboolean layout_cacheable = !(highlight && *highlight);
     NsPangoLayout *layout = (layout_cacheable && b->paint_layout)
-        ? (NsPangoLayout *)g_object_ref(b->paint_layout)
+        ? ns_pango_layout_ref(b->paint_layout)
         : paint_inline_make_layout(b, s, highlight);
     if (layout_cacheable && !b->paint_layout)
-        ((ns_box *)b)->paint_layout = (NsPangoLayout *)g_object_ref(layout);
+        ((ns_box *)b)->paint_layout = ns_pango_layout_ref(layout);
     double y_offset = ns_paint_inline_y_offset_for_layout(b, layout);
     double y_origin = b->y + y_offset;
 
@@ -3983,7 +3983,7 @@ paint_inline(gfx_t *cr, const ns_box *b, const char *highlight)
         }
     }
 
-    g_object_unref(layout);
+    ns_pango_layout_unref(layout);
 }
 
 /* Builds the inline layout a box is painted with, for hit-testing and geometry queries. */
@@ -4019,7 +4019,7 @@ ns_paint_sync_inline_atomic_offsets(ns_box *root)
             atomic->owner_offset_y = y_offset + (double)pos.y / NS_PANGO_SCALE +
                                      atomic->relative_y;
         }
-        g_object_unref(layout);
+        ns_pango_layout_unref(layout);
     }
     for (ns_box *child = root->first_child; child; child = child->next_sibling)
         ns_paint_sync_inline_atomic_offsets(child);
@@ -4054,7 +4054,7 @@ ns_paint_inline_xy_to_byte(const ns_box *b, double rel_x, double rel_y,
         *out_byte = off <= tlen ? off : tlen;
     }
 
-    g_object_unref(layout);
+    ns_pango_layout_unref(layout);
     return TRUE;
 }
 
@@ -4090,7 +4090,7 @@ ns_paint_inline_word_range(const ns_box *b, gsize byte,
         }
     }
 
-    g_object_unref(layout);
+    ns_pango_layout_unref(layout);
     return ok;
 }
 
@@ -4142,7 +4142,7 @@ ns_paint_inline_range_extents(const ns_box *b, gsize start, gsize len,
         }
     } while (ns_pango_layout_iter_next_line(it));
     ns_pango_layout_iter_free(it);
-    g_object_unref(layout);
+    ns_pango_layout_unref(layout);
     if (!any) return FALSE;
     if (out_x) *out_x = x0;
     if (out_y) *out_y = y0 + y_offset;
@@ -4159,13 +4159,13 @@ ns_paint_inline_line_extents(const ns_box *b, GArray *out)
 {
     if (!b || !b->text || !*b->text || b->vertical_wm || !out) return FALSE;
     NsPangoLayout *layout = b->paint_layout
-        ? (NsPangoLayout *)g_object_ref(b->paint_layout)
+        ? ns_pango_layout_ref(b->paint_layout)
         : ns_paint_build_inline_layout(b);
     if (!layout) return FALSE;
     /* The same layout paint_inline() would build and cache, so keep it for
      * the paint that follows. */
     if (!b->paint_layout)
-        ((ns_box *)b)->paint_layout = (NsPangoLayout *)g_object_ref(layout);
+        ((ns_box *)b)->paint_layout = ns_pango_layout_ref(layout);
     double y_origin = b->y + ns_paint_inline_y_offset_for_layout(b, layout);
     guint before = out->len;
     NsPangoLayoutIter *it = ns_pango_layout_get_iter(layout);
@@ -4179,7 +4179,7 @@ ns_paint_inline_line_extents(const ns_box *b, GArray *out)
         g_array_append_vals(out, ext, 2);
     } while (ns_pango_layout_iter_next_line(it));
     ns_pango_layout_iter_free(it);
-    g_object_unref(layout);
+    ns_pango_layout_unref(layout);
     return out->len > before;
 }
 
@@ -5083,7 +5083,7 @@ paint_image(gfx_t *cr, const ns_box *b)
             ns_pango_layout_get_pixel_size(layout, &pw, &ph);
             gfx_set_source_rgb(cr, 0.3, 0.3, 0.3);
             paint_show_layout(cr, cx + 4, cy + (b->content_height - ph) / 2, layout);
-            g_object_unref(layout);
+            ns_pango_layout_unref(layout);
         }
     }
     gfx_restore(cr);
@@ -5231,7 +5231,7 @@ paint_media_controls(gfx_t *cr, const ns_box *b, gboolean overlay)
         ns_pango_layout_get_pixel_size(layout, &tw, &th);
         paint_show_layout(cr, r.time_x + (r.time_w - tw) / 2.0, mid - th / 2.0, layout);
         ns_pango_font_description_free(fd);
-        g_object_unref(layout);
+        ns_pango_layout_unref(layout);
     }
 
     gfx_set_source_rgba(cr, fg_r, fg_g, fg_b, st.audible ? 1.0 : 0.35);
@@ -5609,7 +5609,7 @@ paint_marker_label(gfx_t *cr, const char *label, double edge_x,
     double x = rtl ? edge_x + font_size * 0.35 - ink_x
                    : edge_x - font_size * 0.35 - ink_w - ink_x;
     paint_show_layout(cr, x, baseline_y - baseline, layout);
-    g_object_unref(layout);
+    ns_pango_layout_unref(layout);
 }
 
 /* Formats n with lower-greek letters in bijective base 24. */

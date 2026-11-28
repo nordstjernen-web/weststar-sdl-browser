@@ -2007,7 +2007,7 @@ ns_ctx_paint_text(JSContext *ctx, JSValueConst this_val,
     gfx_restore(st->cr);
     ns_ctx_path_restore(st->cr, keep);
     ns_pango_font_description_free(desc);
-    g_object_unref(layout);
+    ns_pango_layout_unref(layout);
 }
 
 /* Shared fillText/strokeText body: syncs styles, paints text and requests repaint. */
@@ -2067,7 +2067,7 @@ ns_ctx_measureText(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
             ns_pango_font_metrics_unref(fm);
         }
         ns_pango_font_description_free(desc);
-        g_object_unref(layout);
+        ns_pango_layout_unref(layout);
     }
     if (text) JS_FreeCString(ctx, text);
     JS_SetPropertyStr(ctx, obj, "width", JS_NewFloat64(ctx, width));

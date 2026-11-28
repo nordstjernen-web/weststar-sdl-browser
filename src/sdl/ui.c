@@ -99,7 +99,7 @@ ns_ui_text_width(const char *text, int len, double size_px, gboolean bold)
     NsPangoLayout *layout = ui_layout(NULL, text, len, size_px, bold);
     int w = 0, h = 0;
     ns_pango_layout_get_size(layout, &w, &h);
-    g_object_unref(layout);
+    ns_pango_layout_unref(layout);
     return (double)w / NS_PANGO_SCALE;
 }
 
@@ -125,7 +125,7 @@ ns_ui_text_draw(gfx_t *gc, double x, double y, double w, double h,
     ns_pango_gfx_show_layout(gc, layout);
     gfx_new_path(gc);
     gfx_restore(gc);
-    g_object_unref(layout);
+    ns_pango_layout_unref(layout);
 }
 
 /* ---- layers ------------------------------------------------------------ */

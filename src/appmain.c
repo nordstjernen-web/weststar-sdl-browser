@@ -30,7 +30,7 @@
 #include <fontconfig/fontconfig.h>
 #endif
 
-#include <web-text-lib/ns-pango-cache.h>
+#include "ns_pango.h"
 
 #include "audio/audio.h"
 #include "plat/ns_sys.h"

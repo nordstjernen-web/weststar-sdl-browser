@@ -110,7 +110,7 @@ render_token(gfx_t *cr, const char *text, double fpx, gboolean italic,
         ns_pango_gfx_show_layout(cr, l);
         gfx_new_path(cr);
     }
-    g_object_unref(l);
+    ns_pango_layout_unref(l);
     return w;
 }
 

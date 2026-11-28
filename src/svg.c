@@ -1670,7 +1670,7 @@ svg_render_text(svg_ctx *ctx, const ns_node *n, const svg_state *st)
 
     gfx_move_to(cr, x, y - baseline);
     ns_pango_gfx_layout_path(cr, layout);
-    g_object_unref(layout);
+    ns_pango_layout_unref(layout);
     if (svg_hit_current_path(ctx, n, st)) return;
     svg_paint_current_path(ctx, st);
 }

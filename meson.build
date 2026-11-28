@@ -566,6 +566,7 @@ summary({
   'Built-in CA certificates': have_ca_bundle ? get_option('ca_bundle') : 'none',
   'GLib': get_option('glib') == 'bundled' ? 'bundled ' + glib.version() : 'system ' + glib.version(),
   'Fonts found by': have_system_fontconfig ? 'fontconfig ' + libfontconfig.version() : 'nsfc (in tree)',
+  'Text layout': get_option('text') == 'native' ? 'nstext (in tree, no Pango or GObject)' : 'web-text-lib (in-tree Pango fork)',
   'Bundled fallback fonts': bundled_fonts_source,
   'Windows XP': ns_winxp,
 }, section: 'Features')
@@ -595,9 +596,20 @@ int ns_embed_probe_len(void) { return (int)sizeof ns_embed_probe; }
 subdir('src/gfx')
 subdir('src/plat')
 subdir('src/fc')
-subdir('src/web-text-lib')
-pango       = web_text_dep
-pangogfx    = web_text_gfx_dep
-libpangoft2 = web_text_fc_dep
+# -Dtext=native: nstext (src/text/), the same API without Pango or GObject.
+ns_text = get_option('text')
+if ns_text == 'native'
+  subdir('src/text')
+  pango       = nstext_dep
+  pangogfx    = dependency('', required: false)
+  libpangoft2 = dependency('', required: false)
+  ns_engine_gobject = dependency('', required: false)
+else
+  subdir('src/web-text-lib')
+  pango       = web_text_dep
+  pangogfx    = web_text_gfx_dep
+  libpangoft2 = web_text_fc_dep
+  ns_engine_gobject = gobject
+endif
 
 subdir('src')

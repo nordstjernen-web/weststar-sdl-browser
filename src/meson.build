@@ -230,7 +230,7 @@ endif
 northstar_deps = [
   sdl_dep,
   glib,
-  gobject,
+  ns_engine_gobject,
   pango,
   pangogfx,
   libpangoft2,

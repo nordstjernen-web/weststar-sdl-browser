@@ -348,6 +348,28 @@ web-text-lib's `NsPangoFcFontMap` and `NsPangoFcFont`) and a renderer.
 - Grayscale antialiasing is the only mode; fontconfig's hinting settings
   are honoured as cairo-ft honoured them.
 
+## Text without Pango
+
+Pango, and with it GObject, is the heaviest library left that is not
+SDL. Its replacement is started: nstext (`src/text/`, `meson setup
+-Dtext=native`) implements the `ns_pango_*` API the engine calls (105
+functions) on HarfBuzz, FriBidi and FreeType, with fonts from fontconfig
+or nsfc and glyphs drawn with gfx as pangogfx draws them. It has no
+GObject and calls no GLib (its locks and thread-local values are the SDL
+layer's); line breaking is Pango's `break.c` ported onto a Line_Break
+table generated from the Unicode 17 data (`scripts/gen-linebreak-table.py`),
+and the line breaker, extents and hit testing follow `pango-layout.c`, so
+pages lay out alike. The only change the engine needed is
+`ns_pango_layout_ref`/`unref` in place of `g_object_ref`/`unref` on
+layouts.
+
+Status: it builds with either SDL and either font finder, and on the
+fixtures and the 51 render tests it lays out as the fork does (boxes and
+line breaks identical; pictures identical but for an ellipsis cut a space
+apart); see [text-layout.md](text-layout.md) for the comparison and what
+is left. The default stays `-Dtext=pango` until that is clean; then
+`src/web-text-lib/` goes, and GObject with it.
+
 ## Fonts: nsfc
 
 web-text-lib's font map (`pangofc-fontmap.c`, 3,700 lines) and the engine

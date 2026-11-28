@@ -365,3 +365,84 @@ jobs:
           grep -q '^PASS' webcrypto.txt
           ! grep -q '^FAIL' webcrypto.txt
           grep -q '^END' webcrypto.txt
+
+  text-native:
+    # The browser with nstext (-Dtext=native, src/text/) in place of the
+    # Pango fork: no Pango and no GObject in it. It is built beside the
+    # default (-Dtext=pango) and the two lay the fixtures out alike; see
+    # docs/text-layout.md.
+    name: gcc on ubuntu-26.04, nstext against Pango
+    runs-on: ubuntu-26.04
+    timeout-minutes: 50
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      NS_ALLOW_ROOT: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config meson ninja-build git \
+            libsdl3-dev libcurl4-openssl-dev libssl-dev \
+            libharfbuzz-dev libfribidi-dev libfontconfig-dev \
+            libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev \
+            libglib2.0-dev zlib1g-dev libbrotli-dev libzstd-dev \
+            libthai-dev fonts-dejavu-core fonts-noto-core
+
+      - name: Configure and build both text libraries
+        run: |
+          meson setup build-pango --werror -Db_lto=false -Dpdfjs=disabled -Dtext=pango
+          meson setup build-native --werror -Db_lto=false -Dpdfjs=disabled -Dtext=native
+          meson compile -C build-native
+          meson compile -C build-pango
+
+      - name: No Pango or GObject in the nstext binary
+        run: |
+          grep -q 'Text layout *: nstext' build-native/meson-logs/meson-log.txt
+          ! objdump -p build-native/src/sdl/weststar | grep -E 'NEEDED +libgobject'
+
+      - name: Headless smokes with nstext
+        run: |
+          set -o pipefail
+          bin=./build-native/src/sdl/weststar
+          $bin --headless --dump=text about:start > about.txt
+          grep -q 'Search duckduckgo.com' about.txt
+          $bin --headless --dump=text --settle-ms=500 \
+            "file://$PWD/data/fixtures/canvas-2d.html" > canvas.txt
+          test "$(grep -c '^PASS' canvas.txt)" -ge 21
+          ! grep -q '^FAIL' canvas.txt
+          $bin --headless --dump=text --settle-ms=1000 \
+            "file://$PWD/data/fixtures/pattern.html" > pattern.txt
+          grep -q 'PASS checkValidity' pattern.txt
+          ! grep -q '^FAIL' pattern.txt
+          $bin --headless --dump=text --settle-ms=3000 \
+            "file://$PWD/data/fixtures/webcrypto.html" > webcrypto.txt
+          cat webcrypto.txt
+          grep -q '^PASS' webcrypto.txt
+          ! grep -q '^FAIL' webcrypto.txt
+          grep -q '^END' webcrypto.txt
+
+      - name: nstext lays the fixtures out as Pango does
+        run: |
+          # Boxes, line breaks and glyph positions must agree; the pictures
+          # are compared and reported, not required to match byte for byte
+          # (complex scripts may differ by a mark's phase).
+          fail=0
+          for f in data/fixtures/*.html; do
+            for lib in pango native; do
+              ./build-$lib/src/sdl/weststar --headless --viewport=800x1000 \
+                --dump=layout "file://$PWD/$f" > "layout-$lib.txt" 2>/dev/null || true
+              ./build-$lib/src/sdl/weststar --headless --viewport=800x1000 \
+                --dump="png:shot-$lib.png" "file://$PWD/$f" > /dev/null 2>&1 || true
+            done
+            if cmp -s layout-pango.txt layout-native.txt; then layout=same; else layout=DIFFERS; fail=1; fi
+            if cmp -s shot-pango.png shot-native.png; then png=same; else png=differs; fi
+            echo "$(basename "$f"): layout $layout, picture $png"
+            [ "$layout" = same ] || diff layout-pango.txt layout-native.txt | head -20
+          done
+          exit $fail
