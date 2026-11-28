@@ -177,7 +177,7 @@ static size_t compared, skipped;
 
 /* libpsl before 0.23 took a name's trailing dot for an empty last label,
  * so that "com." was no public suffix and the registrable domain of
- * "example.com." was "com." (curl's CVE-2026-8924); the table answers as
+ * "example.com." was "com."; the table answers as
  * 0.23 does, and such names are not compared with an older libpsl. */
 static int libpsl_old_trailing_dot;
 
