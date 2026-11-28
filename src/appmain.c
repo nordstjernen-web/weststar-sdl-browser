@@ -479,7 +479,7 @@ ns_run_headless(ns_headless_opts *hopts)
 static int
 ns_run_proc_gui(const char *url, const char *render_driver_override,
                 const char *session_path, gboolean recover,
-                gboolean private_mode, gboolean chromeless_window)
+                gboolean private_mode, gboolean chromeless_mode)
 {
     const ns_config *cfg = ns_config_get();
     ns_apply_render_driver(render_driver_override ? render_driver_override
@@ -497,7 +497,7 @@ ns_run_proc_gui(const char *url, const char *render_driver_override,
         g_free(abs_path);
         if (file_url) start = file_url;
     }
-    int status = ns_sdl_app_run(start, session_path, recover, private_mode, chromeless_window);
+    int status = ns_sdl_app_run(start, session_path, recover, private_mode, chromeless_mode);
     g_free(file_url);
     g_free(g_self_exe);
     g_self_exe = NULL;
