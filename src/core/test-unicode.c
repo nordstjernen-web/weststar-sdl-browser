@@ -26,51 +26,6 @@
 #include <glib.h>
 #endif
 
-/* ---- Stand-ins for the rest of nscore ---------------------------------- */
-
-struct _NsError {
-  uint32_t domain;
-  int code;
-  char *message;
-};
-
-void *
-ns_malloc(size_t n)
-{
-  void *p = malloc(n ? n : 1);
-  if (!p)
-    abort();
-  return p;
-}
-
-void
-ns_free(void *p)
-{
-  free(p);
-}
-
-uint32_t
-ns_convert_error_quark(void)
-{
-#ifdef NS_TEST_VS_GLIB
-  return g_convert_error_quark();
-#else
-  return 42;
-#endif
-}
-
-NsError *
-ns_error_new_literal(uint32_t domain, int code, const char *message)
-{
-  NsError *e = ns_malloc(sizeof *e);
-  size_t n = strlen(message) + 1;
-  e->domain = domain;
-  e->code = code;
-  e->message = ns_malloc(n);
-  memcpy(e->message, message, n);
-  return e;
-}
-
 static void
 error_free(NsError *e)
 {
@@ -133,7 +88,7 @@ check_str(const char *what, const char *input, ptrdiff_t inlen,
           const char *got, const char *want)
 {
   checks++;
-  if ((got == NULL) != (want == NULL) || (got && strcmp(got, want) != 0)) {
+  if ((got && want) ? strcmp(got, want) != 0 : got != want) {
     char a[200], b[200], c[200], msg[700];
     hexstr(a, sizeof a, input, inlen);
     hexstr(b, sizeof b, got, -1);
@@ -501,7 +456,7 @@ same_error(const char *what, NsError *ns, GError *gl)
 {
   checks++;
   if ((ns == NULL) != (gl == NULL) ||
-      (ns && (ns->code != gl->code || ns->domain != gl->domain ||
+      (ns && (ns->code != gl->code || strcmp(ns_quark_to_string(ns->domain), g_quark_to_string(gl->domain)) != 0 ||
               strcmp(ns->message, gl->message) != 0))) {
     char msg[300];
     snprintf(msg, sizeof msg, "ns %d \"%s\" glib %d \"%s\"",

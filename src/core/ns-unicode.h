@@ -264,16 +264,11 @@ typedef enum {
   NS_NORMALIZE_NFKC = NS_NORMALIZE_ALL_COMPOSE
 } NsNormalizeMode;
 
-/* GConvertError codes that ns_utf8_to_utf16 / ns_utf16_to_utf8 set. */
-#define NS_CONVERT_ERROR_ILLEGAL_SEQUENCE 1
-#define NS_CONVERT_ERROR_PARTIAL_INPUT 3
-
-/* Provided by the rest of nscore. */
-typedef struct _NsError NsError;
-NsError *ns_error_new_literal(uint32_t domain, int code, const char *message);
-uint32_t ns_convert_error_quark(void);
-void *ns_malloc(size_t n);
-void ns_free(void *p);
+/* From the rest of nscore: NsError, ns_error_new_literal, the GConvertError
+ * codes ns_utf8_to_utf16 / ns_utf16_to_utf8 set (NS_CONVERT_ERROR_*) with
+ * ns_convert_error_quark, and ns_malloc / ns_free. */
+#include "ns-error.h"
+#include "ns-mem.h"
 
 /* g_utf8_skip: the length of a UTF-8 sequence by its first byte. */
 extern const char ns_utf8_skip[256];
