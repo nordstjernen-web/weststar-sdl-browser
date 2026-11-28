@@ -427,6 +427,18 @@ jobs:
           ! grep -q '^FAIL' webcrypto.txt
           grep -q '^END' webcrypto.txt
 
+      - name: nstext ellipsizes and justifies as Pango does
+        run: |
+          # The middle ellipsis and carets inside an ellipsis, which no
+          # fixture reaches (src/text/tests/text-layout-dump.c). Layouts,
+          # positions and hits must agree; the pixel hashes are reported.
+          ninja -C build-pango text-layout-dump
+          ninja -C build-native text-layout-dump
+          ./build-pango/text-layout-dump > dump-pango.txt
+          ./build-native/text-layout-dump > dump-native.txt
+          diff dump-pango.txt dump-native.txt || true
+          diff <(grep -v '^  pixels' dump-pango.txt) <(grep -v '^  pixels' dump-native.txt)
+
       - name: nstext lays the fixtures out as Pango does
         run: |
           # Boxes, line breaks and glyph positions must agree; the pictures

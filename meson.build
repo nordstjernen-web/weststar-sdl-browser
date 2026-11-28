@@ -613,3 +613,22 @@ else
 endif
 
 subdir('src')
+
+# Prints the layout and a hash of the pixels of ellipsized and justified
+# text (the middle ellipsis too, which CSS does not reach), with whichever
+# text library is built; the outputs of a pango and a native build should
+# be the same (docs/text-layout.md).
+executable('text-layout-dump',
+  files(
+    'src/text/tests/text-layout-dump.c',
+    'src/plat/ns_env.c',
+    'src/plat/ns_fs.c',
+    'src/plat/ns_plat.c',
+    'src/plat/ns_sdl2.c',
+    'src/plat/ns_sys.c',
+  ),
+  dependencies: [pango, pangogfx, weststar_gfx_dep, sdl_dep, libm] + ns_plat_test_win_libs,
+  include_directories: include_directories('src'),
+  pie: host_machine.system() != 'windows',
+  build_by_default: false,
+)

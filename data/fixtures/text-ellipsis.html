@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Text ellipsis and cluster justification</title>
+<!-- Compares the text libraries (-Dtext=pango and -Dtext=native;
+     docs/text-layout.md) where Pango's ellipsize.c and justify_clusters
+     decide the pixels: text-overflow: ellipsis cut at the end (ltr) and at
+     the start (rtl) of Latin, Hebrew, Arabic and mixed lines, with letter
+     spacing, font changes and clusters at the cut, CJK (the midline
+     ellipsis), and text-align: justify of lines without spaces. -->
+<style>
+  body { font: 16px sans-serif; margin: 8px; width: 584px; }
+  p, div { margin: 0 0 6px 0; }
+  .ell { width: 230px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+         background: #eef; }
+  .w1 { width: 97px; }
+  .w2 { width: 151px; }
+  .ls { letter-spacing: 3px; }
+  .ls1 { letter-spacing: 0.7px; }
+  .big { font-size: 22px; }
+  .b { font-weight: bold; }
+  .serif { font-family: serif; }
+  .justify { text-align: justify; width: 301px; background: #efe; }
+  .justify2 { text-align: justify; width: 187px; background: #efe; }
+</style>
+</head>
+<body>
+<div class="ell">An English line that is far too long for its box, cut at the end.</div>
+<div class="ell" dir="rtl">An English line that is far too long for its box, cut at the start.</div>
+<div class="ell w1">Short words a b c d e f</div>
+<div class="ell w1" dir="rtl">Short words a b c d e f</div>
+<div class="ell" dir="rtl">שורה בעברית שארוכה מדי בשביל התיבה שלה ונחתכת בהתחלה.</div>
+<div class="ell">שורה בעברית שארוכה מדי בשביל התיבה שלה ונחתכת בסוף.</div>
+<div class="ell" dir="rtl">سطر باللغة العربية طويل جدا على صندوقه فيقطع من البداية.</div>
+<div class="ell">سطر باللغة العربية طويل جدا على صندوقه فيقطع من النهاية.</div>
+<div class="ell">Mixed: English then עברית באמצע and English again after it, 123 456.</div>
+<div class="ell" dir="rtl">מעורב: עברית ואז English in the middle ואחר כך עוד עברית 123 456.</div>
+<div class="ell" dir="rtl">English first, then العربية في الوسط, then English to the end.</div>
+<div class="ell w2">عربي then English اكثر عربي</div>
+<div class="ell ls">Letter spacing widens this line until it is cut at the end.</div>
+<div class="ell ls" dir="rtl">Letter spacing widens this line until it is cut at the start.</div>
+<div class="ell ls1">Fractional letter spacing in a line cut at the end, here.</div>
+<div class="ell ls" dir="rtl">ריווח אותיות בשורה בעברית שנחתכת בהתחלה שלה.</div>
+<div class="ell">Fonts change: <span class="big">bigger</span> <span class="b">bold words</span> <span class="serif">and serif at the cut</span></div>
+<div class="ell" dir="rtl"><span class="serif">Serif at the cut</span> <span class="b">then bold</span> <span class="big">and big</span> plain end.</div>
+<div class="ell">Marks at the cut: e&#x301;e&#x301;e&#x301;e&#x301;e&#x301;e&#x301;e&#x301;e&#x301;e&#x301;e&#x301;e&#x301;e&#x301;e&#x301;e&#x301;e&#x301;e&#x301;e&#x301;</div>
+<div class="ell w2">ffi ffl fi fl office affluent</div>
+<div class="ell">日本語の文章はとても長いのでこの箱には入りきらず最後で切られます。</div>
+<div class="ell" dir="rtl">日本語の文章はとても長いのでこの箱には入りきらず最初で切られます。</div>
+<div class="ell">中文 mixed with Latin text 中文字符继续很长很长很长很长。</div>
+<div class="ell">한국어 문장은 너무 길어서 이 상자에 다 들어가지 않습니다.</div>
+
+<p class="justify">日本語の文章は単語の間に空白がないので、両端揃えでは文字と文字の間に余白が分けられます。これは何行にもわたる段落の例です。最後の行は揃えません。</p>
+<p class="justify2">中文段落没有空格，两端对齐时空间分配在字与字之间。这是一个多行的段落，用来比较像素。</p>
+<p class="justify">かなとカナと漢字、そして全角の記号「」、。が混ざった行も揃えられます。ＡＢＣ１２３も含めて。</p>
+<p class="justify2">한국어문장도띄어쓰기없이길게쓰면글자사이에공간이나뉘어집니다정말로그렇습니다.</p>
+<p class="justify2">ไทยไม่มีช่องว่างระหว่างคำจึงต้องตัดคำด้วยพจนานุกรมและจัดแนวสองข้าง</p>
+</body>
+</html>
