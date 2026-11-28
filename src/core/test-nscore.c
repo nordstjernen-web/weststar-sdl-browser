@@ -195,12 +195,18 @@ test_integers(void)
 static void
 test_printf(void)
 {
-    size_t z = 12345678901ULL;
+    /* SIZE_MAX, so that %zu is checked at the width size_t has. */
+    size_t z = SIZE_MAX;
+    char zbuf[32];
+    snprintf(zbuf, sizeof zbuf, "%llu", (unsigned long long)z);
     long long ll = -1234567890123LL;
     int64_t i64 = INT64_MIN;
     char *s = ns_strdup_printf("%zu|%lld|%" PRId64 "|%5.2f|%-4s|%x|%c|%%", z, ll, i64, 3.14159,
                                "ab", 255u, 'q');
-    check_str("printf", s, "12345678901|-1234567890123|-9223372036854775808| 3.14|ab  |ff|q|%");
+    char *want = ns_strdup_printf("%s|-1234567890123|-9223372036854775808| 3.14|ab  |ff|q|%%",
+                                  zbuf);
+    check_str("printf", s, want);
+    ns_free(want);
     ns_free(s);
     char buf[8];
     check_int("snprintf length", ns_snprintf(buf, sizeof buf, "%s", "0123456789"), 10);
