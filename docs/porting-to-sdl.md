@@ -50,11 +50,17 @@ So the shell goes first, and Cairo after it:
    - *The page while it scrolls* is done (see Scrolling below): SDL moves
      the page's texture, and only the strip the scroll exposed, and any
      `position: fixed` boxes, are painted and uploaded.
-   - Next, a layer tree from the engine (which boxes get their own
-     layer, and their transforms and opacities), handed to the shell with
-     each frame, for the rest: then a fixed header is a texture of its
-     own that is not repainted at all, and a scroll further than the
-     window is tall no longer repaints everything.
+   - *Fixed boxes and elements animating only `transform` or `opacity`*
+     are done (see Layers below): the engine hands the shell a list of
+     layers with each frame, each painted once into a buffer of its own
+     and drawn by SDL over the page with its transform and opacity. A
+     fixed header is not repainted while the page scrolls, also not by a
+     scroll further than the window is tall, and an animation step
+     repaints nothing.
+   - Left: `sticky` boxes (still painted into the page, and a page with
+     one is still repainted whole on a scroll), canvases and animated
+     images as layers of their own, and `will-change`, which the CSS
+     engine does not parse yet.
 6. **Portability: SDL as the platform.** Weststar should run wherever SDL
    does — Linux and today's Windows, and in time Windows XP and the Amiga
    family (AmigaOS 4, MorphOS, AROS) — so platform services come from SDL
@@ -477,6 +483,115 @@ SDL2's Direct3D 9 renderer, the one Windows XP has, keeps a copy in
 memory of a texture that is uploaded to and sends all of it again after
 the texture was drawn into, which would undo the scroll; with that
 renderer the shell asks for the whole frame after a scroll instead.
+
+## Layers
+
+Some boxes the engine does not paint into the page at all but into
+compositing layers of their own, which the shell draws over the page
+(`src/layers.c`):
+
+- `position: fixed` boxes, and
+- elements with a running or paused CSS animation, CSS transition or Web
+  Animation that changes nothing but `transform` and `opacity`.
+
+Each layer is painted once, at its size before its transform, into a
+premultiplied ARGB buffer (`ns_paint_layer`), and the page is painted
+without it (`ns_paint_set_layer_skip`). Each frame, `ns_page_frame`
+carries the layers in the order to draw them: an id, the buffer (marked
+when its pixels changed), where its top left pixel is, its transform in
+device pixels and its opacity. A fixed layer stays in the viewport;
+the others move with the page, and a buffer painted at one scroll offset
+serves every other. A buffer is painted again only when the layer is new,
+changed size or moved by a fraction of a pixel, when damage touches it,
+or when the whole frame is repainted. The shell keeps a texture per layer
+(`pageview.c`), uploads only the changed ones, and draws them after the
+page with premultiplied blending, the opacity as colour and alpha
+modulation, by whole pixels as they are, scaled with `SDL_RenderTexture`,
+or turned and skewed with `SDL_RenderTextureAffine`. SDL's software
+renderer draws a turned texture without premultiplied blending, so on it
+the shell asks for layers that are only moved and scaled
+(`NS_PAGE_LAYERS_AXIS_ONLY`), and a turned or mirrored one is painted
+into the page.
+
+An animation step of a layer's element repaints nothing: the tick does
+not damage it (`browser_anim_tick`), and the frame only says where the
+layer now is. A scroll moves the page texture as before, without the
+fixed layers in it: their bands are no longer repainted on the way.
+
+The compositor draws layers over the page, so a box becomes one only if
+nothing the page paints after it can overlap it. The plan
+(`ns_layers_plan_build`, made again when the page is laid out, restyled
+or damaged, or the set of animated elements changes) finds the boxes
+whose ancestors paint their descendants as they are (no group, transform,
+filter, clip, scroller or stacking context; a positioned ancestor without
+a z-index is fine), and collects for each the rectangles of what paints
+above it: for a box in the flow, what follows it in the document and
+every positioned box and float; for a positioned one, the positioned
+boxes above it in z-index or after it at its own. Each frame
+(`ns_layers_plan_resolve`) places the layers with their transforms at the
+scroll offset and paints into the page, for that frame, any layer one of
+those rectangles overlaps, and any layer before it that it overlaps. A
+fixed header with a box of a higher z-index scrolling under it is in the
+page while the two overlap; a box sliding over text later in the document
+is in the page while it is over the text. Promoting or demoting a layer
+damages where it is.
+
+Painted into the page instead, always: `sticky` boxes; boxes with a blend
+mode, filter, mask, `clip-path`, `clip` or a 3D transform; floats, boxes
+in a line (inline-block) or a multi-column flow; boxes with a negative
+z-index or with positioned descendants that would paint in another
+stacking context; anything below such an ancestor; a transform nothing
+animates (the GPU would resample text that is painted sharp in place);
+layers larger than 4096 pixels a side or twice the viewport's area; more
+than 32; and every layer while a modal dialog or a drop-down list is
+open. A layer's content and the page under it are the same pixels as
+before, so hit testing, `getBoundingClientRect` and the like are not
+involved.
+
+Headless consumers of `ns_page_session` frames (screenshots, the remote
+driver) leave layers off and get the whole page in the frame's pixels.
+`--dump=png` paints with layers and composites them on the CPU with gfx
+(`ns_layers_paint_page`): the reference for what the shell shows.
+`NS_LAYERS=0` turns layers off everywhere; `NS_LAYERS=log` prints the
+plan and each frame's decisions; `NS_FRAME_STATS=1` prints each frame's
+paint, copy and upload times in the window.
+
+What comes out, against `NS_LAYERS=0`:
+
+- `--dump=png` of `data/fixtures/layers-fixed.html?set=exact` and
+  `layers-anim.html?set=exact` at `--time-ms=1200`, where every layer
+  moves by whole pixels, is identical byte for byte (both CI workflows
+  check this). Without `set=exact` the fixed header's text on its
+  translucent background is one or two levels apart in 1122 pixels
+  (8-bit rounding: text drawn onto the page through the background,
+  against text drawn onto the background in a buffer that is then drawn
+  onto the page), and the turning and scaling boxes of the animation page
+  differ by up to 165 at their edges and in their text in about 2500
+  pixels: the GPU resamples a painted buffer where paint draws the
+  transformed shapes directly.
+- The window (read back with `NS_GUI_TEST`): for the fixed header page
+  after wheel, Page Down, End and Home scrolls, and while a box with a
+  higher z-index scrolls under the header, at most 2 levels in the
+  translucent header and the badge (the GPU's blending against gfx's),
+  nowhere else. For the animation page paused at 700 ms
+  (`?t=700&set=exact`), at most 2 levels; with the turning and scaling
+  boxes, up to 156 at their edges, as above.
+- In a 1200×820 window (Windows, SDL's default renderer), the fixed header page
+  scrolled by 40 wheel steps and 8 scrolls of more than a window: the
+  engine's paint, copy and upload took 2.1 ms a frame on average (median
+  1.7 ms) against 6.7 ms (median 6.6 ms); a wheel step 1.4 to 1.5 ms
+  against 6.2 to 6.7 ms, a scroll further than the window 3.4 to 4.0 ms
+  against 7.2 to 8.1 ms, and the header and badge were repainted on none
+  of those frames. The animation page, eight elements animating for four
+  seconds: 0.03 ms a frame (median 0.01 ms) against 1.6 ms (median
+  1.5 ms), and 6 300 pixels uploaded a frame (the box in the page while
+  it slides over text) against 132 000.
+
+Not yet: `sticky` boxes as layers (they move against the scroll, and a
+page with one is still repainted whole when it scrolls), canvases and
+animated images as layers of their own, `will-change` (not parsed), a
+layer clipped by a scrolling ancestor, and repainting a layer at its
+scale when a `scale()` animation enlarges it.
 
 ## What is gone, and where it went
 

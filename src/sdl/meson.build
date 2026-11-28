@@ -6,6 +6,7 @@ weststar_sdl_sources = files(
   '../page_session.c',
   '../threaddump.c',
   'enginethread.c',
+  'guitest.c',
   'icons.c',
   'keys.c',
   'mainloop.c',

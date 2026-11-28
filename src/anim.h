@@ -24,6 +24,7 @@ gboolean ns_anim_has_active(const ns_anim *a);
 gboolean ns_anim_needs_layout(const ns_anim *a);
 gboolean ns_anim_repaint_nodes(const ns_anim *a, GPtrArray *out);
 gboolean ns_anim_take_restyle(ns_anim *a);
+void     ns_anim_composite_nodes(const ns_anim *a, GPtrArray *out);
 typedef void (*ns_anim_event_cb)(const ns_node *node, const char *type,
                                  const char *name, double elapsed_ms,
                                  gpointer user);

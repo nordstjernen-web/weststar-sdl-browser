@@ -22,6 +22,7 @@
 #include "css_syntax.h"
 #include "debuglog.h"
 #include "image.h"
+#include "layers.h"
 #include "paint.h"
 #include "render.h"
 #include "security.h"
@@ -1647,7 +1648,11 @@ ns_engine_write_png(const ns_box *root, const char *path)
         return 2;
     }
     gfx_t *cr = gfx_create(surf);
-    ns_paint(cr, root, NULL);
+    /* Fixed boxes and elements animating only transform or opacity are
+     * composited as the shell does, on the CPU (NS_LAYERS=0: painted in). */
+    if (!ns_layers_enabled() ||
+        !ns_layers_paint_page(cr, root, ns_paint_get_anim(), w, h))
+        ns_paint(cr, root, NULL);
     gfx_destroy(cr);
     FILE *f = engine_take_preopened(path);
     gfx_status_t st = f

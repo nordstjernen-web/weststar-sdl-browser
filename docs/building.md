@@ -408,6 +408,9 @@ Others the browser reads:
 | `NS_CAMERA_ALLOW` | Grant every `getUserMedia` (microphone) request without asking. Headless/test runs only; ignored by the interactive browser. |
 | `NS_EARLY_JS_FILE` | Script file evaluated before each page's own scripts. Headless/test runs only; ignored by the interactive browser. |
 | `NS_FRAME_DUMP` | Directory to write every 30th rendered frame to as PNG (debugging; headless and tooling runs only). |
+| `NS_LAYERS` | `0` paints fixed boxes and transform/opacity animations into the page instead of compositing them as layers; `log` keeps layers and prints which boxes get one and why the others do not. |
+| `NS_FRAME_STATS` | Print, for each frame the window gets, what painting the page and the layers, copying and uploading it took. |
+| `NS_GUI_TEST` | A script of waits, key presses, wheel turns and window shots (BMP files beside it) for the window to run, for comparing what it shows (`src/sdl/guitest.c`). |
 | `NS_FORCE_HTTP3` | Use HTTP/3 directly instead of waiting for Alt-Svc. |
 | `NS_PANGO_SHAPE_CACHE` | `0` turns the web-text-lib caches off; `verify` checks every cached shape against a fresh one. |
 | `NS_HEADLESS_LEGACY` | Send every headless run through the direct engine path. |

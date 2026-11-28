@@ -47,6 +47,30 @@ int ns_browser_take_damage(ns_browser *browser, int scroll_x, int scroll_y,
                            GArray *out_rects);
 int ns_browser_scroll_blit_bands(ns_browser *browser, GArray *out_bands);
 
+/* A compositing layer of this frame (see src/layers.h): a buffer of w by h
+ * device pixels whose top left is at (x, y) in the viewport before the
+ * device transform m (xx, yx, xy, yy, x0, y0), shown with an opacity. */
+typedef struct ns_browser_layer {
+    const void *key;
+    int         fixed;
+    int         x, y, w, h;
+    double      m[6];
+    double      opacity;
+    int         visible;
+    /* Its bounds this frame in CSS px of the viewport. */
+    double      vx, vy, vw, vh;
+} ns_browser_layer;
+
+int ns_browser_layers_update(ns_browser *browser, int scroll_x, int scroll_y,
+                             int width, int height, double scale, int replan,
+                             int axis_only, GArray *out_layers,
+                             int *out_changed);
+void ns_browser_layers_off(ns_browser *browser);
+int ns_browser_render_layer(ns_browser *browser, const void *key,
+                            int scroll_x, int scroll_y, int width, int height,
+                            double scale, unsigned char *out, int stride,
+                            int x, int y, int w, int h);
+
 char *ns_browser_link_at(ns_browser *browser, int x, int y);
 char *ns_browser_cursor_at(ns_browser *browser, int x, int y);
 char *ns_browser_press(ns_browser *browser, int x, int y, int mods);

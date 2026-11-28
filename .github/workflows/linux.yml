@@ -112,6 +112,22 @@ jobs:
           grep -q 'PASS toDataURL' canvas.txt
           ! grep -q '^FAIL' canvas.txt
 
+      - name: Layers composite as painting in place does
+        run: |
+          # --dump=png paints fixed boxes and elements animating transform
+          # or opacity into layers and composites them on the CPU. Each
+          # layer here moves by whole pixels, so the image must be byte for
+          # byte the one NS_LAYERS=0 paints, and the layers must be there.
+          for page in 'layers-fixed.html?set=exact' 'layers-anim.html?set=exact'; do
+            NS_LAYERS=log ./builddir/src/sdl/weststar --headless --time-ms=1200 \
+              --dump=png:layers-on.png "file://$PWD/data/fixtures/$page" 2> layers.log
+            NS_LAYERS=0 ./builddir/src/sdl/weststar --headless --time-ms=1200 \
+              --dump=png:layers-off.png "file://$PWD/data/fixtures/$page"
+            grep -E 'plan .*: layer' layers.log | sort -u
+            grep -q -E 'plan (header|slide).*: layer' layers.log
+            cmp layers-on.png layers-off.png
+          done
+
       - name: Pattern attribute checks
         run: |
           set -o pipefail

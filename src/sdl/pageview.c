@@ -70,6 +70,27 @@ typedef struct {
     gint64      frame_time_us;
 } Req;
 
+/* A compositing layer of a frame: where and how to draw it, and its
+ * pixels when they changed (NULL otherwise). */
+typedef struct {
+    int         id;
+    int         w, h, x, y;
+    double      m[6];
+    double      opacity;
+    gboolean    visible;
+    guint8     *pixels;
+} ResLayer;
+
+/* A layer's texture, kept while the page has the layer. */
+typedef struct {
+    int          id;
+    SDL_Texture *texture;
+    int          w, h, x, y;
+    double       m[6];
+    double       opacity;
+    gboolean     visible;
+} ViewLayer;
+
 typedef enum {
     RES_PAGE, RES_FRAME, RES_LINK, RES_CLICK, RES_VIEWPORT, RES_KEY,
     RES_SELECT, RES_COPY, RES_HOVER, RES_RELEASE, RES_FIND, RES_EXPORT,
@@ -100,6 +121,12 @@ typedef struct {
     int         n_damage;
     int         blit_dx, blit_dy;
     guint64     gen, base_gen;
+    /* With layers on: every layer of the frame, in draw order. */
+    gboolean    have_layers;
+    gboolean    layers_changed;
+    GArray     *layers;           /* ResLayer */
+    gint64      paint_us, layers_paint_us, copy_us;
+    int         layers_painted;
     char       *href;
     char       *cursor;
     LinkAct     action;
@@ -125,6 +152,8 @@ struct NsPageView {
     SDL_Texture     *texture;
     SDL_Texture     *texture_back;  /* the other of the pair a scroll swaps */
     int              tex_w, tex_h;
+    GArray          *layers;        /* ViewLayer, in draw order */
+    int              layers_flags;  /* for ns_page_session_set_layers */
     guint64          frame_gen;
     gboolean         have_frame;
     gboolean         frame_force_full;
@@ -199,6 +228,8 @@ enum {
     NS_PV_ZOOM_MAX_PERMILLE = (int)(NS_PROC_ZOOM_MAX * 1000.0 + 0.5)
 };
 
+static void destroy_layers(NsPageView *v);
+
 static NsPageView *pv_ref(NsPageView *v) { g_atomic_ref_count_inc(&v->rc); return v; }
 
 static void
@@ -208,6 +239,9 @@ pv_free(NsPageView *v)
         SDL_DestroyTexture(v->texture);
     if (v->texture_back)
         SDL_DestroyTexture(v->texture_back);
+    destroy_layers(v);
+    if (v->layers)
+        g_array_free(v->layers, TRUE);
     if (v->history)
         g_ptr_array_unref(v->history);
     g_free(v->current_url);
@@ -326,6 +360,31 @@ stage_patch(Res *res, const guint8 *px, int stride, const int *rects, int n,
     return TRUE;
 }
 
+/* Copies the frame's layer list, and the pixels of the layers that
+ * changed, for the main thread. */
+static void
+stage_layers(Res *res, const ns_page_frame *fr)
+{
+    res->have_layers = TRUE;
+    res->layers_changed = fr->layers_changed ? TRUE : FALSE;
+    res->layers = g_array_new(FALSE, TRUE, sizeof(ResLayer));
+    for (int i = 0; i < fr->n_layers; i++) {
+        const ns_page_layer *l = &fr->layers[i];
+        ResLayer rl = { l->id, l->w, l->h, l->x, l->y,
+                        { l->m[0], l->m[1], l->m[2], l->m[3], l->m[4], l->m[5] },
+                        l->opacity, l->visible ? TRUE : FALSE, NULL };
+        if (l->changed && l->pixels) {
+            gsize row = (gsize)l->w * 4u;
+            rl.pixels = g_try_malloc(row * (gsize)l->h);
+            if (rl.pixels)
+                for (int y = 0; y < l->h; y++)
+                    memcpy(rl.pixels + (gsize)y * row,
+                           l->pixels + (gsize)y * (gsize)l->stride, row);
+        }
+        g_array_append_val(res->layers, rl);
+    }
+}
+
 static void
 run_load(NsPageView *v, ns_page_session *s, Req *req)
 {
@@ -363,6 +422,10 @@ run_render(NsPageView *v, ns_page_session *s, Req *req)
         res->ph = fr.page_h;
         res->requested_scroll_y = fr.scroll_y;
         res->requested_scroll_x = fr.scroll_x;
+        res->paint_us = fr.paint_us;
+        res->layers_paint_us = fr.layers_paint_us;
+        res->layers_painted = fr.layers_painted;
+        gint64 copy_start = ns_time_monotonic_us();
         if (!fr.unchanged) {
             gint64 trace_start = ns_trace_now();
             gboolean patched = FALSE;
@@ -385,6 +448,8 @@ run_render(NsPageView *v, ns_page_session *s, Req *req)
             ns_trace_complete("frame", patched ? "copy damage" : "copy frame",
                               trace_start, NULL);
         }
+        stage_layers(res, &fr);
+        res->copy_us = ns_time_monotonic_us() - copy_start;
         res->nav = fr.nav;
         res->url = fr.url;
         res->url_pushed = fr.url_pushed ? TRUE : FALSE;
@@ -432,6 +497,7 @@ run_req(gpointer data)
     if (!v->session) {
         v->session = ns_page_session_new(NS_PROC_MAX_WIDTH, NS_PROC_MAX_HEIGHT);
         ns_page_session_set_wake(v->session, pv_session_wake, v);
+        ns_page_session_set_layers(v->session, v->layers_flags);
     }
     ns_page_session *s = v->session;
     Res *res;
@@ -748,6 +814,19 @@ create_page_texture(NsPageView *v, int w, int h)
 }
 
 static void
+destroy_layers(NsPageView *v)
+{
+    if (!v->layers)
+        return;
+    for (guint i = 0; i < v->layers->len; i++) {
+        ViewLayer *l = &g_array_index(v->layers, ViewLayer, i);
+        if (l->texture)
+            SDL_DestroyTexture(l->texture);
+    }
+    g_array_set_size(v->layers, 0);
+}
+
+static void
 destroy_textures(NsPageView *v)
 {
     if (v->texture)
@@ -757,6 +836,7 @@ destroy_textures(NsPageView *v)
     v->texture = v->texture_back = NULL;
     v->tex_w = v->tex_h = 0;
     v->have_frame = FALSE;
+    destroy_layers(v);
 }
 
 static gboolean
@@ -851,6 +931,117 @@ apply_full(NsPageView *v, const Res *res)
     SDL_UpdateTexture(v->texture, NULL, res->pixels, res->px_stride);
     v->frame_gen = res->gen;
     v->have_frame = TRUE;
+}
+
+/* A layer texture holds premultiplied pixels: blended as such, and faded
+ * by scaling colour and alpha alike. */
+static SDL_Texture *
+create_layer_texture(NsPageView *v, int w, int h)
+{
+    SDL_Texture *texture = SDL_CreateTexture(v->renderer,
+                                             SDL_PIXELFORMAT_ARGB8888,
+                                             SDL_TEXTUREACCESS_STATIC, w, h);
+    if (!texture)
+        return NULL;
+    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND_PREMULTIPLIED);
+    return texture;
+}
+
+/* Takes the frame's layers: keeps the textures of those still there,
+ * uploads the pixels of those that changed, and drops the others. FALSE
+ * when a layer's pixels are missing (a texture could not be made, or the
+ * device was reset): then the whole frame must come again. */
+static gboolean
+apply_layers(NsPageView *v, const Res *res)
+{
+    if (!v->layers)
+        v->layers = g_array_new(FALSE, TRUE, sizeof(ViewLayer));
+    GArray *next = g_array_new(FALSE, TRUE, sizeof(ViewLayer));
+    gboolean complete = TRUE;
+    for (guint i = 0; i < res->layers->len; i++) {
+        const ResLayer *rl = &g_array_index(res->layers, ResLayer, i);
+        ViewLayer vl = { 0 };
+        for (guint j = 0; j < v->layers->len; j++) {
+            ViewLayer *old = &g_array_index(v->layers, ViewLayer, j);
+            if (old->id == rl->id && old->texture) {
+                vl = *old;
+                old->texture = NULL;
+                break;
+            }
+        }
+        if (rl->pixels) {
+            if (vl.texture && (vl.w != rl->w || vl.h != rl->h)) {
+                SDL_DestroyTexture(vl.texture);
+                vl.texture = NULL;
+            }
+            if (!vl.texture)
+                vl.texture = create_layer_texture(v, rl->w, rl->h);
+            if (vl.texture)
+                SDL_UpdateTexture(vl.texture, NULL, rl->pixels, rl->w * 4);
+        }
+        if (!vl.texture) {
+            complete = FALSE;
+            continue;
+        }
+        vl.id = rl->id;
+        vl.w = rl->w;
+        vl.h = rl->h;
+        vl.x = rl->x;
+        vl.y = rl->y;
+        memcpy(vl.m, rl->m, sizeof vl.m);
+        vl.opacity = rl->opacity;
+        vl.visible = rl->visible;
+        g_array_append_val(next, vl);
+    }
+    destroy_layers(v);
+    g_array_free(v->layers, TRUE);
+    v->layers = next;
+    return complete;
+}
+
+/* Draws a layer over the page: by whole pixels as it is, scaled into a
+ * rectangle, or through its full affine transform. */
+static void
+draw_layer(NsPageView *v, const ViewLayer *l)
+{
+    if (!l->visible || l->opacity <= 0)
+        return;
+    float a = (float)CLAMP(l->opacity, 0.0, 1.0);
+    SDL_SetTextureAlphaModFloat(l->texture, a);
+    SDL_SetTextureColorModFloat(l->texture, a, a, a);
+    const double *m = l->m;
+    gboolean axis = m[1] == 0 && m[2] == 0 && m[0] > 0 && m[3] > 0;
+    gboolean whole = axis && m[0] == 1 && m[3] == 1 &&
+                     m[4] == floor(m[4]) && m[5] == floor(m[5]);
+    SDL_SetTextureScaleMode(l->texture, whole ? SDL_SCALEMODE_NEAREST
+                                              : SDL_SCALEMODE_LINEAR);
+    double x0 = l->x, y0 = l->y, x1 = l->x + l->w, y1 = l->y + l->h;
+    if (axis) {
+        double ax = m[0] * x0 + m[4], ay = m[3] * y0 + m[5];
+        double bx = m[0] * x1 + m[4], by = m[3] * y1 + m[5];
+        SDL_FRect dst = { (float)(v->ax + MIN(ax, bx)), (float)(v->ay + MIN(ay, by)),
+                          (float)fabs(bx - ax), (float)fabs(by - ay) };
+        SDL_RenderTexture(v->renderer, l->texture, NULL, &dst);
+        return;
+    }
+    SDL_FPoint origin = { (float)(v->ax + m[0] * x0 + m[2] * y0 + m[4]),
+                          (float)(v->ay + m[1] * x0 + m[3] * y0 + m[5]) };
+    SDL_FPoint right = { (float)(v->ax + m[0] * x1 + m[2] * y0 + m[4]),
+                         (float)(v->ay + m[1] * x1 + m[3] * y0 + m[5]) };
+    SDL_FPoint down = { (float)(v->ax + m[0] * x0 + m[2] * y1 + m[4]),
+                        (float)(v->ay + m[1] * x0 + m[3] * y1 + m[5]) };
+    SDL_RenderTextureAffine(v->renderer, l->texture, NULL, &origin, &right,
+                            &down);
+}
+
+/* NS_FRAME_STATS=1: what each frame cost on the engine thread and here. */
+static gboolean
+frame_stats_on(void)
+{
+    static int on = -1;
+    if (on < 0)
+        on = ns_env_flag("NS_FRAME_STATS") ? 1 : 0;
+    return on == 1;
 }
 
 /* ---- scrollbars -------------------------------------------------------- */
@@ -981,6 +1172,8 @@ ns_page_view_present(NsPageView *v)
         SDL_FRect dst = { (float)v->ax, (float)v->ay, (float)v->tex_w,
                           (float)v->tex_h };
         SDL_RenderTexture(v->renderer, v->texture, NULL, &dst);
+        for (guint i = 0; v->layers && i < v->layers->len; i++)
+            draw_layer(v, &g_array_index(v->layers, ViewLayer, i));
         SDL_SetRenderClipRect(v->renderer, NULL);
     }
     Bar vb, hb;
@@ -1419,6 +1612,11 @@ ns_page_view_zoom_percent(NsPageView *v)
 static void
 res_free(Res *res)
 {
+    if (res->layers) {
+        for (guint i = 0; i < res->layers->len; i++)
+            g_free(g_array_index(res->layers, ResLayer, i).pixels);
+        g_array_free(res->layers, TRUE);
+    }
     g_free(res->pixels);
     free(res->damage);
     g_free(res->title);
@@ -1468,6 +1666,7 @@ on_frame(NsPageView *v, Res *res)
             v->scroll_x = res->requested_scroll_x;
         clamp_scroll(v);
     }
+    gint64 upload_start = ns_time_monotonic_us();
     if (current && res->ok && res->pixels && !res->is_patch) {
         apply_full(v, res);
         emit(v, NS_VIEW_EVT_REDRAW, NULL);
@@ -1478,6 +1677,35 @@ on_frame(NsPageView *v, Res *res)
             v->frame_force_full = TRUE;
             request_render(v);
         }
+    }
+    if (res->ok && res->have_layers) {
+        if (!apply_layers(v, res)) {
+            v->frame_force_full = TRUE;
+            request_render(v);
+        }
+        if (res->layers_changed)
+            emit(v, NS_VIEW_EVT_REDRAW, NULL);
+    }
+    if (res->ok && frame_stats_on() && (res->pixels || res->layers_changed)) {
+        gsize up = 0;
+        if (res->pixels) {
+            if (res->is_patch)
+                for (int i = 0; i < res->n_damage; i++)
+                    up += (gsize)res->damage[4 * i + 2] * (gsize)res->damage[4 * i + 3];
+            else
+                up = (gsize)res->px_w * (gsize)res->px_h;
+        }
+        for (guint i = 0; res->layers && i < res->layers->len; i++) {
+            const ResLayer *rl = &g_array_index(res->layers, ResLayer, i);
+            if (rl->pixels)
+                up += (gsize)rl->w * (gsize)rl->h;
+        }
+        g_printerr("[frame] paint %.3f ms, layers %.3f ms (%d of %u painted), "
+                   "copy %.3f ms, upload %.3f ms, %" G_GSIZE_FORMAT " px\n",
+                   res->paint_us / 1000.0, res->layers_paint_us / 1000.0,
+                   res->layers_painted, res->layers ? res->layers->len : 0u,
+                   res->copy_us / 1000.0,
+                   (ns_time_monotonic_us() - upload_start) / 1000.0, up);
     }
     if (current && res->ok && res->nav && *res->nav &&
         v->js_redirects < NS_PROC_MAX_JS_REDIRECTS) {
@@ -2277,6 +2505,12 @@ ns_page_view_new(SDL_Renderer *renderer)
     v->pending_record = TRUE;
     v->zoom = 1.0;
     v->ui_scale = 1.0;
+    /* SDL's software renderer turns a texture without its premultiplied
+     * blending: layers it would have to turn stay in the page there. */
+    const char *driver = renderer ? SDL_GetRendererName(renderer) : NULL;
+    v->layers_flags = NS_PAGE_LAYERS;
+    if (driver && strcmp(driver, SDL_SOFTWARE_RENDERER) == 0)
+        v->layers_flags |= NS_PAGE_LAYERS_AXIS_ONLY;
     return v;
 }
 

@@ -25,6 +25,21 @@ typedef struct {
     char *remote_ip;
 } ns_page_info;
 
+/* A compositing layer: a premultiplied ARGB32 buffer the shell draws over
+ * the page, w by h pixels whose top left pixel is at (x, y) in the frame
+ * before the transform m (xx, yx, xy, yy, x0, y0, device pixels), at an
+ * opacity. Its pixels are the session's until the next render. */
+typedef struct {
+    int                  id;
+    int                  changed;    /* new pixels since the last frame */
+    const unsigned char *pixels;
+    int                  w, h, stride;
+    int                  x, y;
+    double               m[6];
+    double               opacity;
+    int                  visible;
+} ns_page_layer;
+
 typedef struct {
     int                  ok;
     int                  width;
@@ -44,6 +59,16 @@ typedef struct {
      * damage rectangles (the exposed strips among them) were painted. */
     int                  blit_dx;
     int                  blit_dy;
+    /* With layers on, the layers over the page in the order to draw them,
+     * and whether any came, went, moved or changed since the last frame:
+     * then the frame is new even if the page is unchanged. */
+    int                  n_layers;
+    ns_page_layer       *layers;
+    int                  layers_changed;
+    /* What the frame cost to paint, page and layers, in microseconds. */
+    gint64               paint_us;
+    gint64               layers_paint_us;
+    int                  layers_painted;
     guint64              gen;
     guint64              base_gen;
     const unsigned char *pixels;
@@ -61,6 +86,14 @@ void ns_page_session_free(ns_page_session *s);
 void ns_page_session_set_wake(ns_page_session *s, ns_page_session_wake_cb cb,
                               gpointer user_data);
 void ns_page_session_set_frame_time(ns_page_session *s, gint64 frame_time_us);
+/* Lets the session hand fixed boxes and elements animating only transform
+ * and opacity over as layers, for a shell that composites them; off by
+ * default, so a frame's pixels are the whole page. NS_LAYERS=0 keeps it off.
+ * With NS_PAGE_LAYERS_AXIS_ONLY the shell can only move and scale a layer:
+ * one turned, skewed or mirrored is painted into the page. */
+#define NS_PAGE_LAYERS           1
+#define NS_PAGE_LAYERS_AXIS_ONLY 2
+void ns_page_session_set_layers(ns_page_session *s, int flags);
 
 int  ns_page_session_open(ns_page_session *s, const char *url, int width,
                           int height, int settle_ms, int history,

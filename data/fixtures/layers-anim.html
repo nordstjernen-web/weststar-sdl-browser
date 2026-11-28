@@ -1,0 +1,80 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Layers: animations</title>
+<!-- Elements animating only transform or opacity: CSS animations, a CSS
+     transition and a Web Animation. Each is painted once into a layer and
+     moved, scaled, turned or faded by the compositor, without a repaint.
+     #over slides across the text after it, which paints above it: it is
+     painted into the page while the two overlap. #lifted is positioned
+     with a z-index and slides over the in-flow boxes. Load with ?t=MS to
+     pause every animation MS milliseconds in, for pixel comparisons, and
+     with ?set=exact to leave out the turning and scaling boxes and the
+     transition: at whole multiples of 100 ms every layer is then moved by
+     whole pixels, which compositing reproduces exactly. -->
+<style>
+body { margin: 0; padding: 16px; font: 15px/1.4 sans-serif; background: #f7f7f2; color: #222; }
+.box {
+  width: 120px; height: 80px; margin: 10px 0; border-radius: 8px;
+  color: #fff; font-weight: bold; text-align: center; line-height: 80px;
+}
+.lane { height: 170px; border-bottom: 1px dashed #bbb; position: relative; }
+.lane > .box { margin: 45px 0 0; }
+#slide { background: #2d6cc8; animation: slide 2s linear infinite alternate; }
+#spin { background: #c8372d; margin-left: 80px; animation: spin 3s linear infinite; }
+#grow { background: #2f9e44; margin-left: 300px; animation: grow 1.5s ease-in-out infinite alternate; }
+#fade { background: #7048e8; margin-left: 500px; animation: fade 1s linear infinite alternate; }
+#fade i { display: inline-block; width: 40px; height: 40px; vertical-align: middle;
+          background: #ffd43b; opacity: 0.5; }
+#trans { background: #e8590c; margin-left: 40px; transition: transform 4s linear; }
+#trans.moved { transform: translate(600px, 0) rotate(20deg); }
+#wa { background: #0b7285; margin-left: 700px; }
+#over { background: rgba(240, 140, 0, 0.85); animation: over 3s linear infinite alternate; }
+#lifted { position: relative; z-index: 3; background: #1c7ed6; width: 100px;
+          animation: slide 2s linear infinite alternate; }
+.text { margin: 0 0 8px; }
+@keyframes slide { from { transform: translateX(0); } to { transform: translateX(640px); } }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes grow { from { transform: scale(0.6); } to { transform: scale(1.4); } }
+@keyframes fade { from { opacity: 1; } to { opacity: 0.15; } }
+@keyframes over { from { transform: translateY(0); } to { transform: translateY(70px); } }
+</style>
+</head>
+<body>
+<div class="lane"><div class="box" id="slide">translate</div></div>
+<div class="lane"><div class="box" id="spin">rotate</div></div>
+<div class="lane"><div class="box" id="grow">scale</div></div>
+<div class="lane"><div class="box" id="fade">opacity <i></i></div></div>
+<div class="lane"><div class="box" id="trans">transition</div></div>
+<div class="lane"><div class="box" id="wa">Web Anim</div></div>
+<div class="box" id="over">overlaps</div>
+<p class="text">This paragraph comes after the orange box in the document, so it paints
+above it: while the box slides down over these lines the box is painted into the page.</p>
+<p class="text">Second line of text under the sliding box, for good measure, with some
+more words so that it wraps across the width of the window at most sizes.</p>
+<div class="box" id="lifted">z-index 3</div>
+<div class="lane" style="background:#e9ecef">in-flow content the lifted box slides over</div>
+<script>
+if (/[?&]set=exact/.test(location.search))
+  ["spin", "grow", "trans"].forEach(function (id) {
+    document.getElementById(id).style.display = "none";
+  });
+document.getElementById("wa").animate(
+  [{ opacity: 1, transform: "translateY(0)" }, { opacity: 0.3, transform: "translateY(10px)" }],
+  { duration: 1200, iterations: Infinity, direction: "alternate" });
+requestAnimationFrame(function () {
+  requestAnimationFrame(function () {
+    document.getElementById("trans").className = "box moved";
+  });
+});
+var m = /[?&]t=(\d+)/.exec(location.search);
+if (m) {
+  var t = Number(m[1]);
+  setTimeout(function () {
+    document.getAnimations().forEach(function (a) { a.pause(); a.currentTime = t; });
+  }, 200);
+}
+</script>
+</body>
+</html>

@@ -175,6 +175,20 @@ jobs:
           grep -q 'PASS toDataURL' canvas.txt
           ! grep -q '^FAIL' canvas.txt
 
+      - name: Layers composite as painting in place does
+        run: |
+          # As on Linux: layers composited on the CPU for --dump=png, each
+          # moved by whole pixels, give the image NS_LAYERS=0 paints.
+          for page in 'layers-fixed.html?set=exact' 'layers-anim.html?set=exact'; do
+            NS_LAYERS=log ./builddir/src/sdl/weststar.exe --headless --time-ms=1200 \
+              --dump=png:layers-on.png "file:///$(cygpath -m "$PWD")/data/fixtures/$page" 2> layers.log
+            NS_LAYERS=0 ./builddir/src/sdl/weststar.exe --headless --time-ms=1200 \
+              --dump=png:layers-off.png "file:///$(cygpath -m "$PWD")/data/fixtures/$page"
+            grep -E 'plan .*: layer' layers.log | sort -u
+            grep -q -E 'plan (header|slide).*: layer' layers.log
+            cmp layers-on.png layers-off.png
+          done
+
       - name: Pattern attribute checks
         run: |
           set -o pipefail

@@ -335,6 +335,12 @@ again and compares the two, warning on any difference;
   scroll shifting off. Scaled images can differ by one level after a
   scroll, because pixman's filter sampling depends on the absolute
   offset.
+- **`NS_LAYERS=log`** prints which fixed boxes and animated elements get
+  a compositing layer, which stay in the page and why, and in each frame
+  which layers are shown and which are painted into the page because
+  something above them overlaps; `NS_LAYERS=0` turns layers off (see
+  docs/porting-to-sdl.md, Layers). `NS_FRAME_STATS=1` prints each
+  frame's paint, copy and upload times in the window.
 - **`NS_LAYOUT_CACHE=verify`** measures every text run the layout cache
   answers and reports any difference from the cached height, baseline or
   width; `NS_LAYOUT_CACHE=0` turns the cache off.

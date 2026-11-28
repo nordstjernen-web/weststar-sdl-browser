@@ -8,6 +8,7 @@
 #include "plat/ns_plat.h"
 #include "plat/ns_env.h"
 #include "damage.h"
+#include "layers.h"
 #include "libnorthstar.h"
 #include "mainctx.h"
 #include "net.h"
@@ -23,6 +24,24 @@
 #define NS_DAMAGE_MAX_FRACTION 0.6
 #define NS_DAMAGE_EDGE_PX 48
 #define NS_DAMAGE_MAX_RECTS 8
+
+/* A layer's buffer, kept from frame to frame while its element is one.
+ * (ox, oy) is where its top left pixel is in device pixels of the page,
+ * or of the viewport for a fixed layer: a buffer painted at one scroll
+ * offset serves every other that moves it by whole pixels. */
+typedef struct session_layer {
+    const void    *key;
+    int            id;
+    unsigned char *buf;
+    int            w, h;
+    double         ox, oy;
+    double         scale;
+    int            fixed;
+    double         m[6];
+    double         opacity;
+    int            visible;
+    gboolean       seen;
+} session_layer;
 
 struct ns_page_session {
     unsigned char *fb;
@@ -54,6 +73,10 @@ struct ns_page_session {
     gpointer       wake_data;
     gboolean       rendering;
     gboolean       wake_posted;
+    int            layers_on;
+    int            layers_axis_only;
+    GArray        *layers;          /* session_layer, in draw order */
+    int            next_layer_id;
 };
 
 /* Returns TRUE when the page needs a frame and no wake is posted or render in progress. */
@@ -118,6 +141,29 @@ ns_page_session_set_frame_time(ns_page_session *s, gint64 frame_time_us)
 {
     if (s && s->cur)
         ns_browser_set_frame_time(s->cur, frame_time_us);
+}
+
+/* Frees every layer buffer: the next frame paints the layers it has anew. */
+static void
+session_layers_clear(ns_page_session *s)
+{
+    if (!s->layers) return;
+    for (guint i = 0; i < s->layers->len; i++)
+        free(g_array_index(s->layers, session_layer, i).buf);
+    g_array_set_size(s->layers, 0);
+}
+
+void
+ns_page_session_set_layers(ns_page_session *s, int flags)
+{
+    if (!s) return;
+    int on = (flags & NS_PAGE_LAYERS) && ns_layers_enabled();
+    s->layers_axis_only = (flags & NS_PAGE_LAYERS_AXIS_ONLY) != 0;
+    if (on == s->layers_on) return;
+    s->layers_on = on;
+    session_layers_clear(s);
+    if (!on && s->cur) ns_browser_layers_off(s->cur);
+    s->frame_valid = 0;
 }
 
 /* Parks an eligible page in the back/forward cache, evicting the oldest; else closes it. */
@@ -271,6 +317,8 @@ ns_page_session_free(ns_page_session *s)
         s->cur = NULL;
         ns_browser_close(cur);
     }
+    session_layers_clear(s);
+    if (s->layers) g_array_free(s->layers, TRUE);
     free(s->fb);
     free(s->scratch_fb);
     free(s->verify_fb);
@@ -349,6 +397,7 @@ ns_page_session_open(ns_page_session *s, const char *url, int width,
         ns_browser_set_next_navigation(referrer, user_activated != 0);
     free(referrer);
     s->frame_valid = 0;
+    session_layers_clear(s);
     ns_net_log_clear();
     if (restored) {
         ns_browser_bfcache_restore(restored, vw, (double)vh);
@@ -407,6 +456,7 @@ ns_page_frame_clear(ns_page_frame *frame)
     free(frame->camera);
     free(frame->download);
     free(frame->damage);
+    free(frame->layers);
     memset(frame, 0, sizeof *frame);
 }
 
@@ -693,6 +743,115 @@ session_frame_damage(ns_page_frame *out, gfx_region_t *region)
     out->n_damage = n;
 }
 
+/* TRUE if a damage rectangle (CSS px of the viewport) touches a layer. */
+static gboolean
+layer_damaged(const ns_browser_layer *l, GArray *damage)
+{
+    for (guint i = 0; i < damage->len; i++) {
+        const ns_damage_rect *d = &g_array_index(damage, ns_damage_rect, i);
+        if (d->x < l->vx + l->vw && d->x + d->w > l->vx &&
+            d->y < l->vy + l->vh && d->y + d->h > l->vy)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+/* Brings the layer buffers to this frame: keeps those that are still
+ * layers, painting one again only when it is new, resized or moved by a
+ * fraction of a pixel, or damage touched it (all is, after a full
+ * repaint), and fills the frame's layer list. */
+static void
+session_layers_frame(ns_page_session *s, GArray *layers, GArray *damage,
+                     int all_dirty, long sx, long sy, int vw, int vh,
+                     double scale, ns_page_frame *out)
+{
+    if (!s->layers) s->layers = g_array_new(FALSE, TRUE, sizeof(session_layer));
+    for (guint i = 0; i < s->layers->len; i++)
+        g_array_index(s->layers, session_layer, i).seen = FALSE;
+    GArray *next = g_array_new(FALSE, TRUE, sizeof(session_layer));
+    int changed = 0;
+    for (guint i = 0; i < layers->len; i++) {
+        const ns_browser_layer *l = &g_array_index(layers, ns_browser_layer, i);
+        double ox = l->x + (l->fixed ? 0 : (double)sx * scale);
+        double oy = l->y + (l->fixed ? 0 : (double)sy * scale);
+        session_layer *old = NULL;
+        for (guint j = 0; j < s->layers->len; j++) {
+            session_layer *c = &g_array_index(s->layers, session_layer, j);
+            if (c->key == l->key && !c->seen) old = c;
+        }
+        session_layer sl = { 0 };
+        int paint = 1;
+        if (old) {
+            sl = *old;
+            old->seen = TRUE;
+            old->buf = NULL;
+            paint = all_dirty || sl.w != l->w || sl.h != l->h ||
+                    sl.ox != ox || sl.oy != oy || sl.scale != scale ||
+                    sl.fixed != l->fixed || layer_damaged(l, damage);
+            if (i != (guint)(old - (session_layer *)(void *)s->layers->data))
+                changed = 1;
+        } else {
+            sl.key = l->key;
+            sl.id = ++s->next_layer_id;
+            changed = 1;
+        }
+        if (paint) {
+            size_t size = (size_t)l->w * 4u * (size_t)l->h;
+            if (sl.w != l->w || sl.h != l->h || !sl.buf) {
+                free(sl.buf);
+                sl.buf = malloc(size);
+            }
+            if (!sl.buf) continue;
+            memset(sl.buf, 0, size);
+            sl.w = l->w;
+            sl.h = l->h;
+            if (ns_browser_render_layer(s->cur, l->key, (int)sx, (int)sy, vw,
+                                        vh, scale, sl.buf, l->w * 4, l->x,
+                                        l->y, l->w, l->h) != 0)
+                memset(sl.buf, 0, size);
+            out->layers_painted++;
+            changed = 1;
+        }
+        if (memcmp(sl.m, l->m, sizeof sl.m) != 0 || sl.opacity != l->opacity ||
+            sl.visible != l->visible)
+            changed = 1;
+        sl.ox = ox;
+        sl.oy = oy;
+        sl.scale = scale;
+        sl.fixed = l->fixed;
+        memcpy(sl.m, l->m, sizeof sl.m);
+        sl.opacity = l->opacity;
+        sl.visible = l->visible;
+        g_array_append_val(next, sl);
+        ns_page_layer *fl = NULL;
+        out->layers = realloc(out->layers, sizeof *fl * (size_t)(out->n_layers + 1));
+        if (!out->layers) {
+            out->n_layers = 0;
+            continue;
+        }
+        fl = &out->layers[out->n_layers++];
+        fl->id = sl.id;
+        fl->changed = paint;
+        fl->pixels = sl.buf;
+        fl->w = sl.w;
+        fl->h = sl.h;
+        fl->stride = sl.w * 4;
+        fl->x = l->x;
+        fl->y = l->y;
+        memcpy(fl->m, l->m, sizeof fl->m);
+        fl->opacity = l->opacity;
+        fl->visible = l->visible;
+    }
+    for (guint i = 0; i < s->layers->len; i++) {
+        session_layer *c = &g_array_index(s->layers, session_layer, i);
+        if (!c->seen) changed = 1;
+        free(c->buf);
+    }
+    g_array_free(s->layers, TRUE);
+    s->layers = next;
+    out->layers_changed = changed;
+}
+
 /* Ticks the page, applies scroll requests and snapping, and paints a full or damaged frame. */
 int
 ns_page_session_render(ns_page_session *s, int width, int height,
@@ -755,7 +914,19 @@ ns_page_session_render(ns_page_session *s, int width, int height,
     }
     int caret_changed = ns_browser_set_caret_blink_active(s->cur,
                                                           caret_active != 0);
+    int was_valid = s->frame_valid;
+    GArray *frame_layers = NULL;
+    int layers_changed = 0;
+    if (s->layers_on) {
+        frame_layers = g_array_new(FALSE, FALSE, sizeof(ns_browser_layer));
+        int replan = !s->frame_valid || vw != s->frame_w || vh != s->frame_h ||
+                     scale != s->frame_scale;
+        ns_browser_layers_update(s->cur, (int)sx, (int)sy, vw, vh, scale,
+                                 replan, s->layers_axis_only, frame_layers,
+                                 &layers_changed);
+    }
     int unchanged = s->frame_valid && ticked == 0 && !caret_changed &&
+                    !layers_changed &&
                     sx == s->frame_sx && sy == s->frame_sy &&
                     vw == s->frame_w && vh == s->frame_h &&
                     scale == s->frame_scale;
@@ -768,13 +939,13 @@ ns_page_session_render(ns_page_session *s, int width, int height,
         scale == s->frame_scale)
         region = session_damage_region(s, damage, sx, sy, vw, vh, scale,
                                        &blit_dx, &blit_dy);
-    g_array_free(damage, TRUE);
     gboolean scrolled = sx != s->frame_sx || sy != s->frame_sy;
     if (region && gfx_region_is_empty(region) && !scrolled) {
         gfx_region_destroy(region);
         region = NULL;
         unchanged = 1;
     }
+    gint64 paint_t0 = ns_time_monotonic_us();
     if (!unchanged) {
         phase_start = ns_trace_now();
         int painted;
@@ -812,6 +983,19 @@ ns_page_session_render(ns_page_session *s, int width, int height,
             g_clear_pointer(&out->damage, free);
         }
     }
+    out->paint_us = ns_time_monotonic_us() - paint_t0;
+    if (frame_layers) {
+        gint64 layers_t0 = ns_time_monotonic_us();
+        session_layers_frame(s, frame_layers, damage,
+                             damage_full || !was_valid, sx, sy, vw, vh,
+                             scale, out);
+        out->layers_paint_us = ns_time_monotonic_us() - layers_t0;
+        g_array_free(frame_layers, TRUE);
+    } else if (s->layers && s->layers->len) {
+        session_layers_clear(s);
+        out->layers_changed = 1;
+    }
+    g_array_free(damage, TRUE);
     out->gen = s->frame_gen;
     out->ok = 1;
     out->width = vw;

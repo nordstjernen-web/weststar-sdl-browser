@@ -10,6 +10,7 @@
 #include "plat/ns_env.h"
 #include "plat/ns_fs.h"
 
+#include "guitest.h"
 #include "icons.h"
 #include "mainloop.h"
 #include "nkui.h"
@@ -1596,6 +1597,7 @@ window_present(NsWindow *w)
     SDL_RenderClear(w->ren);
     ns_page_view_present(w->view);
     ns_nk_present(w->nk, w->ren);
+    ns_guitest_present(w->ren);
     SDL_RenderPresent(w->ren);
 }
 
@@ -1797,6 +1799,7 @@ ns_sdl_app_run(const char *startup_url, const char *session_path,
             if (g_app.session_path)
                 g_app.session_timer = ns_loop_timeout_add_seconds(
                     NULL, 4, write_session_cb, NULL);
+            ns_guitest_start(w->win);
             ns_sdl_loop_run(on_event, on_idle, NULL);
         }
     }

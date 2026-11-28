@@ -1747,6 +1747,61 @@ ns_anim_repaint_nodes(const ns_anim *a, GPtrArray *out)
     return TRUE;
 }
 
+/* True for the properties a compositor applies to a layer: it moves and
+ * fades the layer's pixels without painting them again. */
+static gboolean
+prop_composites(int prop)
+{
+    return prop == NS_CSS_OPACITY || prop == NS_CSS_TRANSFORM;
+}
+
+/* True if every property key in the table composites. */
+static gboolean
+props_composite(GHashTable *props)
+{
+    if (!props) return TRUE;
+    GHashTableIter it;
+    gpointer k, v;
+    g_hash_table_iter_init(&it, props);
+    while (g_hash_table_iter_next(&it, &k, &v))
+        if (!prop_composites(GPOINTER_TO_INT(k))) return FALSE;
+    return TRUE;
+}
+
+/* Collects the elements with a running or paused animation or transition
+ * that changes nothing but opacity and transform. */
+void
+ns_anim_composite_nodes(const ns_anim *a, GPtrArray *out)
+{
+    if (!a || !a->states) return;
+    GHashTableIter it;
+    gpointer key, val;
+    g_hash_table_iter_init(&it, a->states);
+    while (g_hash_table_iter_next(&it, &key, &val)) {
+        const ns_anim_state *s = val;
+        if (!s->node) continue;
+        gboolean any = FALSE, only = TRUE;
+        if (s->chans)
+            for (guint i = 0; only && i < s->chans->len; i++) {
+                const ns_anim_chan *ch = s->chans->pdata[i];
+                if (!ch->active) continue;
+                any = TRUE;
+                only = prop_composites(ch->prop);
+            }
+        for (int w = 0; only && w < 2; w++) {
+            GPtrArray *runs = state_runs(s, w);
+            for (guint i = 0; only && runs && i < runs->len; i++) {
+                const ns_anim_run *r = runs->pdata[i];
+                if (!r->active) continue;
+                any = TRUE;
+                only = props_composite(r->partials) &&
+                       props_composite(r->values);
+            }
+        }
+        if (any && only) g_ptr_array_add(out, (gpointer)s->node);
+    }
+}
+
 /* Returns the topmost animated value for prop: scripts, then CSS runs, then transitions. */
 static const ns_css_value *
 state_prop_value(const ns_anim_state *s, int prop)

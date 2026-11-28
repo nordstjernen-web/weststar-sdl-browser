@@ -1,0 +1,66 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Layers: fixed boxes</title>
+<!-- A fixed header and a fixed corner badge over a long page: both become
+     compositing layers, moved by the GPU while the page scrolls and never
+     repainted. A positioned box with a higher z-index than the header
+     scrolls under it further down: while the two overlap the header must
+     go back into the page (it paints below that box), and come out again
+     once it has passed. Load with ?set=exact for an opaque header. -->
+<style>
+body { margin: 0; font: 16px/1.5 sans-serif; background: #fbfbf8; color: #222; }
+header {
+  position: fixed; top: 0; left: 0; right: 0; height: 56px; z-index: 10;
+  display: flex; align-items: center; padding: 0 16px;
+  background: rgba(28, 58, 112, 0.92); color: #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+header b { font-size: 20px; margin-right: 24px; }
+header span { margin-right: 16px; opacity: 0.85; }
+.badge {
+  position: fixed; right: 16px; bottom: 16px; width: 160px; height: 44px;
+  border-radius: 22px; background: #c8372d; color: #fff; opacity: 0.9;
+  text-align: center; line-height: 44px; font-weight: bold;
+}
+main { padding: 72px 16px 16px; }
+.row {
+  height: 110px; margin: 12px 0; padding: 8px 12px; border: 1px solid #c9c9c0;
+  border-radius: 6px; background: linear-gradient(90deg, #fff, #e8eef8);
+}
+.row:nth-child(3n) { background: linear-gradient(90deg, #fff, #f6eadf); }
+.above {
+  position: relative; z-index: 20; height: 60px; margin: 12px 40px;
+  background: #f1c232; border: 2px solid #8a6d00; text-align: center;
+  line-height: 60px;
+}
+</style>
+</head>
+<body>
+<header><b>Weststar</b><span>Layers</span><span>Fixed header</span><span>Scroll me</span></header>
+<div class="badge">fixed badge</div>
+<main id="main"></main>
+<script>
+/* ?set=exact: an opaque header. Text on a translucent background comes
+   out a level or two apart, 8-bit rounding, painted onto the page or onto
+   a layer composited over it; on an opaque one it is the same. */
+if (/[?&]set=exact/.test(location.search))
+  document.querySelector("header").style.background = "rgb(28, 58, 112)";
+var main = document.getElementById("main");
+for (var i = 1; i <= 60; i++) {
+  var d = document.createElement("div");
+  d.className = "row";
+  d.textContent = "Row " + i + ": the quick brown fox jumps over the lazy dog. " +
+                  "Pack my box with five dozen liquor jugs.";
+  main.appendChild(d);
+  if (i === 25) {
+    var a = document.createElement("div");
+    a.className = "above";
+    a.textContent = "z-index 20: paints above the header";
+    main.appendChild(a);
+  }
+}
+</script>
+</body>
+</html>

@@ -36,6 +36,11 @@ static int            g_paint_defer_depth;
 static const ns_box  *g_paint_flush_box;
 static GHashTable    *g_paint_hoisted;
 static gboolean       g_paint_any_negative_z = TRUE;
+/* Compositing layers: the page leaves out the boxes in g_paint_layer_skip,
+ * and ns_paint_layer paints one of them, g_paint_layer_root, on its own,
+ * without the transform and opacity the compositor applies to it. */
+static GHashTable    *g_paint_layer_skip;
+static const ns_box  *g_paint_layer_root;
 static ns_js         *g_paint_js;
 static ns_anim       *g_paint_anim;
 static gboolean       g_search_case_sensitive;
@@ -7432,6 +7437,9 @@ paint_walk(gfx_t *cr, const ns_box *b, const char *highlight)
     ns_dbg_paint_probe(cr, b);
     if (box_clip_hides(b)) return;
     if (b == g_paint_skip_box) return;
+    if (g_paint_layer_skip && b != g_paint_layer_root &&
+        g_hash_table_contains(g_paint_layer_skip, b))
+        return;
     if (g_paint_hoisted && b != g_paint_flush_box &&
         g_hash_table_contains(g_paint_hoisted, b))
         return;
@@ -7464,7 +7472,7 @@ paint_walk(gfx_t *cr, const ns_box *b, const char *highlight)
     if (g_dbg_paint_x >= 0)
         gfx_clip_extents(cr, &dbg_e0, &dbg_e1, &dbg_e2, &dbg_e3);
     const ns_style *style = b->style;
-    double op = box_opacity(b);
+    double op = b == g_paint_layer_root ? 1.0 : box_opacity(b);
     if (op <= 0.0) return;
     gfx_operator_t blend = blend_mode_operator(style);
     const ns_css_value *mask_v = style ? style->values[NS_CSS_MASK_IMAGE] : NULL;
@@ -7495,7 +7503,7 @@ paint_walk(gfx_t *cr, const ns_box *b, const char *highlight)
     if (anim_tf || ns_style_has_transform(style))
         ns_css_style_effective_transform(style, anim_tf, &eff_tf);
     gboolean has_transform = eff_tf.n_ops > 0;
-    if (b == g_paint_tex_root) {
+    if (b == g_paint_tex_root || b == g_paint_layer_root) {
         has_transform = FALSE;
     } else if (box_establishes_3d(b) ||
                (has_transform && ns_css_transform_is_3d(&eff_tf))) {
@@ -7782,7 +7790,7 @@ paint_walk(gfx_t *cr, const ns_box *b, const char *highlight)
     }
     gboolean own_layer_scope = b->parent == NULL || grouped || has_transform ||
                                clip_overflow || has_path_clip ||
-                               box_has_filter(b) ||
+                               box_has_filter(b) || b == g_paint_layer_root ||
                                (b == g_paint_flush_box &&
                                 box_is_stacking_context(b));
     GPtrArray *saved_layer_list = NULL;
@@ -8224,4 +8232,171 @@ ns_paint_with_selection(gfx_t *cr, const ns_box *root,
     g_paint_have_clip = FALSE;
     g_paint_have_viewport = FALSE;
     ns_paint_list_ordinals_end();
+}
+
+/* ---- compositing layers ------------------------------------------------ */
+
+ns_anim *
+ns_paint_get_anim(void)
+{
+    return g_paint_anim;
+}
+
+void
+ns_paint_set_layer_skip(GHashTable *boxes)
+{
+    g_paint_layer_skip = boxes;
+}
+
+/* Paints one layer box and its subtree as the page would paint it there,
+ * but for its own transform and opacity, which the compositor applies. */
+void
+ns_paint_layer(gfx_t *cr, const ns_box *root, const ns_box *layer,
+               const char *highlight_query, const struct ns_selection *sel)
+{
+    if (!layer) return;
+    ns_paint_list_ordinals_begin();
+    paint_cache_clip(cr);
+    if (sel) g_paint_sel_runs = ns_selection_ranges(root, sel);
+    gboolean saved_negative = g_paint_any_negative_z;
+    const ns_box *saved_flush = g_paint_flush_box;
+    int saved_depth = g_paint_defer_depth;
+    g_paint_any_negative_z = FALSE;
+    g_paint_defer_depth = 0;
+    g_paint_layer_root = layer;
+    g_paint_flush_box = layer;
+    paint_walk(cr, layer, highlight_query);
+    g_paint_layer_root = NULL;
+    g_paint_flush_box = saved_flush;
+    g_paint_defer_depth = saved_depth;
+    g_paint_any_negative_z = saved_negative;
+    g_clear_pointer(&g_paint_sel_runs, g_hash_table_destroy);
+    g_paint_have_clip = FALSE;
+    g_paint_have_viewport = FALSE;
+    ns_paint_list_ordinals_end();
+}
+
+/* The box's 2D transform in user space, about its transform-origin, as
+ * paint_walk applies it; identity without one. FALSE for a 3D transform or
+ * one paint_walk would not apply; *out_singular when it collapses the box,
+ * which then paints nothing. */
+gboolean
+ns_paint_box_transform(const ns_box *b, struct ns_anim *anim,
+                       gfx_matrix_t *out, gboolean *out_singular)
+{
+    gfx_matrix_init_identity(out);
+    *out_singular = FALSE;
+    const ns_css_transform *anim_tf =
+        anim && b->dom ? ns_anim_get_transform(anim, b->dom) : NULL;
+    ns_css_transform eff_tf;
+    eff_tf.n_ops = 0;
+    if (anim_tf || ns_style_has_transform(b->style))
+        ns_css_style_effective_transform(b->style, anim_tf, &eff_tf);
+    if (eff_tf.n_ops == 0) return TRUE;
+    if (ns_css_transform_is_3d(&eff_tf) || box_establishes_3d(b))
+        return FALSE;
+    double bx, by, bw, bh;
+    ns_box_border_rect(b, &bx, &by, &bw, &bh);
+    double ox, oy, oz;
+    box_transform_origin(b, bx, by, bw, bh, NS_CSS_TRANSFORM_ORIGIN,
+                         &ox, &oy, &oz);
+    ns_mat4 m;
+    ns_css_transform_to_mat4(&eff_tf, bw, bh, &m);
+    if (isnan(m.m[0]) || isnan(m.m[4]) || isnan(m.m[1]) ||
+        isnan(m.m[5]) || isnan(m.m[3]) || isnan(m.m[7]) ||
+        isnan(ox) || isnan(oy))
+        return FALSE;
+    if (fabs(m.m[0] * m.m[5] - m.m[1] * m.m[4]) < 1e-6) {
+        *out_singular = TRUE;
+        return TRUE;
+    }
+    gfx_matrix_t cm, pre, post;
+    gfx_matrix_init(&cm, m.m[0], m.m[4], m.m[1], m.m[5], m.m[3], m.m[7]);
+    gfx_matrix_init_translate(&pre, -ox, -oy);
+    gfx_matrix_init_translate(&post, ox, oy);
+    gfx_matrix_multiply(out, &pre, &cm);
+    gfx_matrix_multiply(out, out, &post);
+    return TRUE;
+}
+
+/* The box's opacity with a running animation applied, 0..1. */
+double
+ns_paint_box_opacity(const ns_box *b, struct ns_anim *anim)
+{
+    ns_anim *saved = g_paint_anim;
+    g_paint_anim = anim;
+    double op = box_opacity(b);
+    g_paint_anim = saved;
+    return op;
+}
+
+/* TRUE if anything in the subtree paints. */
+gboolean
+ns_paint_box_subtree_paints(const ns_box *b)
+{
+    return b && box_subtree_paints(b);
+}
+
+/* TRUE if the box itself paints: a background, border or outline, text or
+ * replaced content. */
+gboolean
+ns_paint_box_paints_itself(const ns_box *b)
+{
+    if (!b || box_is_hidden(b)) return FALSE;
+    if (b->kind == NS_BOX_IMAGE || b->kind == NS_BOX_VIDEO ||
+        b->kind == NS_BOX_INLINE || b->kind == NS_BOX_TEXT ||
+        b->kind == NS_BOX_SVG || b->kind == NS_BOX_MATH)
+        return TRUE;
+    if (ns_node_is_tag(b->dom, NS_TAG_CANVAS)) return TRUE;
+    return box_has_own_decor(b);
+}
+
+/* TRUE if painting the box changes how its subtree is composited: a group
+ * (opacity, blend mode, mask), a transform, a filter, a clip, 3D or sticky
+ * positioning; anim adds running opacity and transform animations. */
+gboolean
+ns_paint_box_isolates(const ns_box *b, struct ns_anim *anim)
+{
+    const ns_style *s = b->style;
+    if (!s) return FALSE;
+    if (ns_paint_box_opacity(b, anim) < 0.999) return TRUE;
+    if (blend_mode_operator(s) != GFX_OPERATOR_OVER) return TRUE;
+    if (box_has_filter(b) || box_establishes_3d(b) || box_preserve3d(b))
+        return TRUE;
+    if (ns_style_has_transform(s) ||
+        (anim && b->dom && ns_anim_get_transform(anim, b->dom)))
+        return TRUE;
+    const ns_css_value *mask = s->values[NS_CSS_MASK_IMAGE];
+    if (mask && !ns_css_keyword_is(mask, "none")) return TRUE;
+    const ns_css_value *clip = s->values[NS_CSS_CLIP_PATH];
+    if (clip && !ns_css_keyword_is(clip, "none")) return TRUE;
+    if (s->values[NS_CSS_CLIP] && s->values[NS_CSS_CLIP]->kind == NS_CSS_V_RECT)
+        return TRUE;
+    return ns_css_keyword_is(s->values[NS_CSS_POSITION], "sticky");
+}
+
+/* How the box takes part in its stacking context: 0 in flow, 1 a float,
+ * 2 a z-ordered box painted after the flow (z-index >= 0, in *z), 3 one
+ * painted before it (negative z-index). */
+int
+ns_paint_box_stacking(const ns_box *b, int *z)
+{
+    *z = box_z_index(b);
+    if (box_is_z_ordered(b)) return *z < 0 ? 3 : 2;
+    return box_is_float(b) ? 1 : 0;
+}
+
+/* TRUE if the box is a stacking context when painted from the positioned
+ * list of the stacking context it is in. */
+gboolean
+ns_paint_box_is_stacking_context(const ns_box *b)
+{
+    return box_is_stacking_context(b);
+}
+
+/* TRUE if a modal dialog paints in the top layer, above the page. */
+gboolean
+ns_paint_has_top_layer(const ns_box *root)
+{
+    return top_layer_box(root) != NULL;
 }

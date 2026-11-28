@@ -316,6 +316,7 @@ hazards_walk(const ns_box *b, ns_anim *anim, ns_paint_hazards *h,
                 .fixed = TRUE,
             };
             g_array_append_val(h->fixed_bands, band);
+            g_ptr_array_add(h->fixed_band_nodes, (gpointer)b->dom);
         }
         in_fixed = TRUE;
     }
@@ -333,6 +334,7 @@ ns_paint_hazards_scan(const ns_box *root, ns_anim *anim, ns_paint_hazards *out)
 {
     ns_paint_hazards_clear(out);
     out->fixed_bands = g_array_new(FALSE, FALSE, sizeof(ns_damage_rect));
+    out->fixed_band_nodes = g_ptr_array_new();
     hazards_walk(root, anim, out, FALSE);
 }
 
@@ -341,6 +343,8 @@ ns_paint_hazards_clear(ns_paint_hazards *hazards)
 {
     if (!hazards) return;
     if (hazards->fixed_bands) g_array_free(hazards->fixed_bands, TRUE);
+    if (hazards->fixed_band_nodes)
+        g_ptr_array_free(hazards->fixed_band_nodes, TRUE);
     memset(hazards, 0, sizeof *hazards);
 }
 
@@ -443,6 +447,26 @@ subtree_visual_extent(const ns_box *b, ns_anim *anim, const ns_mat4 *m,
         if (!subtree_visual_extent(a->box, anim, &shifted, e, FALSE))
             return FALSE;
     }
+    return TRUE;
+}
+
+/* The paint extent of a subtree in the box's own space, before its own
+ * transform; FALSE when part of it is fixed, sticky or 3D. */
+gboolean
+ns_damage_subtree_extent(const ns_box *b, ns_anim *anim, double *x0,
+                         double *y0, double *x1, double *y1)
+{
+    ns_mat4 id;
+    ns_mat4_identity(&id);
+    paint_extent e = { G_MAXDOUBLE, G_MAXDOUBLE, -G_MAXDOUBLE, -G_MAXDOUBLE, 0 };
+    if (!b || !subtree_visual_extent(b, anim, &id, &e, TRUE)) return FALSE;
+    if (!(e.x1 > e.x0 && e.y1 > e.y0) || !isfinite(e.x0) || !isfinite(e.y0) ||
+        !isfinite(e.x1) || !isfinite(e.y1))
+        return FALSE;
+    *x0 = e.x0;
+    *y0 = e.y0;
+    *x1 = e.x1;
+    *y1 = e.y1;
     return TRUE;
 }
 

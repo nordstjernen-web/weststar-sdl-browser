@@ -23,10 +23,26 @@ void ns_paint_with_selection(gfx_t *cr, const ns_box *root,
                              const struct ns_selection *sel);
 void ns_paint_set_js(ns_js *js);
 void ns_paint_set_anim(struct ns_anim *anim);
+struct ns_anim *ns_paint_get_anim(void);
 void ns_paint_set_caret_visible(gboolean visible);
 double ns_paint_filter_blur_px(const ns_style *style);
 void ns_paint_set_device_viewport(double x0, double y0, double x1, double y1);
 void ns_paint_clear_device_viewport(void);
+
+/* Compositing layers (src/layers.c). */
+void ns_paint_set_layer_skip(GHashTable *boxes);
+void ns_paint_layer(gfx_t *cr, const ns_box *root, const ns_box *layer,
+                    const char *highlight_query,
+                    const struct ns_selection *sel);
+gboolean ns_paint_box_transform(const ns_box *b, struct ns_anim *anim,
+                                gfx_matrix_t *out, gboolean *out_singular);
+double   ns_paint_box_opacity(const ns_box *b, struct ns_anim *anim);
+gboolean ns_paint_box_subtree_paints(const ns_box *b);
+gboolean ns_paint_box_paints_itself(const ns_box *b);
+gboolean ns_paint_box_isolates(const ns_box *b, struct ns_anim *anim);
+int      ns_paint_box_stacking(const ns_box *b, int *z);
+gboolean ns_paint_box_is_stacking_context(const ns_box *b);
+gboolean ns_paint_has_top_layer(const ns_box *root);
 
 void ns_paint_3d_invalidate(void);
 gboolean ns_paint_3d_registered(const ns_box *b);

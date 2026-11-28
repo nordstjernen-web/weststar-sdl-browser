@@ -33,6 +33,7 @@
 #include "pdf.h"
 #include "image.h"
 #include "js.h"
+#include "layers.h"
 #include "layout.h"
 #include "net.h"
 #include "spellcheck.h"
@@ -100,6 +101,19 @@ struct ns_browser {
     guint           layout_gen;
     guint           hazards_gen;
     ns_paint_hazards hazards;
+    /* Compositing layers, for a shell that asked for them: the plan, the
+     * boxes the page leaves out this frame and their elements, the ones
+     * animating only transform or opacity (no repaint when they tick), and
+     * those that were layers in the frame before too. */
+    ns_layer_plan   layer_plan;
+    const ns_box   *layer_plan_root;
+    guint           layer_plan_gen;
+    double          layer_plan_scale;
+    int             layer_plan_vw, layer_plan_vh;
+    GHashTable     *layer_skip;
+    GHashTable     *layer_nodes;
+    GHashTable     *layer_anim_nodes;
+    GHashTable     *layer_steady;
     gint64          frame_time_us;
     gint64          last_frame_now_us;
     gboolean        relaying;
@@ -2094,6 +2108,15 @@ browser_anim_rects(ns_browser *b, GHashTable *nodes, GArray *out)
     return ok;
 }
 
+/* TRUE if the compositor shows the element's animation: a layer of its
+ * own animating only transform and opacity, which needs no repaint. */
+static gboolean
+browser_anim_layered(const ns_browser *b, gconstpointer node)
+{
+    return b->layer_anim_nodes && g_hash_table_contains(b->layer_anim_nodes,
+                                                        node);
+}
+
 /* Ticks animations, damaging only the animated nodes' rects when that suffices. */
 static gboolean
 browser_anim_tick(ns_browser *browser, gint64 now)
@@ -2105,7 +2128,8 @@ browser_anim_tick(ns_browser *browser, gint64 now)
         ns_anim_repaint_nodes(browser->anim, nodes) && nodes->len > 0) {
         set = g_hash_table_new(g_direct_hash, g_direct_equal);
         for (guint i = 0; i < nodes->len; i++)
-            g_hash_table_add(set, g_ptr_array_index(nodes, i));
+            if (!browser_anim_layered(browser, g_ptr_array_index(nodes, i)))
+                g_hash_table_add(set, g_ptr_array_index(nodes, i));
         rects = g_array_new(FALSE, FALSE, sizeof(ns_damage_rect));
         if (!browser_anim_rects(browser, set, rects))
             g_clear_pointer(&rects, g_array_unref);
@@ -2116,7 +2140,8 @@ browser_anim_tick(ns_browser *browser, gint64 now)
         gboolean same = rects && !ns_anim_needs_layout(browser->anim) &&
                         ns_anim_repaint_nodes(browser->anim, nodes);
         for (guint i = 0; same && i < nodes->len; i++)
-            same = g_hash_table_contains(set, g_ptr_array_index(nodes, i));
+            same = browser_anim_layered(browser, g_ptr_array_index(nodes, i)) ||
+                   g_hash_table_contains(set, g_ptr_array_index(nodes, i));
         if (same && browser_anim_rects(browser, set, rects)) {
             if (!browser->damage_rects)
                 browser->damage_rects =
@@ -2478,8 +2503,217 @@ ns_browser_scroll_blit_bands(ns_browser *browser, GArray *out_bands)
     browser_scan_hazards(browser);
     const ns_paint_hazards *h = &browser->hazards;
     if (h->three_d || h->sticky || h->fixed_background) return 0;
-    g_array_append_vals(out_bands, h->fixed_bands->data, h->fixed_bands->len);
+    for (guint i = 0; i < h->fixed_bands->len; i++) {
+        /* A fixed box that is a layer in this frame and the one before is
+         * not in the page: the scroll moves nothing of it. */
+        if (browser->layer_steady && i < h->fixed_band_nodes->len &&
+            g_hash_table_contains(browser->layer_steady,
+                                  g_ptr_array_index(h->fixed_band_nodes, i)))
+            continue;
+        g_array_append_val(out_bands,
+                           g_array_index(h->fixed_bands, ns_damage_rect, i));
+    }
     return 1;
+}
+
+/* Damages where an element that stops or starts being a layer is: the page
+ * must paint it there now, or paint what is under it. */
+static void
+browser_damage_layer_change(ns_browser *b, const ns_node *node)
+{
+    const ns_box *box = b->layout ? ns_box_find(b->layout, node) : NULL;
+    if (!box) return;
+    ns_damage_rect r;
+    if (!ns_damage_box_visual_rect(box, b->anim, &r)) {
+        b->damage_full = TRUE;
+        return;
+    }
+    if (!b->damage_rects)
+        b->damage_rects = g_array_new(FALSE, FALSE, sizeof(ns_damage_rect));
+    g_array_append_val(b->damage_rects, r);
+}
+
+/* Replaces a set of elements, damaging those that joined or left it. */
+static void
+browser_layers_swap(ns_browser *b, GHashTable *next, int *changed)
+{
+    GHashTable *prev = b->layer_nodes;
+    GHashTableIter it;
+    gpointer k;
+    if (prev) {
+        g_hash_table_iter_init(&it, prev);
+        while (g_hash_table_iter_next(&it, &k, NULL))
+            if (!next || !g_hash_table_contains(next, k)) {
+                browser_damage_layer_change(b, k);
+                *changed = 1;
+            }
+    }
+    if (next) {
+        g_hash_table_iter_init(&it, next);
+        while (g_hash_table_iter_next(&it, &k, NULL))
+            if (!prev || !g_hash_table_contains(prev, k)) {
+                browser_damage_layer_change(b, k);
+                *changed = 1;
+            }
+    }
+    if (b->layer_steady) g_hash_table_destroy(b->layer_steady);
+    b->layer_steady = NULL;
+    if (prev && next) {
+        b->layer_steady = g_hash_table_new(g_direct_hash, g_direct_equal);
+        g_hash_table_iter_init(&it, next);
+        while (g_hash_table_iter_next(&it, &k, NULL))
+            if (g_hash_table_contains(prev, k))
+                g_hash_table_add(b->layer_steady, k);
+    }
+    if (prev) g_hash_table_destroy(prev);
+    b->layer_nodes = next;
+}
+
+/* Stops compositing: the page paints every box again. */
+void
+ns_browser_layers_off(ns_browser *browser)
+{
+    if (!browser) return;
+    int changed = 0;
+    browser_layers_swap(browser, NULL, &changed);
+    ns_layers_plan_clear(&browser->layer_plan);
+    g_clear_pointer(&browser->layer_skip, g_hash_table_destroy);
+    g_clear_pointer(&browser->layer_anim_nodes, g_hash_table_destroy);
+    g_clear_pointer(&browser->layer_steady, g_hash_table_destroy);
+}
+
+/* Decides this frame's layers, before its damage is taken: plans them again
+ * when the page changed, then places each at this scroll offset and keeps
+ * those nothing above them overlaps. Fills out_layers in paint order;
+ * *out_changed is set when the set of layers changed. */
+int
+ns_browser_layers_update(ns_browser *browser, int scroll_x, int scroll_y,
+                         int width, int height, double scale, int replan,
+                         int axis_only, GArray *out_layers, int *out_changed)
+{
+    g_array_set_size(out_layers, 0);
+    *out_changed = 0;
+    if (!browser) return 0;
+    if (!(scale > 0)) scale = 1.0;
+    GPtrArray *nodes = g_ptr_array_new();
+    if (browser->anim) ns_anim_composite_nodes(browser->anim, nodes);
+    ns_layer_plan *plan = &browser->layer_plan;
+    gboolean stale = replan || !plan->layers ||
+        browser->layer_plan_root != browser->layout ||
+        browser->layer_plan_gen != browser->layout_gen ||
+        browser->layer_plan_scale != scale ||
+        browser->layer_plan_vw != width || browser->layer_plan_vh != height ||
+        browser->damage_full ||
+        (browser->damage_nodes && g_hash_table_size(browser->damage_nodes)) ||
+        (browser->damage_images && g_hash_table_size(browser->damage_images)) ||
+        (browser->damage_rects && browser->damage_rects->len) ||
+        !ns_layers_plan_same_nodes(plan, nodes);
+    if (stale) {
+        /* An open drop-down list paints over everything: no layers then. */
+        ns_layers_plan_build(plan, browser->open_select ? NULL : browser->layout,
+                             browser->anim, nodes, scale, 4096, 4096,
+                             2.0 * width * height);
+        browser->layer_plan_root = browser->layout;
+        browser->layer_plan_gen = browser->layout_gen;
+        browser->layer_plan_scale = scale;
+        browser->layer_plan_vw = width;
+        browser->layer_plan_vh = height;
+    }
+    g_ptr_array_free(nodes, TRUE);
+    ns_layers_plan_resolve(plan, browser->anim, scroll_x, scroll_y,
+                           axis_only != 0);
+    GHashTable *next = NULL;
+    if (browser->layer_skip) g_hash_table_remove_all(browser->layer_skip);
+    if (browser->layer_anim_nodes) g_hash_table_remove_all(browser->layer_anim_nodes);
+    for (guint i = 0; plan->layers && i < plan->layers->len; i++) {
+        const ns_layer *l = &g_array_index(plan->layers, ns_layer, i);
+        if (!l->active) continue;
+        if (!next) next = g_hash_table_new(g_direct_hash, g_direct_equal);
+        g_hash_table_add(next, (gpointer)l->node);
+        if (!browser->layer_skip)
+            browser->layer_skip = g_hash_table_new(g_direct_hash, g_direct_equal);
+        g_hash_table_add(browser->layer_skip, (gpointer)l->box);
+        if (g_hash_table_contains(plan->composite, l->node)) {
+            if (!browser->layer_anim_nodes)
+                browser->layer_anim_nodes =
+                    g_hash_table_new(g_direct_hash, g_direct_equal);
+            g_hash_table_add(browser->layer_anim_nodes, (gpointer)l->node);
+        }
+        ns_browser_layer o;
+        memset(&o, 0, sizeof o);
+        o.key = l->node;
+        o.fixed = l->fixed;
+        ns_layer_device_box(l, scale, scroll_x, scroll_y, &o.x, &o.y, &o.w, &o.h);
+        gfx_matrix_t m;
+        ns_layer_device_matrix(l, scale, scroll_x, scroll_y, &m);
+        o.m[0] = m.xx;
+        o.m[1] = m.yx;
+        o.m[2] = m.xy;
+        o.m[3] = m.yy;
+        o.m[4] = m.x0;
+        o.m[5] = m.y0;
+        o.opacity = l->opacity;
+        o.visible = l->visible;
+        double ox = l->fixed ? 0 : scroll_x, oy = l->fixed ? 0 : scroll_y;
+        o.vx = l->bx0 - ox;
+        o.vy = l->by0 - oy;
+        o.vw = l->bx1 - l->bx0;
+        o.vh = l->by1 - l->by0;
+        g_array_append_val(out_layers, o);
+    }
+    if (browser->layer_skip && g_hash_table_size(browser->layer_skip) == 0)
+        g_clear_pointer(&browser->layer_skip, g_hash_table_destroy);
+    browser_layers_swap(browser, next, out_changed);
+    return (int)out_layers->len;
+}
+
+/* Paints one of this frame's layers into a cleared buffer of w by h device
+ * pixels that shows the viewport's (x, y) at its top left. */
+int
+ns_browser_render_layer(ns_browser *browser, const void *key, int scroll_x,
+                        int scroll_y, int width, int height, double scale,
+                        unsigned char *out, int stride, int x, int y, int w,
+                        int h)
+{
+    if (!browser || !browser->layout || !out || w <= 0 || h <= 0) return -1;
+    const ns_box *box = NULL;
+    const ns_layer_plan *plan = &browser->layer_plan;
+    for (guint i = 0; plan->layers && i < plan->layers->len; i++) {
+        const ns_layer *l = &g_array_index(plan->layers, ns_layer, i);
+        if (l->active && l->node == key) box = l->box;
+    }
+    if (!box) return -1;
+    if (!(scale > 0)) scale = 1.0;
+    gfx_surface_t *surf =
+        gfx_image_surface_create_for_data(out, GFX_FORMAT_ARGB32, w, h, stride);
+    if (gfx_surface_status(surf) != GFX_STATUS_SUCCESS) {
+        gfx_surface_destroy(surf);
+        return -1;
+    }
+    gfx_surface_set_device_offset(surf, -x, -y);
+    ns_paint_set_device_viewport(0, 0, width, height);
+    ns_paint_set_js(browser->js);
+    ns_paint_set_anim(browser->anim);
+    ns_paint_set_search(browser->search_case, browser->search_active);
+    ns_paint_set_caret_visible(browser->caret_paint_visible);
+    gfx_t *cr = gfx_create(surf);
+    gfx_set_tolerance(cr, 0.5 / scale);
+    gfx_set_antialias(cr, GFX_ANTIALIAS_FAST);
+    gfx_rectangle(cr, x, y, w, h);
+    gfx_clip(cr);
+    gfx_scale(cr, scale, scale);
+    gfx_translate(cr, -(double)scroll_x, -(double)scroll_y);
+    ns_paint_layer(cr, browser->layout, box, browser->search_query,
+                   ns_selection_has_range(&browser->selection)
+                       ? &browser->selection : NULL);
+    gfx_destroy(cr);
+    ns_paint_set_search(FALSE, NULL);
+    ns_paint_set_anim(NULL);
+    ns_paint_set_js(NULL);
+    ns_paint_clear_device_viewport();
+    gfx_surface_flush(surf);
+    gfx_surface_destroy(surf);
+    return 0;
 }
 
 /* Paints one clipped device rect of the page at the scroll offset and scale. */
@@ -2532,6 +2766,7 @@ ns_browser_render_argb32_rects(ns_browser *browser, int scroll_x, int scroll_y,
     ns_paint_set_anim(browser->anim);
     ns_paint_set_search(browser->search_case, browser->search_active);
     ns_paint_set_caret_visible(browser->caret_paint_visible);
+    ns_paint_set_layer_skip(browser->layer_skip);
     gint64 paint_t0 = ns_time_monotonic_us();
     if (rects && n_rects > 0) {
         for (int i = 0; i < n_rects; i++)
@@ -2546,6 +2781,7 @@ ns_browser_render_argb32_rects(ns_browser *browser, int scroll_x, int scroll_y,
         g_printerr("[profile] paint %6.1fms %dx%d\n",
                    (double)(ns_time_monotonic_us() - paint_t0) / 1000.0,
                    width, height);
+    ns_paint_set_layer_skip(NULL);
     ns_paint_set_search(FALSE, NULL);
     ns_paint_set_anim(NULL);
     ns_paint_set_js(NULL);
@@ -4532,6 +4768,11 @@ ns_browser_close(ns_browser *browser)
     if (browser->damage_rects) g_array_free(browser->damage_rects, TRUE);
     if (browser->damage_images) g_hash_table_destroy(browser->damage_images);
     ns_paint_hazards_clear(&browser->hazards);
+    ns_layers_plan_clear(&browser->layer_plan);
+    if (browser->layer_skip) g_hash_table_destroy(browser->layer_skip);
+    if (browser->layer_nodes) g_hash_table_destroy(browser->layer_nodes);
+    if (browser->layer_anim_nodes) g_hash_table_destroy(browser->layer_anim_nodes);
+    if (browser->layer_steady) g_hash_table_destroy(browser->layer_steady);
     ns_css_set_active_node(NULL);
     ns_paint_set_anim(NULL);
     if (browser->js) {
