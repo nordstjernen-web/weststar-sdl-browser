@@ -490,3 +490,88 @@ jobs:
             done
           fi
           exit $fail
+
+  glib-native:
+    # The browser on nscore (-Dglib=native, src/core/) in place of GLib:
+    # no GLib or GObject linked. It is built beside the same browser on
+    # the system GLib, both with nstext, and the two must lay out and
+    # paint the fixtures byte for byte alike; see docs/porting-to-sdl.md,
+    # stage 6.5.
+    name: gcc on ubuntu-26.04, nscore against GLib
+    runs-on: ubuntu-26.04
+    timeout-minutes: 50
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      NS_ALLOW_ROOT: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install build dependencies
+        # GLib only for the GLib build and nscore's tests against it.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config meson ninja-build git \
+            libsdl3-dev libcurl4-openssl-dev libssl-dev \
+            libharfbuzz-dev libfribidi-dev libfontconfig-dev \
+            libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev \
+            libglib2.0-dev zlib1g-dev libbrotli-dev libzstd-dev \
+            libthai-dev fonts-dejavu-core fonts-noto-core
+
+      - name: Configure and build on GLib and on nscore
+        run: |
+          meson setup build-sys --werror -Db_lto=false -Dpdfjs=disabled -Dtext=native -Dglib=system
+          meson setup build-nat --werror -Db_lto=false -Dpdfjs=disabled -Dtext=native -Dglib=native
+          meson compile -C build-nat
+          meson compile -C build-sys
+
+      - name: No GLib or GObject in the nscore binary
+        run: |
+          grep -q 'GLib *: none (nscore' build-nat/meson-logs/meson-log.txt
+          objdump -p build-nat/src/sdl/weststar | grep NEEDED
+          ! objdump -p build-nat/src/sdl/weststar | grep -E 'NEEDED +lib(glib|gobject|gio)-'
+
+      - name: nscore tests, alone and against GLib
+        run: meson test -C build-nat --suite nscore --print-errorlogs
+
+      - name: Headless smokes on nscore
+        run: |
+          set -o pipefail
+          bin=./build-nat/src/sdl/weststar
+          $bin --headless --dump=text about:start > about.txt
+          grep -q 'Search duckduckgo.com' about.txt
+          $bin --headless --dump=text --settle-ms=3000 \
+            "file://$PWD/data/fixtures/webcrypto.html" > webcrypto.txt
+          grep -q '^PASS' webcrypto.txt
+          ! grep -q '^FAIL' webcrypto.txt
+          grep -q '^END' webcrypto.txt
+
+      - name: nscore lays out and paints the fixtures as GLib does
+        run: |
+          fail=0
+          for f in data/fixtures/*.html; do
+            for b in sys nat; do
+              ./build-$b/src/sdl/weststar --headless --viewport=800x1000 \
+                --dump=layout "file://$PWD/$f" > "layout-$b.txt" 2>/dev/null || true
+              ./build-$b/src/sdl/weststar --headless --viewport=800x1000 \
+                --dump="png:shot-$b.png" "file://$PWD/$f" > /dev/null 2>&1 || true
+            done
+            res=same
+            cmp -s layout-sys.txt layout-nat.txt || { res="layout DIFFERS"; fail=1; }
+            cmp -s shot-sys.png shot-nat.png || { res="$res, picture DIFFERS"; fail=1; }
+            echo "$(basename "$f"): $res"
+            cmp -s layout-sys.txt layout-nat.txt || diff layout-sys.txt layout-nat.txt | head -20
+          done
+          for b in sys nat; do
+            ./build-$b/src/sdl/weststar --headless --dump=text about:start > "about-$b.txt"
+            ./build-$b/src/sdl/weststar --print-config > "config-$b.txt"
+            ./build-$b/src/sdl/weststar --headless --dump=text --settle-ms=3000 \
+              "file://$PWD/data/fixtures/webcrypto.html" > "webcrypto-$b.txt"
+          done
+          for t in about config webcrypto; do
+            cmp "$t-sys.txt" "$t-nat.txt" || { diff "$t-sys.txt" "$t-nat.txt" | head -20; fail=1; }
+          done
+          exit $fail

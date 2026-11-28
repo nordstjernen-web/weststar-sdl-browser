@@ -218,6 +218,58 @@ jobs:
           grep 'text lines' pitch.txt
           awk '/text lines/ { split($5, r, /\.\./); n = $3 + 0; t = r[1] + 0; b = r[2] + 0; ok = (n == 600 && t >= -1 && t <= 4 && b >= 13676 && b <= 13681) } END { exit !ok }' pitch.txt
 
+      # nscore (-Dglib=native, src/core/) in place of GLib, beside the
+      # same browser on the system GLib, both with nstext: no GLib DLL may
+      # be imported, and the two must lay out and paint the fixtures byte
+      # for byte alike (docs/porting-to-sdl.md, stage 6.5).
+      - name: Build on GLib and on nscore (-Dglib=native)
+        run: |
+          export CC="ccache clang"
+          export CC_LD=lld
+          meson setup build-sys --werror -Db_lto=false -Dpdfjs=disabled -Dtext=native -Dglib=system
+          meson setup build-nat --werror -Db_lto=false -Dpdfjs=disabled -Dtext=native -Dglib=native
+          meson compile -C build-nat
+          meson compile -C build-sys
+
+      - name: No GLib or GObject DLL in the nscore binary
+        run: |
+          grep -q 'GLib *: none (nscore' build-nat/meson-logs/meson-log.txt
+          objdump -p build-nat/src/sdl/weststar.exe | grep 'DLL Name'
+          ! objdump -p build-nat/src/sdl/weststar.exe | grep -i -E 'DLL Name: lib(glib|gobject|gio)-'
+
+      - name: nscore tests, alone and against GLib
+        run: meson test -C build-nat --suite nscore --print-errorlogs
+
+      - name: nscore lays out and paints the fixtures as GLib does
+        run: |
+          fail=0
+          root="file:///$(cygpath -m "$PWD")"
+          for f in data/fixtures/*.html; do
+            for b in sys nat; do
+              ./build-$b/src/sdl/weststar.exe --headless --viewport=800x1000 \
+                --dump=layout "$root/$f" > "layout-$b.txt" 2>/dev/null || true
+              ./build-$b/src/sdl/weststar.exe --headless --viewport=800x1000 \
+                --dump="png:shot-$b.png" "$root/$f" > /dev/null 2>&1 || true
+            done
+            res=same
+            cmp -s layout-sys.txt layout-nat.txt || { res="layout DIFFERS"; fail=1; }
+            cmp -s shot-sys.png shot-nat.png || { res="$res, picture DIFFERS"; fail=1; }
+            echo "$(basename "$f"): $res"
+            cmp -s layout-sys.txt layout-nat.txt || diff layout-sys.txt layout-nat.txt | head -20
+          done
+          for b in sys nat; do
+            ./build-$b/src/sdl/weststar.exe --headless --dump=text about:start > "about-$b.txt"
+            ./build-$b/src/sdl/weststar.exe --print-config > "config-$b.txt"
+            ./build-$b/src/sdl/weststar.exe --headless --dump=text --settle-ms=3000 \
+              "$root/data/fixtures/webcrypto.html" > "webcrypto-$b.txt"
+          done
+          grep -q '^END' webcrypto-nat.txt
+          ! grep -q '^FAIL' webcrypto-nat.txt
+          for t in about config webcrypto; do
+            cmp "$t-sys.txt" "$t-nat.txt" || { diff "$t-sys.txt" "$t-nat.txt" | head -20; fail=1; }
+          done
+          exit $fail
+
       # The binary with the UCRT64 DLLs it links and fontconfig's
       # configuration: what a Windows package would hold.
       - name: Bundle
