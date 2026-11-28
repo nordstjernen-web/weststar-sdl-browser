@@ -35,7 +35,7 @@ built and tested it on Linux and Windows:
 | 5 | Composite with SDL textures: scrolling, fixed boxes and `transform`/`opacity` animations moved by the GPU | done for fixed boxes and animations; `sticky` boxes, canvases and animated images are left |
 | 6 | SDL as the platform: threads, the main loop, files, fonts, crypto, SDL2, Windows XP | done, except for a run on XP itself and an Amiga-family build |
 | 6a | Replace Pango with Weststar's own text layout (nstext) | done and the default: Pango and GObject are not linked |
-| 6b | Replace GLib with a small in-tree core library | in progress |
+| 6b | Replace GLib with a small in-tree core library (nscore, `src/core/`) | done, opt-in with `-Dglib=native`: no GLib is linked, and pages come out identical; the default stays the system's GLib for now |
 
 See [docs/porting-to-sdl.md](docs/porting-to-sdl.md) for the plan, what
 has been removed and why, and what is left.
@@ -117,7 +117,7 @@ Libraries the build needs from the system:
 | Library | For |
 |---------|-----|
 | [SDL3](https://libsdl.org) ≥ 3.2, or SDL2 ≥ 2.0.18 with `-Dsdl=sdl2` | the window, input, audio output, threads, files |
-| GLib ≥ 2.80 | strings, lists, hash tables and Unicode functions (`-Dglib=bundled` builds the part of it used from source) |
+| GLib ≥ 2.80 | strings, lists, hash tables and Unicode functions; not needed with `-Dglib=native`, which uses nscore (`src/core/`) instead |
 | [libcurl](https://curl.se) ≥ 8.5 | HTTP, HTTPS, WebSocket |
 | OpenSSL (libcrypto), or Mbed TLS with `-Dcrypto=mbedtls` | Web Crypto, random numbers, hashing |
 | HarfBuzz ≥ 8.3, FriBidi ≥ 1.0.6 | text shaping, bidirectional text |
@@ -177,6 +177,7 @@ Options for smaller and older systems:
 | `-Dsdl=sdl2` | builds against SDL2 instead of SDL3 |
 | `-Dcrypto=mbedtls` | Web Crypto without OpenSSL |
 | `-Dfontconfig=disabled` | fonts are found by nsfc, with DejaVu compiled in |
+| `-Dglib=native` | no GLib: nscore, the in-tree core library, takes its place |
 | `-Dglib=bundled` | builds the part of GLib that is used from source |
 | `-Dca_bundle=<file>` | compiles the certificates in that file into the browser |
 
