@@ -586,6 +586,8 @@ typedef struct
   int            line_start_index;
   int            line_start_offset;
 
+  const NsPangoAttrList *attrs; /* the itemization attributes */
+
   int            line_width;
   int            remaining_width;
   int            hyphen_width;
@@ -1557,233 +1559,6 @@ justify_words (NtLine *line, ParaBreakState *state)
   state->remaining_width -= added_so_far;
 }
 
-/* ---- ellipsizing ------------------------------------------------------- */
-
-/* Shapes U+2026 (or "...") in a run's font, as the glyphs of a run that
- * stands for the text [offset, offset + length) it replaces. */
-static NtRun *
-make_ellipsis_run (NsPangoLayout *layout, const NtItem *like, int offset, int length,
-                   int num_chars, int char_offset)
-{
-  static const char ellipsis[] = "\xe2\x80\xa6";
-  NtRun *run = nt_new0 (NtRun, 1);
-  NtItem *item = nt_item_copy (like);
-  NtItem tmp = *like;
-  const char *s = ellipsis;
-  hb_codepoint_t g;
-
-  if (!item->font || !hb_font_get_nominal_glyph (item->font->hb_font, 0x2026, &g))
-    s = "...";
-  tmp.offset = 0;
-  tmp.length = (int) strlen (s);
-  tmp.num_chars = nt_utf8_strlen (s, tmp.length);
-  tmp.flags = 0;
-  tmp.n_extra = 0;
-  tmp.extra_attrs = NULL;
-  run->glyphs = nt_glyph_string_new ();
-  nt_shape_item (s, tmp.length, &tmp, NULL, run->glyphs);
-  {
-    int i;
-
-    for (i = 0; i < run->glyphs->num_glyphs; i++)
-      run->glyphs->log_clusters[i] = 0;
-  }
-  item->offset = offset;
-  item->length = length;
-  item->num_chars = num_chars;
-  item->char_offset = char_offset;
-  item->flags = NT_ITEM_IS_ELLIPSIS;
-  run->item = item;
-  (void) layout;
-  return run;
-}
-
-/* The width of the glyphs of the characters [from, to) of a run. */
-static int
-run_chars_width (NsPangoLayout *layout, NtRun *run, int *widths)
-{
-  nt_glyph_logical_widths (run->glyphs, layout->text, run->item, widths);
-  return nt_glyph_string_get_width (run->glyphs);
-}
-
-static void
-keep_run_prefix (NsPangoLayout *layout, NtRun *run, int keep_chars)
-{
-  NtItem *item = run->item;
-  int bytes = (int) (nt_utf8_offset_to_pointer (layout->text + item->offset, keep_chars) -
-                     (layout->text + item->offset));
-  NtGlyphString *gs = run->glyphs;
-  int i, n = 0;
-
-  /* Keep the glyphs of clusters before the cut. */
-  for (i = 0; i < gs->num_glyphs; i++)
-    if (gs->log_clusters[i] < bytes)
-      {
-        gs->glyphs[n] = gs->glyphs[i];
-        gs->log_clusters[n] = gs->log_clusters[i];
-        n++;
-      }
-  gs->num_glyphs = n;
-  item->length = bytes;
-  item->num_chars = keep_chars;
-}
-
-static void
-keep_run_suffix (NsPangoLayout *layout, NtRun *run, int drop_chars)
-{
-  NtItem *item = run->item;
-  int bytes = (int) (nt_utf8_offset_to_pointer (layout->text + item->offset, drop_chars) -
-                     (layout->text + item->offset));
-  NtGlyphString *gs = run->glyphs;
-  int i, n = 0;
-
-  for (i = 0; i < gs->num_glyphs; i++)
-    if (gs->log_clusters[i] >= bytes)
-      {
-        gs->glyphs[n] = gs->glyphs[i];
-        gs->log_clusters[n] = gs->log_clusters[i] - bytes;
-        n++;
-      }
-  gs->num_glyphs = n;
-  item->offset += bytes;
-  item->length -= bytes;
-  item->num_chars -= drop_chars;
-  item->char_offset += drop_chars;
-}
-
-/* Cuts the line (logical order) to goal_width with an ellipsis at its end
- * (or start), at grapheme boundaries. TRUE when it cut. */
-static int
-line_ellipsize (NtLine *line, int goal_width)
-{
-  NsPangoLayout *layout = line->pub.layout;
-  int width = line_get_width (line);
-  int from_start = layout->ellipsize == NS_PANGO_ELLIPSIZE_START;
-  NtRun *ellipsis;
-  int ell_width, budget, used = 0, r, i;
-  int cut_run = -1, cut_char = 0;
-
-  if (line->n_runs == 0 || width <= goal_width)
-    return FALSE;
-
-  {
-    NtRun *like = line->runs[from_start ? 0 : line->n_runs - 1];
-
-    ellipsis = make_ellipsis_run (layout, like->item, 0, 0, 0, 0);
-  }
-  ell_width = nt_glyph_string_get_width (ellipsis->glyphs);
-  budget = goal_width - ell_width;
-
-  /* Find how many characters from the kept end fit. */
-  for (r = 0; r < line->n_runs && cut_run < 0; r++)
-    {
-      int ri = from_start ? line->n_runs - 1 - r : r;
-      NtRun *run = line->runs[ri];
-      int n = run->item->num_chars;
-      int *widths = nt_new (int, n ? n : 1);
-
-      run_chars_width (layout, run, widths);
-      for (i = 0; i < n; i++)
-        {
-          int ci = from_start ? n - 1 - i : i;
-          int at = run->item->char_offset + (from_start ? ci : ci);
-
-          /* Cut only at grapheme boundaries. */
-          if (!from_start && !layout->log_attrs[at].is_cursor_position)
-            {
-              used += widths[ci];
-              continue;
-            }
-          if (used + widths[ci] > budget)
-            {
-              cut_run = ri;
-              cut_char = from_start ? ci + 1 : ci;
-              break;
-            }
-          used += widths[ci];
-        }
-      free (widths);
-    }
-  if (cut_run < 0)
-    {
-      run_free (ellipsis);
-      return FALSE;
-    }
-  if (from_start)
-    {
-      /* Keep grapheme starts: move the cut forward to a cursor position. */
-      NtRun *run = line->runs[cut_run];
-
-      while (cut_char < run->item->num_chars &&
-             !layout->log_attrs[run->item->char_offset + cut_char].is_cursor_position)
-        cut_char++;
-    }
-
-  if (!from_start)
-    {
-      NtRun *run = line->runs[cut_run];
-      int gap_offset = 0, gap_char = 0, gap_len, gap_chars = 0;
-      int keep = cut_char;
-
-      gap_offset = (int) (nt_utf8_offset_to_pointer (layout->text + run->item->offset, keep) -
-                          layout->text);
-      gap_char = run->item->char_offset + keep;
-      gap_len = line->pub.start_index + line->pub.length - gap_offset;
-      for (r = cut_run; r < line->n_runs; r++)
-        gap_chars += line->runs[r]->item->num_chars;
-      gap_chars -= keep;
-
-      for (r = line->n_runs - 1; r > cut_run; r--)
-        run_free (line->runs[r]);
-      line->n_runs = cut_run + 1;
-      if (keep == 0)
-        {
-          run_free (run);
-          line->n_runs = cut_run;
-        }
-      else
-        keep_run_prefix (layout, run, keep);
-      ellipsis->item->offset = gap_offset;
-      ellipsis->item->length = gap_len;
-      ellipsis->item->num_chars = gap_chars;
-      ellipsis->item->char_offset = gap_char;
-      line_append_run (line, ellipsis);
-    }
-  else
-    {
-      NtRun *run = line->runs[cut_run];
-      int drop = cut_char, gap_chars = 0, gap_offset = line->pub.start_index, gap_len;
-
-      for (r = 0; r < cut_run; r++)
-        gap_chars += line->runs[r]->item->num_chars;
-      gap_chars += drop;
-      gap_len = (int) (nt_utf8_offset_to_pointer (layout->text + run->item->offset, drop) -
-                       layout->text) - gap_offset;
-      for (r = 0; r < cut_run; r++)
-        run_free (line->runs[r]);
-      memmove (line->runs, line->runs + cut_run,
-               (size_t) (line->n_runs - cut_run) * sizeof *line->runs);
-      line->n_runs -= cut_run;
-      if (drop >= run->item->num_chars)
-        {
-          run_free (run);
-          memmove (line->runs, line->runs + 1, (size_t) (line->n_runs - 1) * sizeof *line->runs);
-          line->n_runs--;
-        }
-      else if (drop > 0)
-        keep_run_suffix (layout, run, drop);
-      ellipsis->item->offset = gap_offset;
-      ellipsis->item->length = gap_len;
-      ellipsis->item->num_chars = gap_chars;
-      ellipsis->item->char_offset = nt_utf8_pointer_to_offset (layout->text,
-                                                               layout->text + gap_offset);
-      line_append_run (line, NULL);
-      memmove (line->runs + 1, line->runs, (size_t) (line->n_runs - 1) * sizeof *line->runs);
-      line->runs[0] = ellipsis;
-    }
-  return TRUE;
-}
-
 static void
 line_postprocess (NtLine *line, ParaBreakState *state, int wrapped)
 {
@@ -1797,7 +1572,7 @@ line_postprocess (NtLine *line, ParaBreakState *state, int wrapped)
   apply_baseline_shift (line);
 
   if (state->line_width >= 0 && should_ellipsize_current_line (layout, state))
-    ellipsized = line_ellipsize (line, state->line_width);
+    ellipsized = nt_line_ellipsize (line, state->attrs, state->line_width);
 
   line_reorder (line);
 
@@ -2121,6 +1896,7 @@ nt_layout_check_lines (NsPangoLayout *layout)
   memset (&state, 0, sizeof state);
   state.remaining_height = layout->height;
   state.line_height = -1;
+  state.attrs = itemize_attrs;
   if (layout->height >= 0)
     {
       NsPangoRectangle logical;
