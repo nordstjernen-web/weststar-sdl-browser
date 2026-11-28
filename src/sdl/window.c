@@ -1532,7 +1532,7 @@ window_new(const char *url, gboolean private_mode)
         return NULL;
     }
     SDL_SetRenderVSync(ren, 1);
-    SDL_Surface *icon = ns_sdl_icon_surface("weststar", 64);
+    SDL_Surface *icon = ns_sdl_icon_surface("weststar", 96);
     if (icon) {
         SDL_SetWindowIcon(win, icon);
         SDL_DestroySurface(icon);
