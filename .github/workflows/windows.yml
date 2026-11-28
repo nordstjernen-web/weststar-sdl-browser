@@ -249,10 +249,13 @@ jobs:
           fail=0
           root="file:///$(cygpath -m "$PWD")"
           for f in data/fixtures/*.html; do
+            # webcrypto.html prints each result as it arrives: let it finish.
+            settle=""
+            case "$f" in *webcrypto.html) settle=--settle-ms=60000 ;; esac
             for b in sys nat; do
-              ./build-$b/src/sdl/weststar.exe --headless --viewport=800x1000 \
+              ./build-$b/src/sdl/weststar.exe --headless --viewport=800x1000 $settle \
                 --dump=layout "$root/$f" > "layout-$b.txt" 2>/dev/null || true
-              ./build-$b/src/sdl/weststar.exe --headless --viewport=800x1000 \
+              ./build-$b/src/sdl/weststar.exe --headless --viewport=800x1000 $settle \
                 --dump="png:shot-$b.png" "$root/$f" > /dev/null 2>&1 || true
             done
             res=same
