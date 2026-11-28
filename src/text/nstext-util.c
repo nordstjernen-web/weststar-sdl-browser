@@ -661,6 +661,43 @@ nt_hash_insert (NtHash *h, const char *key, size_t len, void *value)
   h->n++;
 }
 
+size_t
+nt_hash_filter (NtHash *h, int (*keep) (void *value, void *user), void *user)
+{
+  NtHashEntry *old = h->entries;
+  size_t old_cap = h->cap, i, dropped = 0;
+
+  if (!old_cap)
+    return 0;
+  /* Rebuilt rather than deleted from in place: the table probes linearly,
+   * and a hole would cut the probe chains that run through it. */
+  h->entries = nt_new0 (NtHashEntry, old_cap);
+  h->n = 0;
+  for (i = 0; i < old_cap; i++)
+    {
+      NtHashEntry *e;
+
+      if (!old[i].key)
+        continue;
+      if (!keep (old[i].value, user))
+        {
+          free (old[i].key);
+          if (h->free_value)
+            h->free_value (old[i].value);
+          dropped++;
+          continue;
+        }
+      e = hash_find (h, old[i].key, old[i].key_len, old[i].hash);
+      if (e)
+        {
+          *e = old[i];
+          h->n++;
+        }
+    }
+  free (old);
+  return dropped;
+}
+
 /* ---- languages --------------------------------------------------------- */
 
 static NsMutex lang_lock;

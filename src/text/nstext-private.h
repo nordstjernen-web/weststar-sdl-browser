@@ -410,6 +410,8 @@ void   *nt_hash_lookup  (NtHash *h, const char *key, size_t key_len);
 /* Copies the key; replaces (and frees) an existing value. */
 void    nt_hash_insert  (NtHash *h, const char *key, size_t key_len, void *value);
 void    nt_hash_remove_all (NtHash *h);
+/* Drops (and frees) the values keep() says no to; returns how many. */
+size_t  nt_hash_filter  (NtHash *h, int (*keep) (void *value, void *user), void *user);
 size_t  nt_hash_size    (NtHash *h);
 uint32_t nt_hash_bytes  (const void *p, size_t n, uint32_t seed);
 
@@ -535,7 +537,8 @@ void nt_glyph_index_to_x (const NtGlyphString *gs, const char *text, const NtIte
 void nt_glyph_x_to_index (const NtGlyphString *gs, const char *text, const NtItem *item,
                           int x_pos, int *index, int *trailing);
 
-void nt_shape_cache_stats (uint64_t *hits, uint64_t *misses, uint64_t *entries);
+void nt_shape_cache_stats (uint64_t *hits, uint64_t *misses, uint64_t *skips,
+                          uint64_t *entries);
 
 /* ---- breaking ---------------------------------------------------------- */
 

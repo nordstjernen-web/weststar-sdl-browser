@@ -1047,11 +1047,180 @@ hb_shape_item (const char *paragraph_text, int paragraph_length, const NtItem *i
 
 /* ---- the shape cache --------------------------------------------------- */
 
-static NsPrivate shape_cache_key = NS_PRIVATE_INIT ((void (*) (void *)) nt_hash_free);
-static SDL_AtomicInt cache_hits, cache_misses, cache_entries;
+/* One cache for every thread, as the fork's ns-shape-cache.c: fonts are
+ * per thread (each thread has its font map), but a font's key names all
+ * that decides its glyphs, so what one thread shapes serves the others.
+ *
+ * The table is split on the top bits of the hash into shards with a
+ * reader/writer lock each: lookups, nearly every visit once the cache is
+ * warm, share a shard; inserts and eviction sweeps take it alone. A shard
+ * is bounded in entries and bytes; when it is full, a sweep drops what no
+ * lookup has read since the last sweep, and all of it when that does not
+ * get it under half its bounds. */
 
-#define SHAPE_CACHE_MAX 16384
-#define SHAPE_CONTEXT_BYTES 16
+#define SHAPE_CACHE_SHARDS      16
+#define SHAPE_CACHE_SHARD(hash) (((hash) >> 28) & (SHAPE_CACHE_SHARDS - 1))
+#define SHAPE_CACHE_MAX_ENTRIES 20000
+#define SHAPE_CACHE_MAX_BYTES   (48 * 1024 * 1024)
+#define SHAPE_CACHE_MAX_TEXT    4096
+#define SHAPE_CONTEXT_BYTES     16
+
+typedef struct
+{
+  SDL_AtomicInt read;    /* set by readers since the last sweep */
+  size_t        bytes;
+  int           num_glyphs;
+  NtGlyph      *glyphs;
+  int          *log_clusters;
+} CachedRun;
+
+typedef struct
+{
+  NsRWLock lock;
+  NtHash  *table;
+  size_t   bytes;
+} ShapeShard;
+
+static ShapeShard shards[SHAPE_CACHE_SHARDS];
+
+/* Diagnostics: counters that may wrap are good enough. */
+static SDL_AtomicInt cache_hits, cache_misses, cache_skips, cache_entries;
+
+/* NS_PANGO_SHAPE_CACHE=0 (or off) turns it off, as it does the fork's. */
+static int
+shape_cache_enabled (void)
+{
+  static SDL_AtomicInt enabled = { -1 };
+  int value = SDL_GetAtomicInt (&enabled);
+
+  if (value < 0)
+    {
+      const char *v = getenv ("NS_PANGO_SHAPE_CACHE");
+
+      value = !(v && (strcmp (v, "0") == 0 || nt_ascii_strcasecmp (v, "off") == 0));
+      SDL_SetAtomicInt (&enabled, value);
+    }
+  return value == 1;
+}
+
+/* The shard comes off the top of the hash, which FNV leaves weak for short
+ * keys: an avalanche step first. */
+static uint32_t
+mix_hash (uint32_t h)
+{
+  h ^= h >> 16;
+  h *= 0x7feb352du;
+  h ^= h >> 15;
+  return h;
+}
+
+static void
+cached_run_free (void *p)
+{
+  CachedRun *run = p;
+
+  free (run->glyphs);
+  free (run->log_clusters);
+  free (run);
+}
+
+static int
+run_was_read (void *value, void *user)
+{
+  CachedRun *run = value;
+  size_t *freed = user;
+
+  if (SDL_GetAtomicInt (&run->read))
+    {
+      SDL_SetAtomicInt (&run->read, 0);
+      return TRUE;
+    }
+  *freed += run->bytes;
+  return FALSE;
+}
+
+/* With the shard held for writing. */
+static void
+make_room (ShapeShard *shard)
+{
+  size_t freed = 0, dropped;
+
+  if (nt_hash_size (shard->table) < SHAPE_CACHE_MAX_ENTRIES / SHAPE_CACHE_SHARDS &&
+      shard->bytes < SHAPE_CACHE_MAX_BYTES / SHAPE_CACHE_SHARDS)
+    return;
+
+  dropped = nt_hash_filter (shard->table, run_was_read, &freed);
+  shard->bytes -= NT_MIN (freed, shard->bytes);
+  SDL_AddAtomicInt (&cache_entries, - (int) dropped);
+
+  /* A sweep walks the shard: it has to buy room enough to be worth
+   * repeating, or the working set really is the whole shard. */
+  if (nt_hash_size (shard->table) >= SHAPE_CACHE_MAX_ENTRIES / SHAPE_CACHE_SHARDS / 2 ||
+      shard->bytes >= SHAPE_CACHE_MAX_BYTES / SHAPE_CACHE_SHARDS / 2)
+    {
+      SDL_AddAtomicInt (&cache_entries, - (int) nt_hash_size (shard->table));
+      nt_hash_remove_all (shard->table);
+      shard->bytes = 0;
+    }
+}
+
+static int
+shape_cache_lookup (const NtString *key, uint32_t hash, NtGlyphString *glyphs)
+{
+  ShapeShard *shard = &shards[SHAPE_CACHE_SHARD (hash)];
+  CachedRun *run;
+
+  ns_rw_lock_reader_lock (&shard->lock);
+  run = shard->table ? nt_hash_lookup (shard->table, key->str, key->len) : NULL;
+  if (!run)
+    {
+      ns_rw_lock_reader_unlock (&shard->lock);
+      SDL_AddAtomicInt (&cache_misses, 1);
+      return FALSE;
+    }
+  SDL_SetAtomicInt (&run->read, 1);
+  nt_glyph_string_set_size (glyphs, run->num_glyphs);
+  memcpy (glyphs->glyphs, run->glyphs, (size_t) run->num_glyphs * sizeof *run->glyphs);
+  memcpy (glyphs->log_clusters, run->log_clusters, (size_t) run->num_glyphs * sizeof (int));
+  ns_rw_lock_reader_unlock (&shard->lock);
+  SDL_AddAtomicInt (&cache_hits, 1);
+  return TRUE;
+}
+
+static void
+shape_cache_insert (const NtString *key, uint32_t hash, const NtGlyphString *glyphs)
+{
+  ShapeShard *shard = &shards[SHAPE_CACHE_SHARD (hash)];
+  CachedRun *run = nt_new0 (CachedRun, 1);
+  size_t n = (size_t) glyphs->num_glyphs;
+
+  /* The copy is made before the lock is taken. */
+  run->num_glyphs = glyphs->num_glyphs;
+  run->glyphs = nt_new (NtGlyph, n ? n : 1);
+  run->log_clusters = nt_new (int, n ? n : 1);
+  if (n)
+    {
+      memcpy (run->glyphs, glyphs->glyphs, n * sizeof *run->glyphs);
+      memcpy (run->log_clusters, glyphs->log_clusters, n * sizeof (int));
+    }
+  run->bytes = n * (sizeof (NtGlyph) + sizeof (int)) + sizeof *run + key->len;
+
+  ns_rw_lock_writer_lock (&shard->lock);
+  if (!shard->table)
+    shard->table = nt_hash_new (cached_run_free);
+  if (nt_hash_lookup (shard->table, key->str, key->len))
+    {
+      /* Another thread shaped it meanwhile. */
+      ns_rw_lock_writer_unlock (&shard->lock);
+      cached_run_free (run);
+      return;
+    }
+  make_room (shard);
+  nt_hash_insert (shard->table, key->str, key->len, run);
+  shard->bytes += run->bytes;
+  ns_rw_lock_writer_unlock (&shard->lock);
+  SDL_AddAtomicInt (&cache_entries, 1);
+}
 
 /* The key: everything shaping reads. The paragraph around the item is
  * context for HarfBuzz; a few bytes either side stand for it (HarfBuzz
@@ -1088,12 +1257,6 @@ shape_key (NtString *key, const char *paragraph_text, int paragraph_length,
                         (size_t) (pre + item->length + post));
 }
 
-static void
-glyphs_free_void (void *p)
-{
-  nt_glyph_string_free (p);
-}
-
 void
 nt_shape_item (const char *paragraph_text, int paragraph_length, const NtItem *item,
                const NsPangoLogAttr *log_attrs, NtGlyphString *glyphs)
@@ -1106,9 +1269,8 @@ nt_shape_item_full (const char *paragraph_text, int paragraph_length, const NtIt
                     const NsPangoLogAttr *log_attrs, int round_positions,
                     NtGlyphString *glyphs)
 {
-  NtHash *cache = NULL;
   NtString key = { 0 };
-  NtGlyphString *hit;
+  uint32_t hash = 0;
   int i, last_cluster;
 
   glyphs->num_glyphs = 0;
@@ -1119,27 +1281,23 @@ nt_shape_item_full (const char *paragraph_text, int paragraph_length, const NtIt
       goto finish;
     }
 
-  /* Feature ranges are absolute indexes: an item is keyed relative to its
-   * start, so only features that cover it whole are cacheable. */
-  cache = ns_private_get (&shape_cache_key);
-  if (!cache)
+  /* Feature ranges are keyed relative to the item's start. */
+  if (shape_cache_enabled ())
     {
-      cache = nt_hash_new (glyphs_free_void);
-      ns_private_set (&shape_cache_key, cache);
+      if (item->length > SHAPE_CACHE_MAX_TEXT)
+        SDL_AddAtomicInt (&cache_skips, 1);
+      else
+        {
+          shape_key (&key, paragraph_text, paragraph_length, item, log_attrs);
+          nt_string_append (&key, round_positions ? "|R" : "|U");
+          hash = mix_hash (nt_hash_bytes (key.str, key.len, 0));
+          if (shape_cache_lookup (&key, hash, glyphs))
+            {
+              free (key.str);
+              return;
+            }
+        }
     }
-  shape_key (&key, paragraph_text, paragraph_length, item, log_attrs);
-  nt_string_append (&key, round_positions ? "|R" : "|U");
-  hit = nt_hash_lookup (cache, key.str, key.len);
-  if (hit)
-    {
-      nt_glyph_string_set_size (glyphs, hit->num_glyphs);
-      memcpy (glyphs->glyphs, hit->glyphs, (size_t) hit->num_glyphs * sizeof *hit->glyphs);
-      memcpy (glyphs->log_clusters, hit->log_clusters, (size_t) hit->num_glyphs * sizeof (int));
-      SDL_AddAtomicInt (&cache_hits, 1);
-      free (key.str);
-      return;
-    }
-  SDL_AddAtomicInt (&cache_misses, 1);
 
   hb_shape_item (paragraph_text, paragraph_length, item, log_attrs, glyphs);
   if (glyphs->num_glyphs == 0)
@@ -1193,15 +1351,9 @@ finish:
         }
     }
 
-  if (key.str && cache)
+  if (key.str)
     {
-      if (nt_hash_size (cache) >= SHAPE_CACHE_MAX)
-        {
-          nt_hash_remove_all (cache);
-          SDL_SetAtomicInt (&cache_entries, 0);
-        }
-      nt_hash_insert (cache, key.str, key.len, nt_glyph_string_copy (glyphs));
-      SDL_AddAtomicInt (&cache_entries, 1);
+      shape_cache_insert (&key, hash, glyphs);
       free (key.str);
     }
 }
@@ -1229,23 +1381,25 @@ nt_shape_shape_attr (const char *text, const NtItem *item, const NtAttr *shape,
 }
 
 void
-nt_shape_cache_stats (uint64_t *hits, uint64_t *misses, uint64_t *entries)
+nt_shape_cache_stats (uint64_t *hits, uint64_t *misses, uint64_t *skips, uint64_t *entries)
 {
   if (hits)
-    *hits = (uint64_t) SDL_GetAtomicInt (&cache_hits);
+    *hits = (uint32_t) SDL_GetAtomicInt (&cache_hits);
   if (misses)
-    *misses = (uint64_t) SDL_GetAtomicInt (&cache_misses);
+    *misses = (uint32_t) SDL_GetAtomicInt (&cache_misses);
+  if (skips)
+    *skips = (uint32_t) SDL_GetAtomicInt (&cache_skips);
   if (entries)
-    *entries = (uint64_t) SDL_GetAtomicInt (&cache_entries);
+    *entries = (uint64_t) NT_MAX (SDL_GetAtomicInt (&cache_entries), 0);
 }
 
+/* The shape cache's statistics. nstext keeps no break or item cache (it
+ * computes both per layout), so those two read zero. */
 void
 ns_pango_cache_get_stats (uint64_t *hits, uint64_t *misses, uint64_t *skips,
                           uint64_t *entries)
 {
-  nt_shape_cache_stats (hits, misses, entries);
-  if (skips)
-    *skips = 0;
+  nt_shape_cache_stats (hits, misses, skips, entries);
 }
 
 void
