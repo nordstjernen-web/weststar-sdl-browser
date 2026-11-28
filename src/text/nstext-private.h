@@ -315,7 +315,7 @@ struct _NtFont
   hb_face_t      *hb_face;
   hb_font_t      *hb_font;
   double          size;        /* the em in pixels */
-  double          ctm_scale;   /* the context's scale it is hinted for */
+  double          ctm_sx, ctm_sy; /* the context's scale it is hinted for */
   int             embolden;
   int             has_shape;
   FT_Matrix       shape;       /* fontconfig's matrix (synthetic oblique) */

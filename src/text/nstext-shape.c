@@ -1173,20 +1173,21 @@ finish:
    * (offsets too, in device pixels, under a scaled context). */
   if (round_positions)
     {
-      double scale = item->font ? item->font->ctm_scale : 1.0;
+      double sx = item->font ? item->font->ctm_sx : 1.0;
+      double sy = item->font ? item->font->ctm_sy : 1.0;
 
       for (i = 0; i < glyphs->num_glyphs; i++)
         {
           NtGlyph *g = &glyphs->glyphs[i];
 
-          if (scale == 1.0)
+          if (sx == 1.0 && sy == 1.0)
             g->width = NS_PANGO_UNITS_ROUND (g->width);
           else
             {
-#define HINT(v) ((int) (NS_PANGO_UNITS_ROUND ((int) ((v) * scale)) / scale))
-              g->width = HINT (g->width);
-              g->x_offset = HINT (g->x_offset);
-              g->y_offset = HINT (g->y_offset);
+#define HINT(v, scale) ((int) (NS_PANGO_UNITS_ROUND ((int) ((v) * (scale))) / (scale)))
+              g->width = HINT (g->width, sx);
+              g->x_offset = HINT (g->x_offset, sx);
+              g->y_offset = HINT (g->y_offset, sy);
 #undef HINT
             }
         }

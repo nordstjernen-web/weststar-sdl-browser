@@ -180,9 +180,11 @@ get_face (NtFont *font)
         }
     }
 
+  /* Hinted at the device size, as the fork's gfx backend (cairo's FreeType
+   * backend before it) measures under a scaled context. */
   if (!set_pixel_size (face, font->metric_size,
-                       (FT_F26Dot6) lround (font->size * 64),
-                       (FT_F26Dot6) lround (font->size * 64),
+                       (FT_F26Dot6) lround (font->size * font->ctm_sx * 64),
+                       (FT_F26Dot6) lround (font->size * font->ctm_sy * 64),
                        &font->metric_scale))
     {
       ns_mutex_lock (&ft_library_lock);
@@ -259,14 +261,14 @@ hb_glyph_extents (NtFont *font, uint32_t glyph, NtGlyphExtents *entry)
 }
 
 /* What cairo's FreeType backend reported: the hinted outline's box and
- * advance, in user space. Called with the lock held. */
+ * advance at the device size, in user space. Called with the lock held. */
 static void
 compute_glyph_extents (NtFont *font, uint32_t glyph, NtGlyphExtents *entry)
 {
   FT_Face face;
   FT_GlyphSlot slot;
   const FT_Glyph_Metrics *m;
-  double f;
+  double xf, yf;
   double x_bearing, y_bearing, width, height, advance;
 
   memset (entry, 0, sizeof *entry);
@@ -288,7 +290,9 @@ compute_glyph_extents (NtFont *font, uint32_t glyph, NtGlyphExtents *entry)
   if (font->embolden && slot->format == FT_GLYPH_FORMAT_OUTLINE)
     FT_GlyphSlot_Embolden (slot);
   m = &slot->metrics;
-  f = font->metric_scale / 64.0;
+  /* Device pixels (26.6) to user space. */
+  xf = font->metric_scale / (64.0 * font->ctm_sx);
+  yf = font->metric_scale / (64.0 * font->ctm_sy);
 
   if (font->load_flags & FT_LOAD_NO_HINTING)
     {
@@ -297,19 +301,19 @@ compute_glyph_extents (NtFont *font, uint32_t glyph, NtGlyphExtents *entry)
       FT_Pos y1 = (-m->horiBearingY) & -64;
       FT_Pos y2 = (-m->horiBearingY + m->height + 63) & -64;
 
-      x_bearing = x1 * f;
-      y_bearing = y1 * f;
-      width = (x2 - x1) * f;
-      height = (y2 - y1) * f;
-      advance = ((m->horiAdvance + 32) & -64) * f;
+      x_bearing = x1 * xf;
+      y_bearing = y1 * yf;
+      width = (x2 - x1) * xf;
+      height = (y2 - y1) * yf;
+      advance = ((m->horiAdvance + 32) & -64) * xf;
     }
   else
     {
-      x_bearing = m->horiBearingX * f;
-      y_bearing = -m->horiBearingY * f;
-      width = m->width * f;
-      height = m->height * f;
-      advance = m->horiAdvance * f;
+      x_bearing = m->horiBearingX * xf;
+      y_bearing = -m->horiBearingY * yf;
+      width = m->width * xf;
+      height = m->height * yf;
+      advance = m->horiAdvance * xf;
     }
 
   entry->width = units_from_double (advance);
@@ -397,10 +401,10 @@ font_ascent_descent (NtFont *font, double *ascent, double *descent)
   face = get_face (font);
   if (face)
     {
-      double f = font->metric_scale / 64.0;
+      double yf = font->metric_scale / (64.0 * font->ctm_sy);
 
-      *ascent = font->metric_size->metrics.ascender * f;
-      *descent = - font->metric_size->metrics.descender * f;
+      *ascent = font->metric_size->metrics.ascender * yf;
+      *descent = - font->metric_size->metrics.descender * yf;
     }
   else
     {
@@ -1199,7 +1203,7 @@ font_map_get_hb_face (NsPangoFontMap *fontmap, const char *file, int index)
 /* A font for a rendered pattern; desc_variations are the description's. */
 static NtFont *
 font_new (NsPangoFontMap *fontmap, FcPattern *pattern, const char *desc_variations,
-          double ctm_scale)
+          double ctm_sx, double ctm_sy)
 {
   NtFont *font;
   FcChar8 *file = NULL;
@@ -1228,9 +1232,9 @@ font_new (NsPangoFontMap *fontmap, FcPattern *pattern, const char *desc_variatio
   for (i = 0; FcPatternGetMatrix (pattern, FC_MATRIX, i, &fc_matrix_val) == FcResultMatch; i++)
     FcMatrixMultiply (&fc_matrix, &fc_matrix, fc_matrix_val);
 
-  nt_string_printf (&key, "%s|%d|%.4f|%.6f,%.6f,%.6f,%.6f|%.4f|%s|", (const char *) file,
+  nt_string_printf (&key, "%s|%d|%.4f|%.6f,%.6f,%.6f,%.6f|%.4f,%.4f|%s|", (const char *) file,
                     index, pixel_size, fc_matrix.xx, fc_matrix.xy, fc_matrix.yx,
-                    fc_matrix.yy, ctm_scale, desc_variations ? desc_variations : "");
+                    fc_matrix.yy, ctm_sx, ctm_sy, desc_variations ? desc_variations : "");
   {
     FcChar8 *v = NULL;
     int hs = -1;
@@ -1268,8 +1272,11 @@ font_new (NsPangoFontMap *fontmap, FcPattern *pattern, const char *desc_variatio
   /* fontconfig scales a bitmap font (colour emoji) with a matrix; its
    * uniform scale goes into the size, its shape stays a transform. */
   fc_scale = sqrt (fabs (fc_matrix.xx * fc_matrix.yy - fc_matrix.xy * fc_matrix.yx));
-  font->size = pixel_size / ctm_scale;
-  font->ctm_scale = ctm_scale;
+  /* The pattern's pixel size includes the context's scale; the em in user
+   * space does not. */
+  font->size = pixel_size / ctm_sy;
+  font->ctm_sx = ctm_sx;
+  font->ctm_sy = ctm_sy;
   {
     FcMatrix shape = fc_matrix;
 
@@ -1294,8 +1301,8 @@ font_new (NsPangoFontMap *fontmap, FcPattern *pattern, const char *desc_variatio
    * slant and the emboldening synthesized. */
   matrix_font_scale_factors (fc_matrix.xx, - fc_matrix.yx, fc_matrix.xy, - fc_matrix.yy,
                              &x, &y);
-  x_scale = x / ctm_scale;
-  y_scale = y / ctm_scale;
+  x_scale = x / ctm_sx;
+  y_scale = y / ctm_sy;
   font->hb_face = font_map_get_hb_face (fontmap, (const char *) file, index);
   font->hb_font = hb_font_create (font->hb_face);
   hb_font_set_scale (font->hb_font,
@@ -1437,7 +1444,7 @@ struct _NtFontset
   FcFontSet      *sorted;    /* FcFontSetSort's, made on demand */
   int             sort_done;
   char           *variations;
-  double          ctm_scale;
+  double          ctm_sx, ctm_sy;
   NtFont        **fonts;
   int             n_fonts, cap_fonts;
   int             exhausted;
@@ -1517,15 +1524,16 @@ style_to_fc_slant (NsPangoStyle style)
     }
 }
 
-/* The size in Pango units of pixels, as the fontset key's. */
+/* The size in Pango units of device pixels, as the fontset key's
+ * (pangofc's get_scaled_size: the context's scale on the font's height). */
 static int
-desc_pixel_size (const NsPangoFontDescription *desc, double dpi)
+desc_pixel_size (const NsPangoFontDescription *desc, double dpi, double ctm_sy)
 {
-  int size = (desc->mask & NT_DESC_SIZE) ? desc->size : 0;
+  double size = (desc->mask & NT_DESC_SIZE) ? desc->size : 0;
 
   if (desc->mask & NT_DESC_SIZE && !desc->size_is_absolute)
-    return (int) (size * dpi / 72. + .5);
-  return size;
+    size = size * dpi / 72.;
+  return (int) (.5 + ctm_sy * size);
 }
 
 static FcPattern *
@@ -1574,19 +1582,19 @@ make_pattern (const NsPangoFontDescription *desc, NsPangoLanguage *language,
 
 static NtFontset *
 font_map_load_fontset_scaled (NsPangoFontMap *fontmap, const NsPangoFontDescription *desc,
-                              NsPangoLanguage *language, double ctm_scale)
+                              NsPangoLanguage *language, double ctm_sx, double ctm_sy)
 {
   NtString key = { 0 };
   NtFontset *fs;
-  int pixel_size = desc_pixel_size (desc, fontmap->dpi);
+  int pixel_size = desc_pixel_size (desc, fontmap->dpi, ctm_sy);
   FcResult result;
 
-  nt_string_printf (&key, "%s|%d|%d|%d|%d|%d|%d|%s|%s|%.4f",
+  nt_string_printf (&key, "%s|%d|%d|%d|%d|%d|%d|%s|%s|%.4f,%.4f",
                     (desc->mask & NT_DESC_FAMILY) && desc->family ? desc->family : "",
                     desc->style, desc->weight, desc->stretch, desc->variant, desc->color,
                     pixel_size,
                     desc->variations ? desc->variations : "",
-                    language ? language->tag : "", ctm_scale);
+                    language ? language->tag : "", ctm_sx, ctm_sy);
 
   ns_mutex_lock (&fontmap->lock);
   fs = nt_hash_lookup (fontmap->fontsets, key.str, key.len);
@@ -1601,10 +1609,10 @@ font_map_load_fontset_scaled (NsPangoFontMap *fontmap, const NsPangoFontDescript
   fs = nt_new0 (NtFontset, 1);
   fs->ref_count = 1;
   fs->fontmap = fontmap;
-  fs->ctm_scale = ctm_scale;
+  fs->ctm_sx = ctm_sx;
+  fs->ctm_sy = ctm_sy;
   fs->variations = nt_strdup (desc->variations);
-  fs->pattern = make_pattern (desc, language, (int) lround (pixel_size * ctm_scale),
-                              fontmap->dpi);
+  fs->pattern = make_pattern (desc, language, pixel_size, fontmap->dpi);
   FcConfigSubstitute (NULL, fs->pattern, FcMatchPattern);
   FcDefaultSubstitute (fs->pattern);
 
@@ -1630,7 +1638,7 @@ NtFontset *
 nt_font_map_load_fontset (NsPangoFontMap *fontmap, const NsPangoFontDescription *desc,
                           NsPangoLanguage *language)
 {
-  return font_map_load_fontset_scaled (fontmap, desc, language, 1.0);
+  return font_map_load_fontset_scaled (fontmap, desc, language, 1.0, 1.0);
 }
 
 NtFont *
@@ -1670,7 +1678,7 @@ nt_fontset_get_font_at (NtFontset *fs, int i)
             }
         }
       if (font_pattern)
-        font = font_new (fontmap, font_pattern, fs->variations, fs->ctm_scale);
+        font = font_new (fontmap, font_pattern, fs->variations, fs->ctm_sx, fs->ctm_sy);
       if (prepared)
         FcPatternDestroy (font_pattern);
       if (!font_pattern)
@@ -2002,7 +2010,8 @@ ns_pango_gfx_create_layout (gfx_t *g)
   return layout;
 }
 
-/* The font scale of the context's matrix, for fontsets. */
+/* The font scale of the context's matrix, for fontsets: the size is the
+ * device size, the fonts' metrics are hinted at it. */
 NtFontset *nt_context_load_fontset (NsPangoContext *context, const NsPangoFontDescription *desc,
                                     NsPangoLanguage *language);
 
@@ -2010,7 +2019,6 @@ NtFontset *
 nt_context_load_fontset (NsPangoContext *context, const NsPangoFontDescription *desc,
                          NsPangoLanguage *language)
 {
-  double scale = sqrt (context->scale_x * context->scale_y);
-
-  return font_map_load_fontset_scaled (context->fontmap, desc, language, scale);
+  return font_map_load_fontset_scaled (context->fontmap, desc, language,
+                                       context->scale_x, context->scale_y);
 }
