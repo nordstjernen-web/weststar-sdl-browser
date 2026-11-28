@@ -351,7 +351,7 @@ web-text-lib's `NsPangoFcFontMap` and `NsPangoFcFont`) and a renderer.
 ## Text without Pango
 
 Pango, and with it GObject, is the heaviest library left that is not
-SDL. Its replacement is started: nstext (`src/text/`, `meson setup
+SDL. Its replacement is done: nstext (`src/text/`, `meson setup
 -Dtext=native`) implements the `ns_pango_*` API the engine calls (105
 functions) on HarfBuzz, FriBidi and FreeType, with fonts from fontconfig
 or nsfc and glyphs drawn with gfx as pangogfx draws them. It has no
@@ -365,10 +365,10 @@ layouts.
 
 Status: it builds with either SDL and either font finder, and on the
 fixtures and the 51 render tests it lays out as the fork does (boxes and
-line breaks identical; pictures identical but for an ellipsis cut a space
-apart); see [text-layout.md](text-layout.md) for the comparison and what
-is left. The default stays `-Dtext=pango` until that is clean; then
-`src/web-text-lib/` goes, and GObject with it.
+line breaks and pictures identical); see [text-layout.md](text-layout.md)
+for the comparison and what is left. It is the default; `-Dtext=pango`
+builds the fork, which the Linux CI still compares nstext against for a
+while. Then `src/web-text-lib/` goes, and GObject with it.
 
 ## Fonts: nsfc
 

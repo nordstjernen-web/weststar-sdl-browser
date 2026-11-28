@@ -3,14 +3,17 @@
 The engine lays text out and draws it through one API, the `ns_pango_*`
 functions of `src/ns_pango.h`. Two libraries implement it:
 
-- **web-text-lib** (`src/web-text-lib/`, `-Dtext=pango`, the default): the
-  in-tree Pango 1.58 fork with its gfx backend (`pangogfx`), on GLib and
-  GObject.
-- **nstext** (`src/text/`, `-Dtext=native`): the same API written for the
-  browser on HarfBuzz, FriBidi and FreeType, with fonts from fontconfig or
-  nsfc (`src/fc/`), drawn with gfx. No Pango, no GObject, no GLib.
+- **nstext** (`src/text/`, `-Dtext=native`, the default): the API written
+  for the browser on HarfBuzz, FriBidi and FreeType, with fonts from
+  fontconfig or nsfc (`src/fc/`), drawn with gfx. No Pango, no GObject, no
+  GLib.
+- **web-text-lib** (`src/web-text-lib/`, `-Dtext=pango`): the in-tree Pango
+  1.58 fork with its gfx backend (`pangogfx`), on GLib and GObject. It is
+  kept for a while as the reference the CI compares nstext against, and
+  then removed.
 
-nstext is opt-in while it is compared against the fork (see *Status*).
+nstext is the default since it lays out every page compared the same as
+the fork, in boxes and in pixels (see *Status*).
 This page records what the engine needs of the API, how nstext provides
 it, and how far the two agree.
 
@@ -145,8 +148,7 @@ the rest of the engine (stage 6.5 of [porting-to-sdl.md](porting-to-sdl.md)).
 
 `meson setup -Dtext=native` builds the whole browser, with SDL3 or SDL2,
 with fontconfig or nsfc (and its bundled fonts), with gcc and with clang
-ThinLTO under `--werror`; the default stays `pango` until the comparison
-below is clean everywhere. Measured on Windows (MSYS2 UCRT64, system
+ThinLTO under `--werror`, and is the default. Measured on Windows (MSYS2 UCRT64, system
 fontconfig) with `--headless --viewport=800x1000`, comparing `--dump=png`
 byte for byte and `--dump=layout` line by line, 77 pages:
 

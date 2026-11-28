@@ -367,9 +367,9 @@ jobs:
           grep -q '^END' webcrypto.txt
 
   text-native:
-    # The browser with nstext (-Dtext=native, src/text/) in place of the
-    # Pango fork: no Pango and no GObject in it. It is built beside the
-    # default (-Dtext=pango) and the two lay the fixtures out alike; see
+    # The browser with nstext (-Dtext=native, src/text/, the default): no
+    # Pango and no GObject in it. It is built beside the Pango fork
+    # (-Dtext=pango) and the two lay the fixtures out alike; see
     # docs/text-layout.md.
     name: gcc on ubuntu-26.04, nstext against Pango
     runs-on: ubuntu-26.04
