@@ -451,7 +451,7 @@ jobs:
           # A crash is shown with its backtrace, from a build with symbols.
           if [ -n "$crashed" ]; then
             fail=1
-            sudo apt-get install -y --no-install-recommends gdb > /dev/null
+            sudo apt-get install -y --no-install-recommends gdb valgrind > /dev/null
             for c in $crashed; do
               lib=${c%%:*}; f=${c#*:}
               [ -d build-dbg-$lib ] || {
@@ -460,9 +460,17 @@ jobs:
                 meson compile -C build-dbg-$lib src/sdl/weststar > /dev/null
               }
               echo "=== $lib crashed on $f"
-              gdb -batch -ex run -ex 'bt 40' --args ./build-dbg-$lib/src/sdl/weststar \
+              # The system libraries' lines come from Ubuntu's debuginfod.
+              DEBUGINFOD_URLS=https://debuginfod.ubuntu.com \
+                gdb -batch -ex 'set debuginfod enabled on' -ex run -ex 'bt 40' \
+                --args ./build-dbg-$lib/src/sdl/weststar \
                 --headless --viewport=800x1000 --dump=layout "file://$PWD/$f" 2>&1 \
-                | grep -vE '^\[(New|Thread|Inferior)' | tail -60
+                | grep -vE '^\[(New|Thread|Inferior)|^Download' | tail -60
+              echo "=== valgrind, $lib on $f"
+              valgrind --error-limit=no --num-callers=30 --track-origins=yes \
+                ./build-dbg-$lib/src/sdl/weststar \
+                --headless --viewport=800x1000 --dump=layout "file://$PWD/$f" \
+                2>&1 > /dev/null | grep -A32 -m4 -E 'Invalid|uninitialised|Process terminating' || true
             done
           fi
           exit $fail
