@@ -1,9 +1,9 @@
-# nscore — the in-tree core library that takes GLib's place with
-# -Dglib=native: containers, strings, printf, errors, logging, key files,
-# checksums, URIs and file names (ns-*.c), and UTF-8, UTF-16 and Unicode
-# properties (ns-unicode.c; tables made by scripts/gen-unicode-tables.py).
-# glib.h here gives the engine GLib's names over it, so with -Dglib=native
-# this directory comes first on the include path. Plain C11; no GLib.
+# nscore — the in-tree core library that takes GLib's place: containers,
+# strings, printf, errors, logging, key files, checksums, URIs and file
+# names (ns-*.c), and UTF-8, UTF-16 and Unicode properties (ns-unicode.c;
+# tables made by scripts/gen-unicode-tables.py).
+# glib.h here gives the engine GLib's names over it, so this directory
+# comes first on the include path. Plain C11; no GLib.
 # Public surface: `nscore_dep`. See docs/porting-to-sdl.md, stage 6.5.
 
 ns_unicode_sources = files('ns-unicode.c')
@@ -36,13 +36,11 @@ endif
 nscore_lib = static_library('nscore',
   nscore_sources,
   c_args: nscore_c_args,
-  build_by_default: get_option('glib') == 'native',
 )
 
 nscore_dep = declare_dependency(
   link_with: nscore_lib,
   include_directories: include_directories('.'),
-  compile_args: ['-DNS_GLIB_NATIVE'],
 )
 
 # Known answers for the unicode part; with NS_UCD_DIR set to a directory
@@ -61,7 +59,8 @@ test('nscore',
   suite: 'nscore')
 
 # The same tests compared with the system GLib's answers, where GLib is
-# installed (nscore itself never needs it): every unicode function over all
+# installed (nscore itself never needs it, nor does the browser: GLib is
+# looked for only for these tests): every unicode function over all
 # code points, random input and the files in data/; and the other
 # functions, key files written byte for byte as GLib writes them, the hash
 # table's iteration order, the log format and so on.

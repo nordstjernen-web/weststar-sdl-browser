@@ -37,6 +37,11 @@ jobs:
           persist-credentials: false
 
       - name: Install build dependencies
+        # The browser needs no GLib: libglib2.0-dev is here only for
+        # nscore's tests against GLib (meson test --suite nscore), and
+        # libpsl-dev only for the Public Suffix List's test against libpsl.
+        # libenchant-2-dev builds spell checking; Enchant brings its own
+        # GLib.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -46,7 +51,7 @@ jobs:
             libfreetype-dev libsqlite3-dev libseccomp-dev \
             libglib2.0-dev zlib1g-dev libbrotli-dev libzstd-dev \
             libopusfile-dev libvorbis-dev xvfb xauth fonts-dejavu-core \
-            libsdl2-dev libpsl-dev libthai-dev
+            libsdl2-dev libpsl-dev libthai-dev libenchant-2-dev
 
       - name: Configure and build
         run: |
@@ -86,6 +91,11 @@ jobs:
         # nstext its Thai dictionary breaks.
         run: meson test -C builddir --suite text --print-errorlogs
 
+      - name: nscore tests, alone and against GLib
+        run: |
+          meson test -C builddir --list | grep -q 'nscore-vs-glib'
+          meson test -C builddir --suite nscore --print-errorlogs
+
       - name: Public Suffix List, against libpsl
         # The list is compiled in (src/psl.c); libpsl-dev is installed
         # only for this test, which asks libpsl the same of the same rules.
@@ -94,12 +104,22 @@ jobs:
       - name: Cookies for public suffixes are refused
         run: python3 scripts/check-cookie-psl.py builddir/src/sdl/weststar
 
-      - name: No GTK, Cairo or GIO in the binary
+      - name: No GTK, Cairo, Pango, GLib or GObject in the binary
         run: |
           test -x builddir/src/sdl/weststar
-          ! ldd builddir/src/sdl/weststar | grep -i -E 'libgtk|libgdk|libcairo|libpixman'
-          ! objdump -p builddir/src/sdl/weststar | grep -E 'NEEDED +(libgio|libpsl)'
+          ! ldd builddir/src/sdl/weststar | grep -i -E 'libgtk|libgdk|libcairo|libpixman|libpango'
+          # GLib may be loaded for the system's HarfBuzz and Enchant, but
+          # the browser itself links none of it, nor libpsl.
+          objdump -p builddir/src/sdl/weststar | grep NEEDED
+          ! objdump -p builddir/src/sdl/weststar | grep -E 'NEEDED +lib(glib|gobject|gio|gmodule|pango|psl)'
           ldd builddir/src/sdl/weststar | grep -i libSDL3
+          grep -q 'Core library *: nscore' builddir/meson-logs/meson-log.txt
+          grep -q -E 'Spell checking \(Enchant\) *: (true|YES)' builddir/meson-logs/meson-log.txt
+          # Nor does any of its sources read a GLib header, though HarfBuzz's
+          # and Enchant's pkg-config files put GLib's on the include path:
+          # only nscore's tests against GLib may.
+          ! ninja -C builddir -t deps |
+            awk '/^[^ ]/ { t = $1 } /glib-2\.0\/glib/ { print t }' | grep -v 'vs-glib'
 
       - name: Headless smoke (about:start)
         run: |
@@ -218,7 +238,7 @@ jobs:
             libcurl4-openssl-dev libssl-dev \
             libharfbuzz-dev libfribidi-dev libfontconfig-dev \
             libfreetype-dev libsqlite3-dev libseccomp-dev \
-            libglib2.0-dev zlib1g-dev libbrotli-dev libzstd-dev \
+            zlib1g-dev libbrotli-dev libzstd-dev \
             libopusfile-dev libvorbis-dev xvfb xauth fonts-dejavu-core \
             libx11-dev libxext-dev libxi-dev libxrandr-dev libxfixes-dev \
             libxcursor-dev libxkbcommon-dev libgl-dev libegl-dev \
@@ -231,11 +251,12 @@ jobs:
             -Dsdl2:default_library=shared
           meson compile -C builddir
 
-      - name: The binary uses SDL2 from the wrap, and no SDL3
+      - name: The binary uses SDL2 from the wrap, and no SDL3, GLib or GObject
         run: |
           ldd builddir/src/sdl/weststar | grep -i libsdl
           ldd builddir/src/sdl/weststar | grep -E 'libSDL2-2\.0\.so.* => .*/subprojects/SDL2-[0-9.]+/'
           ! ldd builddir/src/sdl/weststar | grep -i libSDL3
+          ! objdump -p builddir/src/sdl/weststar | grep -E 'NEEDED +lib(glib|gobject|gio)'
 
       - name: gfx, nsfc and SDL layer tests
         run: |
@@ -277,9 +298,9 @@ jobs:
     # The portable build profile: mbedTLS (fetched as a meson subproject)
     # instead of OpenSSL, nsfc, the in-tree font finder, instead of
     # fontconfig, which is not even installed, CA certificates compiled
-    # in, the C11 language level older toolchains stop at, and nscore
-    # (-Dglib=native, src/core/) in place of GLib. Algorithms mbedTLS
-    # lacks (EdDSA) must report NotSupportedError (SKIP), never fail.
+    # in, and the C11 language level older toolchains stop at. GLib is
+    # not installed at all. Algorithms mbedTLS lacks (EdDSA) must report
+    # NotSupportedError (SKIP), never fail.
     name: gcc on ubuntu-26.04, portable profile
     runs-on: ubuntu-26.04
     timeout-minutes: 40
@@ -307,8 +328,7 @@ jobs:
         run: |
           meson setup builddir --werror -Db_lto=false -Dpdfjs=disabled \
             -Dcrypto=mbedtls -Dfontconfig=disabled \
-            -Dca_bundle=/etc/ssl/certs/ca-certificates.crt -Dc_std=gnu11 \
-            -Dglib=native
+            -Dca_bundle=/etc/ssl/certs/ca-certificates.crt -Dc_std=gnu11
           meson compile -C builddir
 
       - name: No libcrypto, fontconfig or GLib in the binary
@@ -316,8 +336,7 @@ jobs:
           # curl may bring its own TLS library, and the distribution's
           # HarfBuzz its own GLib; Weststar itself must not link OpenSSL's
           # libcrypto, fontconfig, or any GLib and GObject.
-          grep -q 'GLib *: none (nscore' builddir/meson-logs/meson-log.txt
-          ! objdump -p builddir/src/sdl/weststar | grep -E 'NEEDED +(libcrypto|libfontconfig|libglib|libgobject)'
+          ! objdump -p builddir/src/sdl/weststar | grep -E 'NEEDED +(libcrypto|libfontconfig|libglib|libgobject|libgio)'
 
       - name: nsfc, SDL layer and nscore tests
         run: |
@@ -381,94 +400,3 @@ jobs:
           ! grep -q '^FAIL' webcrypto.txt
           grep -q '^END' webcrypto.txt
 
-  glib-native:
-    # The browser on nscore (-Dglib=native, src/core/) in place of GLib:
-    # no GLib or GObject linked. It is built beside the same browser on
-    # the system GLib, and the two must lay out and
-    # paint the fixtures byte for byte alike; see docs/porting-to-sdl.md,
-    # stage 6.5.
-    name: gcc on ubuntu-26.04, nscore against GLib
-    runs-on: ubuntu-26.04
-    timeout-minutes: 50
-    env:
-      DEBIAN_FRONTEND: noninteractive
-      NS_ALLOW_ROOT: '1'
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Install build dependencies
-        # GLib only for the GLib build and nscore's tests against it.
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config meson ninja-build git \
-            libsdl3-dev libcurl4-openssl-dev libssl-dev \
-            libharfbuzz-dev libfribidi-dev libfontconfig-dev \
-            libfreetype-dev libsqlite3-dev libseccomp-dev \
-            libglib2.0-dev zlib1g-dev libbrotli-dev libzstd-dev \
-            libthai-dev fonts-dejavu-core fonts-noto-core
-
-      - name: Configure and build on GLib and on nscore
-        run: |
-          meson setup build-sys --werror -Db_lto=false -Dpdfjs=disabled -Dglib=system
-          meson setup build-nat --werror -Db_lto=false -Dpdfjs=disabled -Dglib=native
-          meson compile -C build-nat
-          meson compile -C build-sys
-
-      - name: No GLib or GObject in the nscore binary
-        run: |
-          grep -q 'GLib *: none (nscore' build-nat/meson-logs/meson-log.txt
-          objdump -p build-nat/src/sdl/weststar | grep NEEDED
-          ! objdump -p build-nat/src/sdl/weststar | grep -E 'NEEDED +lib(glib|gobject|gio)-'
-          # Nor does any of its sources read a GLib header: only nscore's
-          # tests against GLib may.
-          ! ninja -C build-nat -t deps |
-            awk '/^[^ ]/ { t = $1 } /glib-2\.0\/glib\.h/ { print t }' | grep -v 'vs-glib'
-
-      - name: nscore tests, alone and against GLib
-        run: meson test -C build-nat --suite nscore --print-errorlogs
-
-      - name: Headless smokes on nscore
-        run: |
-          set -o pipefail
-          bin=./build-nat/src/sdl/weststar
-          $bin --headless --dump=text about:start > about.txt
-          grep -q 'Search duckduckgo.com' about.txt
-          $bin --headless --dump=text --settle-ms=3000 \
-            "file://$PWD/data/fixtures/webcrypto.html" > webcrypto.txt
-          grep -q '^PASS' webcrypto.txt
-          ! grep -q '^FAIL' webcrypto.txt
-          grep -q '^END' webcrypto.txt
-
-      - name: nscore lays out and paints the fixtures as GLib does
-        run: |
-          fail=0
-          for f in data/fixtures/*.html; do
-            # webcrypto.html prints each result as it arrives: let it finish.
-            settle=""
-            case "$f" in *webcrypto.html) settle=--settle-ms=60000 ;; esac
-            for b in sys nat; do
-              ./build-$b/src/sdl/weststar --headless --viewport=800x1000 $settle \
-                --dump=layout "file://$PWD/$f" > "layout-$b.txt" 2>/dev/null || true
-              ./build-$b/src/sdl/weststar --headless --viewport=800x1000 $settle \
-                --dump="png:shot-$b.png" "file://$PWD/$f" > /dev/null 2>&1 || true
-            done
-            res=same
-            cmp -s layout-sys.txt layout-nat.txt || { res="layout DIFFERS"; fail=1; }
-            cmp -s shot-sys.png shot-nat.png || { res="$res, picture DIFFERS"; fail=1; }
-            echo "$(basename "$f"): $res"
-            cmp -s layout-sys.txt layout-nat.txt || diff layout-sys.txt layout-nat.txt | head -20
-          done
-          for b in sys nat; do
-            ./build-$b/src/sdl/weststar --headless --dump=text about:start > "about-$b.txt"
-            ./build-$b/src/sdl/weststar --print-config > "config-$b.txt"
-            ./build-$b/src/sdl/weststar --headless --dump=text --settle-ms=3000 \
-              "file://$PWD/data/fixtures/webcrypto.html" > "webcrypto-$b.txt"
-          done
-          for t in about config webcrypto; do
-            cmp "$t-sys.txt" "$t-nat.txt" || { diff "$t-sys.txt" "$t-nat.txt" | head -20; fail=1; }
-          done
-          exit $fail

@@ -198,7 +198,7 @@ for name, w in tp:
 text(36, 1218, "lexbor, quickjs-ng, Wuffs, WAMR: subprojects/*.wrap · pl_mpeg: subprojects/ · minimp3: src/audio/ · nstext: src/text/", "lbl")
 
 group(20, 1238, 1160, 76, "System libraries", "g-ext")
-libs = ["GTK 4", "GLib", "Cairo", "HarfBuzz", "FriBidi", "fontconfig", "FreeType", "libcurl", "OpenSSL",
+libs = ["GTK 4", "Cairo", "HarfBuzz", "FriBidi", "fontconfig", "FreeType", "libcurl", "OpenSSL",
         "SQLite", "libpsl", "zlib", "SDL3", "libseccomp", "libavif*", "Enchant*"]
 ws = [14 + len(n) * 7 for n in libs]
 gap = (1128 - sum(ws)) / (len(libs) - 1)

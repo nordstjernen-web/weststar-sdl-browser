@@ -1,5 +1,5 @@
 /* Weststar SDL Browser — nscore: the in-tree core library that takes the
- * place of GLib (meson -Dglib=native). Common types and attributes.
+ * place of GLib. Common types and attributes.
  *
  * nscore is plain C11 and includes nothing of GLib. Its functions carry
  * GLib's names with ns_ in place of g_, and its containers keep the public

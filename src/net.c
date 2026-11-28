@@ -3332,14 +3332,7 @@ about_diagnostics_html(void)
 #ifdef NS_LEXBOR_VERSION
     diag_kv(s, "HTML / CSS (lexbor)", NS_LEXBOR_VERSION);
 #endif
-#ifdef NS_GLIB_NATIVE
-    diag_kv(s, "GLib", "none (nscore, in tree)");
-#else
-    char *glibv = g_strdup_printf("%u.%u.%u", glib_major_version,
-                                  glib_minor_version, glib_micro_version);
-    diag_kv(s, "GLib", glibv);
-    g_free(glibv);
-#endif
+    diag_kv(s, "Core library", "nscore (in tree, no GLib)");
     int sdlv = SDL_GetVersion();
     char *sdl_version = g_strdup_printf("%d.%d.%d",
                                         SDL_VERSIONNUM_MAJOR(sdlv),

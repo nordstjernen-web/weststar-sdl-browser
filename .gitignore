@@ -36,7 +36,7 @@ build.ninja
 compile_commands.json
 
 # Meson auto-downloaded subprojects (wrap files only are committed).
-# lexbor, quickjs-ng, quickjs, pdfjs-dist, WAMR, Wuffs, mbedTLS, GLib, SDL2 and DejaVu are fetched at setup
+# lexbor, quickjs-ng, quickjs, pdfjs-dist, WAMR, Wuffs, mbedTLS, SDL2 and DejaVu are fetched at setup
 # from their upstream releases; curl, FreeType, HarfBuzz, FriBidi, SQLite,
 # zlib, libpsl, Brotli and zstd (WrapDB) where the system lacks them, as in
 # the Windows XP build.
@@ -48,7 +48,6 @@ compile_commands.json
 /subprojects/wasm-micro-runtime-*/
 /subprojects/wuffs-*/
 /subprojects/mbedtls-*/
-/subprojects/glib-*/
 /subprojects/SDL2-*/
 /subprojects/dejavu-fonts-*/
 /subprojects/curl-*/

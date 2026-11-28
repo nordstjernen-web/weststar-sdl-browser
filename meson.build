@@ -144,7 +144,6 @@ message('weststar build profile: ' +
 # named once here and reused by every dependency() call on these
 # libraries, here and in src/text/.
 ns_floors = {
-  'glib-2.0': '>=2.80',
   'harfbuzz': '>=8.3',
   'fribidi': '>=1.0.6',
   'fontconfig': '>=2.15',
@@ -166,10 +165,6 @@ foreach name, floor : ns_floors
   # fontconfig is only required when asked for: without it the fonts are
   # found by nsfc, in the tree.
   if name == 'fontconfig' and not get_option('fontconfig').enabled()
-    continue
-  endif
-  # GLib may come from the pinned subproject instead.
-  if get_option('glib') != 'system' and name == 'glib-2.0'
     continue
   endif
   if not dependency(name, version: floor, required: false).found()
@@ -198,28 +193,8 @@ if ns_sdl == 'sdl2'
                                          'test=false', 'werror=false',
                                          'warning_level=0'])
   add_project_arguments('-DNS_SDL2', language: 'c')
-  # The bundled GLib's threads and clocks are SDL's too (packagefiles/glib/).
-  meson.override_dependency('weststar-sdl', declare_dependency(
-    dependencies: sdl_dep,
-    compile_args: ['-DNS_SDL2'],
-    include_directories: include_directories('src/plat'),
-  ))
 else
   sdl_dep = dependency('sdl3', version: ns_floors['sdl3'])
-endif
-
-# GLib: the system's, or with -Dglib=bundled the part of it the browser
-# uses, built statically from the pinned release (subprojects/glib.wrap
-# and packagefiles/glib/). With -Dglib=native none: nscore (src/core/)
-# takes GLib's place under its names, declared further down, once every
-# project argument is set. GObject is not used.
-ns_glib = get_option('glib')
-if ns_glib == 'native'
-  glib = dependency('', required: false)
-elif ns_glib == 'bundled'
-  glib = subproject('glib').get_variable('glib_dep')
-else
-  glib = dependency('glib-2.0', version: ns_floors['glib-2.0'])
 endif
 
 # The chrome is drawn with Nuklear, vendored in subprojects/nuklear.
@@ -410,14 +385,13 @@ endif
 have_audio = get_option('audio').allowed()
 libvorbisfile = dependency('vorbisfile', required: false)
 libopusfile = dependency('opusfile', required: false)
-# Spell checking through Enchant, where it is installed; not with
-# -Dglib=native, since the system Enchant links GLib.
-if ns_glib == 'native'
-  libenchant = dependency('', required: false)
-  message('spell checking (Enchant) left out: -Dglib=native links no GLib')
-else
-  libenchant = dependency('enchant-2', required: false)
-endif
+# Spell checking through Enchant 2, where it is installed (-Dspellcheck).
+# The system Enchant is built on GLib and loads it for itself; the browser
+# hands it only C strings, includes none of GLib's headers (nscore's
+# glib.h comes first on the include path, before the GLib directories
+# Enchant's pkg-config file adds) and names no GLib symbol, as nscore's
+# functions are all ns_ ones.
+libenchant = dependency('enchant-2', required: get_option('spellcheck'))
 have_enchant = libenchant.found()
 
 libseccomp = dependency('libseccomp', required: host_system == 'linux')
@@ -564,12 +538,13 @@ summary({
   'WebAssembly (WAMR)': have_wasm,
   'PDF viewer (PDF.js)': pdfjs_source,
   'AVIF images (libavif)': have_avif,
+  'Spell checking (Enchant)': have_enchant,
   'Audio playback (SDL)': have_audio,
   'SDL': ns_sdl + ' ' + sdl_dep.version(),
   'JavaScript engine': js_engine + ' ' + libquickjs.version(),
   'Crypto library': crypto_backend + ' ' + libcrypto.version(),
   'Built-in CA certificates': have_ca_bundle ? get_option('ca_bundle') : 'none',
-  'GLib': ns_glib == 'native' ? 'none (nscore, in tree)' : ns_glib + ' ' + glib.version(),
+  'Core library': 'nscore (in tree, no GLib)',
   'Fonts found by': have_system_fontconfig ? 'fontconfig ' + libfontconfig.version() : 'nsfc (in tree)',
   'Text layout': 'nstext (in tree)',
   'Bundled fallback fonts': bundled_fonts_source,
@@ -600,11 +575,9 @@ int ns_embed_probe_len(void) { return (int)sizeof ns_embed_probe; }
 subdir('src/gfx')
 subdir('src/plat')
 subdir('src/fc')
-# nscore, the core library that stands in for GLib with -Dglib=native.
+# nscore (src/core/), the core library in GLib's place: containers,
+# strings, Unicode and the rest, under GLib's names.
 subdir('src/core')
-if ns_glib == 'native'
-  glib = nscore_dep
-endif
 subdir('src/text')
 
 subdir('src')

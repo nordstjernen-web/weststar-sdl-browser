@@ -247,10 +247,12 @@ if host_system == 'windows'
 endif
 
 # A dependency that was not found is ignored, so optional libraries are
-# listed unconditionally.
+# listed unconditionally. nscore comes first: its glib.h must be found
+# before any GLib include directory another library's pkg-config file
+# brings along (HarfBuzz's and Enchant's may).
 northstar_deps = [
+  nscore_dep,
   sdl_dep,
-  glib,
   nstext_dep,
   libcurl,
   libcrypto,

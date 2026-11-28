@@ -1,9 +1,11 @@
-/* Weststar SDL Browser — GLib's names over nscore (meson -Dglib=native).
+/* Weststar SDL Browser — GLib's names over nscore.
  *
- * With -Dglib=native, src/core is first on the include path, so the
- * engine's #include <glib.h> lands here: GLib's types as typedefs of
- * nscore's, GLib's functions as #defines of their ns_ names, and GLib's
- * macros written out. Nothing of GLib itself is included or linked.
+ * src/core is first on the include path, so the engine's #include <glib.h>
+ * lands here: GLib's types as typedefs of nscore's, GLib's functions as
+ * #defines of their ns_ names, and GLib's macros written out. Nothing of
+ * GLib itself is included or linked. The engine's sources still spell
+ * GLib's names only through this file; renaming them to the ns_ names
+ * is a mechanical change for later (docs/porting-to-sdl.md, stage 6.5).
  *
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -13,7 +15,7 @@
 #define NS_CORE_GLIB_H
 
 #ifdef __G_LIB_H__
-#error "GLib's own glib.h was included in a -Dglib=native build"
+#error "GLib's own glib.h was included: the browser is built on nscore"
 #endif
 
 #include <errno.h>

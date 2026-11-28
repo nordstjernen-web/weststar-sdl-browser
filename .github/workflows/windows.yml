@@ -57,6 +57,9 @@ jobs:
           # installs 404, set this back to true.
           update: false
           cache: true
+          # The browser needs no GLib: glib2 is here only for nscore's
+          # tests against GLib (meson test --suite nscore). (MSYS2's
+          # HarfBuzz links GLib for itself, so it is installed anyway.)
           install: >-
             git
             diffutils
@@ -111,16 +114,14 @@ jobs:
           ninja --version
           pkg-config --modversion sdl3 freetype2 libcurl
 
-      # On the bundled GLib (-Dglib=bundled): the one CI build of it, kept
-      # working while the XP and portable builds are on nscore.
       - name: Build (ThinLTO via LLD on main, no LTO on pull requests)
         run: |
           export CC="ccache clang"
           export CC_LD=lld
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            meson setup builddir --werror -Db_lto=false -Dpdfjs=disabled -Dglib=bundled
+            meson setup builddir --werror -Db_lto=false -Dpdfjs=disabled
           else
-            meson setup builddir --werror -Db_lto=true -Db_lto_mode=thin -Dpdfjs=disabled -Dglib=bundled
+            meson setup builddir --werror -Db_lto=true -Db_lto_mode=thin -Dpdfjs=disabled
             THINLTO_CACHE_DIR=$(cygpath -m "$RUNNER_TEMP/thinlto-cache")
             mkdir -p "$THINLTO_CACHE_DIR"
             meson configure builddir -Dc_link_args="-Wl,--thinlto-cache-dir=$THINLTO_CACHE_DIR -Wl,--thinlto-cache-policy=cache_size_bytes=300m"
@@ -147,6 +148,22 @@ jobs:
         # text-layout-dump lays out ellipsized and justified text, the
         # middle ellipsis too (docs/text-layout.md).
         run: meson test -C builddir --suite text --print-errorlogs
+
+      - name: No GLib, GObject or Pango DLL in the binary
+        run: |
+          grep -q 'Core library *: nscore' builddir/meson-logs/meson-log.txt
+          objdump -p builddir/src/sdl/weststar.exe | grep 'DLL Name'
+          ! objdump -p builddir/src/sdl/weststar.exe | grep -i -E 'DLL Name: lib(glib|gobject|gio|gmodule|pango)'
+          # Nor does any of its sources read a GLib header, though
+          # HarfBuzz's pkg-config file puts GLib's on the include path:
+          # only nscore's tests against GLib may.
+          ! ninja -C builddir -t deps |
+            awk '/^[^ ]/ { t = $1 } /glib-2\.0\/glib/ { print t }' | grep -v 'vs-glib'
+
+      - name: nscore tests, alone and against GLib
+        run: |
+          meson test -C builddir --list | grep -q 'nscore-vs-glib'
+          meson test -C builddir --suite nscore --print-errorlogs
 
       - name: Public Suffix List, against libpsl
         # The list is compiled in (src/psl.c): the browser imports no
@@ -234,65 +251,6 @@ jobs:
             "file:///$(cygpath -m "$PWD")/data/fixtures/pre-line-pitch.html" > pitch.txt
           grep 'text lines' pitch.txt
           awk '/text lines/ { split($5, r, /\.\./); n = $3 + 0; t = r[1] + 0; b = r[2] + 0; ok = (n == 600 && t >= -1 && t <= 4 && b >= 13676 && b <= 13681) } END { exit !ok }' pitch.txt
-
-      # nscore (-Dglib=native, src/core/) in place of GLib, beside the
-      # same browser on the system GLib: no GLib DLL may
-      # be imported, and the two must lay out and paint the fixtures byte
-      # for byte alike (docs/porting-to-sdl.md, stage 6.5).
-      - name: Build on GLib and on nscore (-Dglib=native)
-        run: |
-          export CC="ccache clang"
-          export CC_LD=lld
-          meson setup build-sys --werror -Db_lto=false -Dpdfjs=disabled -Dglib=system
-          meson setup build-nat --werror -Db_lto=false -Dpdfjs=disabled -Dglib=native
-          meson compile -C build-nat
-          meson compile -C build-sys
-
-      - name: No GLib or GObject DLL in the nscore binary
-        run: |
-          grep -q 'GLib *: none (nscore' build-nat/meson-logs/meson-log.txt
-          objdump -p build-nat/src/sdl/weststar.exe | grep 'DLL Name'
-          ! objdump -p build-nat/src/sdl/weststar.exe | grep -i -E 'DLL Name: lib(glib|gobject|gio)-'
-          # Nor does any of its sources read a GLib header: only nscore's
-          # tests against GLib may.
-          ! ninja -C build-nat -t deps |
-            awk '/^[^ ]/ { t = $1 } /glib-2\.0\/glib\.h/ { print t }' | grep -v 'vs-glib'
-
-      - name: nscore tests, alone and against GLib
-        run: meson test -C build-nat --suite nscore --print-errorlogs
-
-      - name: nscore lays out and paints the fixtures as GLib does
-        run: |
-          fail=0
-          root="file:///$(cygpath -m "$PWD")"
-          for f in data/fixtures/*.html; do
-            # webcrypto.html prints each result as it arrives: let it finish.
-            settle=""
-            case "$f" in *webcrypto.html) settle=--settle-ms=60000 ;; esac
-            for b in sys nat; do
-              ./build-$b/src/sdl/weststar.exe --headless --viewport=800x1000 $settle \
-                --dump=layout "$root/$f" > "layout-$b.txt" 2>/dev/null || true
-              ./build-$b/src/sdl/weststar.exe --headless --viewport=800x1000 $settle \
-                --dump="png:shot-$b.png" "$root/$f" > /dev/null 2>&1 || true
-            done
-            res=same
-            cmp -s layout-sys.txt layout-nat.txt || { res="layout DIFFERS"; fail=1; }
-            cmp -s shot-sys.png shot-nat.png || { res="$res, picture DIFFERS"; fail=1; }
-            echo "$(basename "$f"): $res"
-            cmp -s layout-sys.txt layout-nat.txt || diff layout-sys.txt layout-nat.txt | head -20
-          done
-          for b in sys nat; do
-            ./build-$b/src/sdl/weststar.exe --headless --dump=text about:start > "about-$b.txt"
-            ./build-$b/src/sdl/weststar.exe --print-config > "config-$b.txt"
-            ./build-$b/src/sdl/weststar.exe --headless --dump=text --settle-ms=3000 \
-              "$root/data/fixtures/webcrypto.html" > "webcrypto-$b.txt"
-          done
-          grep -q '^END' webcrypto-nat.txt
-          ! grep -q '^FAIL' webcrypto-nat.txt
-          for t in about config webcrypto; do
-            cmp "$t-sys.txt" "$t-nat.txt" || { diff "$t-sys.txt" "$t-nat.txt" | head -20; fail=1; }
-          done
-          exit $fail
 
       # The binary with the UCRT64 DLLs it links and fontconfig's
       # configuration: what a Windows package would hold.
@@ -400,8 +358,7 @@ jobs:
           meson setup builddir-xp --werror --native-file scripts/winxp-i686.ini \
             -Dpdfjs=disabled -Dca_bundle=/mingw32/etc/ssl/certs/ca-bundle.crt
           meson compile -C builddir-xp
-          # On nscore, with no GLib built.
-          grep -q 'GLib *: none (nscore' builddir-xp/meson-logs/meson-log.txt
+          grep -q 'Core library *: nscore' builddir-xp/meson-logs/meson-log.txt
 
       - name: Save the subproject downloads
         if: steps.wraps-restore.outputs.cache-hit != 'true'

@@ -1,4 +1,4 @@
-/* Weststar SDL Browser — <glib-unix.h> over nscore (meson -Dglib=native): what
+/* Weststar SDL Browser — <glib-unix.h> over nscore: what
  * the engine takes from it is in glib.h.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later

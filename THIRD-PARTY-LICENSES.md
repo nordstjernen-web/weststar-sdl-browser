@@ -61,7 +61,7 @@ alongside the browser's own GPL-3.0-or-later source, so a recipient can
 modify them and rebuild the binary. The Apache License 2.0, for the
 emoji scanner, is at <http://www.apache.org/licenses/LICENSE-2.0>.
 
-### nscore — after GLib's design (with `-Dglib=native`)
+### nscore — after GLib's design
 
 > Weststar's core library in place of GLib, in `src/core/`, is
 > Weststar's own code (GPL-3.0-or-later); no GLib source is copied into
@@ -445,7 +445,7 @@ non-commercial, without restriction.
 ### zlib — zlib License
 
 > DEFLATE compression behind `CompressionStream` and `DecompressionStream`,
-> and a dependency of libcurl, FreeType and GLib.
+> and a dependency of libcurl and FreeType.
 > <https://zlib.net>
 >
 > Copyright (c) 1995-2024 Jean-loup Gailly and Mark Adler
@@ -467,25 +467,14 @@ may not be removed from any source distribution.
 >
 > Copyright (c) Paul Moore and the libseccomp contributors.
 
-Licensed under the GNU Lesser General Public License version 2.1. See the
-LGPL section below for terms and obligations.
-
-### GLib — GNU LGPL 2.1 or later
-
-> Core utilities, the main loops and threads.
-> <https://gitlab.gnome.org/GNOME/glib>
->
-> Copyright the GNU Project and contributors.
-
-These libraries are licensed under the GNU Lesser General Public
-License version 2.1, or (at your option) any later version. The full
-license text is available at:
+Licensed under the GNU Lesser General Public License version 2.1. The
+full license text is available at:
 
   <https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html>
 
-Per LGPL section 6, since Weststar SDL Browser links to these libraries
-dynamically, you are entitled to modify them and re-link it against the
-modified copies; on Linux distributions they are loaded from the system
+Per LGPL section 6, since Weststar SDL Browser links to it dynamically,
+you are entitled to modify it and re-link the browser against the
+modified copy; on Linux distributions it is loaded from the system
 package manager.
 
 ### SDL3 — zlib License
@@ -551,7 +540,11 @@ them, their notices apply:
 - **libthai** — GNU LGPL 2.1 or later, © the libthai contributors.
   Optional Thai word breaking in nstext, linked when present.
 - **Enchant** — GNU LGPL 2.1 or later, © the AbiSource / Enchant
-  contributors. Optional on-screen spell-checking.
+  contributors. Optional on-screen spell-checking (`-Dspellcheck`).
+- **GLib** — GNU LGPL 2.1 or later, © the GNU Project and contributors.
+  Not linked by the browser (nscore takes its place), but loaded by a
+  system Enchant, and by a system HarfBuzz built with it, for their own
+  use.
 - **opusfile / libopus / vorbisfile / libvorbis / libogg** — BSD 3-Clause,
   © the Xiph.Org Foundation. Optional Ogg Opus / Vorbis decode in the
   in-process audio mixer.
