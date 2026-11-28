@@ -433,10 +433,13 @@ jobs:
           # are compared and reported, not required to match byte for byte
           # (complex scripts may differ by a mark's phase).
           fail=0
+          crashed=""
           for f in data/fixtures/*.html; do
             for lib in pango native; do
+              rc=0
               ./build-$lib/src/sdl/weststar --headless --viewport=800x1000 \
-                --dump=layout "file://$PWD/$f" > "layout-$lib.txt" 2>/dev/null || true
+                --dump=layout "file://$PWD/$f" > "layout-$lib.txt" 2>/dev/null || rc=$?
+              [ "$rc" -ge 128 ] && crashed="$crashed $lib:$f"
               ./build-$lib/src/sdl/weststar --headless --viewport=800x1000 \
                 --dump="png:shot-$lib.png" "file://$PWD/$f" > /dev/null 2>&1 || true
             done
@@ -445,4 +448,21 @@ jobs:
             echo "$(basename "$f"): layout $layout, picture $png"
             [ "$layout" = same ] || diff layout-pango.txt layout-native.txt | head -20
           done
+          # A crash is shown with its backtrace, from a build with symbols.
+          if [ -n "$crashed" ]; then
+            fail=1
+            sudo apt-get install -y --no-install-recommends gdb > /dev/null
+            for c in $crashed; do
+              lib=${c%%:*}; f=${c#*:}
+              [ -d build-dbg-$lib ] || {
+                meson setup build-dbg-$lib -Dbuildtype=debug -Db_lto=false \
+                  -Dpdfjs=disabled -Dtext=$lib > /dev/null
+                meson compile -C build-dbg-$lib src/sdl/weststar > /dev/null
+              }
+              echo "=== $lib crashed on $f"
+              gdb -batch -ex run -ex 'bt 40' --args ./build-dbg-$lib/src/sdl/weststar \
+                --headless --viewport=800x1000 --dump=layout "file://$PWD/$f" 2>&1 \
+                | grep -vE '^\[(New|Thread|Inferior)' | tail -60
+            done
+          fi
           exit $fail
