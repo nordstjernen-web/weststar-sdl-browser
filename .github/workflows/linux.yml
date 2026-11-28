@@ -46,7 +46,7 @@ jobs:
             libfreetype-dev libsqlite3-dev libseccomp-dev \
             libglib2.0-dev zlib1g-dev libbrotli-dev libzstd-dev \
             libopusfile-dev libvorbis-dev xvfb xauth fonts-dejavu-core \
-            libsdl2-dev libpsl-dev
+            libsdl2-dev libpsl-dev libthai-dev
 
       - name: Configure and build
         run: |
@@ -79,6 +79,12 @@ jobs:
             meson test -C builddir --suite nsfc --suite plat --print-errorlogs
           meson test -C builddir --list | grep -q 'ns_sys-sdl2'
           meson test -C builddir --list | grep -q 'nsfc-sdl2'
+
+      - name: Text layout test
+        # text-layout-dump lays out ellipsized and justified text, the
+        # middle ellipsis too (docs/text-layout.md); libthai-dev gives
+        # nstext its Thai dictionary breaks.
+        run: meson test -C builddir --suite text --print-errorlogs
 
       - name: Public Suffix List, against libpsl
         # The list is compiled in (src/psl.c); libpsl-dev is installed
@@ -375,135 +381,10 @@ jobs:
           ! grep -q '^FAIL' webcrypto.txt
           grep -q '^END' webcrypto.txt
 
-  text-native:
-    # The browser with nstext (-Dtext=native, src/text/, the default): no
-    # Pango and no GObject in it. It is built beside the Pango fork
-    # (-Dtext=pango) and the two lay the fixtures out alike; see
-    # docs/text-layout.md.
-    name: gcc on ubuntu-26.04, nstext against Pango
-    runs-on: ubuntu-26.04
-    timeout-minutes: 50
-    env:
-      DEBIAN_FRONTEND: noninteractive
-      NS_ALLOW_ROOT: '1'
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config meson ninja-build git \
-            libsdl3-dev libcurl4-openssl-dev libssl-dev \
-            libharfbuzz-dev libfribidi-dev libfontconfig-dev \
-            libfreetype-dev libsqlite3-dev libseccomp-dev \
-            libglib2.0-dev zlib1g-dev libbrotli-dev libzstd-dev \
-            libthai-dev fonts-dejavu-core fonts-noto-core
-
-      - name: Configure and build both text libraries
-        run: |
-          meson setup build-pango --werror -Db_lto=false -Dpdfjs=disabled -Dtext=pango
-          meson setup build-native --werror -Db_lto=false -Dpdfjs=disabled -Dtext=native
-          meson compile -C build-native
-          meson compile -C build-pango
-
-      - name: No Pango or GObject in the nstext binary
-        run: |
-          grep -q 'Text layout *: nstext' build-native/meson-logs/meson-log.txt
-          ! objdump -p build-native/src/sdl/weststar | grep -E 'NEEDED +libgobject'
-
-      - name: Headless smokes with nstext
-        run: |
-          set -o pipefail
-          bin=./build-native/src/sdl/weststar
-          $bin --headless --dump=text about:start > about.txt
-          grep -q 'Search duckduckgo.com' about.txt
-          $bin --headless --dump=text --settle-ms=500 \
-            "file://$PWD/data/fixtures/canvas-2d.html" > canvas.txt
-          test "$(grep -c '^PASS' canvas.txt)" -ge 21
-          ! grep -q '^FAIL' canvas.txt
-          $bin --headless --dump=text --settle-ms=1000 \
-            "file://$PWD/data/fixtures/pattern.html" > pattern.txt
-          grep -q 'PASS checkValidity' pattern.txt
-          ! grep -q '^FAIL' pattern.txt
-          $bin --headless --dump=text --settle-ms=3000 \
-            "file://$PWD/data/fixtures/webcrypto.html" > webcrypto.txt
-          cat webcrypto.txt
-          grep -q '^PASS' webcrypto.txt
-          ! grep -q '^FAIL' webcrypto.txt
-          grep -q '^END' webcrypto.txt
-
-      - name: nstext ellipsizes and justifies as Pango does
-        run: |
-          # The middle ellipsis and carets inside an ellipsis, which no
-          # fixture reaches (src/text/tests/text-layout-dump.c). Layouts,
-          # positions and hits must agree; the pixel hashes are reported.
-          ninja -C build-pango text-layout-dump
-          ninja -C build-native text-layout-dump
-          ./build-pango/text-layout-dump > dump-pango.txt
-          ./build-native/text-layout-dump > dump-native.txt
-          diff dump-pango.txt dump-native.txt || true
-          diff <(grep -v '^  pixels' dump-pango.txt) <(grep -v '^  pixels' dump-native.txt)
-
-      - name: nstext lays the fixtures out as Pango does
-        run: |
-          # Boxes, line breaks and glyph positions must agree; the pictures
-          # are compared and reported, not required to match byte for byte
-          # (complex scripts may differ by a mark's phase).
-          fail=0
-          crashed=""
-          for f in data/fixtures/*.html; do
-            # webcrypto.html prints each result as it arrives: let it
-            # finish (settle returns once the page is idle).
-            settle=""
-            case "$f" in *webcrypto.html) settle=--settle-ms=60000 ;; esac
-            for lib in pango native; do
-              rc=0
-              ./build-$lib/src/sdl/weststar --headless --viewport=800x1000 $settle \
-                --dump=layout "file://$PWD/$f" > "layout-$lib.txt" 2>/dev/null || rc=$?
-              [ "$rc" -ge 128 ] && crashed="$crashed $lib:$f"
-              ./build-$lib/src/sdl/weststar --headless --viewport=800x1000 \
-                --dump="png:shot-$lib.png" "file://$PWD/$f" > /dev/null 2>&1 || true
-            done
-            if cmp -s layout-pango.txt layout-native.txt; then layout=same; else layout=DIFFERS; fail=1; fi
-            if cmp -s shot-pango.png shot-native.png; then png=same; else png=differs; fi
-            echo "$(basename "$f"): layout $layout, picture $png"
-            [ "$layout" = same ] || diff layout-pango.txt layout-native.txt | head -20
-          done
-          # A crash is shown with its backtrace, from a build with symbols.
-          if [ -n "$crashed" ]; then
-            fail=1
-            sudo apt-get install -y --no-install-recommends gdb valgrind > /dev/null
-            for c in $crashed; do
-              lib=${c%%:*}; f=${c#*:}
-              [ -d build-dbg-$lib ] || {
-                meson setup build-dbg-$lib -Dbuildtype=debug -Db_lto=false \
-                  -Dpdfjs=disabled -Dtext=$lib > /dev/null
-                meson compile -C build-dbg-$lib src/sdl/weststar > /dev/null
-              }
-              echo "=== $lib crashed on $f"
-              # The system libraries' lines come from Ubuntu's debuginfod.
-              DEBUGINFOD_URLS=https://debuginfod.ubuntu.com \
-                gdb -batch -ex 'set debuginfod enabled on' -ex run -ex 'bt 40' \
-                --args ./build-dbg-$lib/src/sdl/weststar \
-                --headless --viewport=800x1000 --dump=layout "file://$PWD/$f" 2>&1 \
-                | grep -vE '^\[(New|Thread|Inferior)|^Download' | tail -60
-              echo "=== valgrind, $lib on $f"
-              valgrind --error-limit=no --num-callers=30 --track-origins=yes \
-                ./build-dbg-$lib/src/sdl/weststar \
-                --headless --viewport=800x1000 --dump=layout "file://$PWD/$f" \
-                2>&1 > /dev/null | grep -A32 -m4 -E 'Invalid|uninitialised|Process terminating' || true
-            done
-          fi
-          exit $fail
-
   glib-native:
     # The browser on nscore (-Dglib=native, src/core/) in place of GLib:
     # no GLib or GObject linked. It is built beside the same browser on
-    # the system GLib, both with nstext, and the two must lay out and
+    # the system GLib, and the two must lay out and
     # paint the fixtures byte for byte alike; see docs/porting-to-sdl.md,
     # stage 6.5.
     name: gcc on ubuntu-26.04, nscore against GLib
@@ -532,8 +413,8 @@ jobs:
 
       - name: Configure and build on GLib and on nscore
         run: |
-          meson setup build-sys --werror -Db_lto=false -Dpdfjs=disabled -Dtext=native -Dglib=system
-          meson setup build-nat --werror -Db_lto=false -Dpdfjs=disabled -Dtext=native -Dglib=native
+          meson setup build-sys --werror -Db_lto=false -Dpdfjs=disabled -Dglib=system
+          meson setup build-nat --werror -Db_lto=false -Dpdfjs=disabled -Dglib=native
           meson compile -C build-nat
           meson compile -C build-sys
 

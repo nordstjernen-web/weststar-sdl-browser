@@ -1,7 +1,7 @@
 /* Weststar SDL Browser — nstext, the text layout library without Pango.
  *
- * The part of Pango's API the engine calls (the ns_pango_* names of the
- * in-tree fork, src/web-text-lib/), implemented on HarfBuzz, FriBidi and
+ * The part of Pango's API the engine calls (under the ns_pango_* names of
+ * the Pango fork it replaced, web-text-lib), implemented on HarfBuzz, FriBidi and
  * FreeType with fonts from fontconfig or nsfc and glyphs drawn with gfx.
  * There is no GObject and no GLib here: the types are plain C, and a
  * gboolean argument is an int as GLib's is. See docs/text-layout.md.

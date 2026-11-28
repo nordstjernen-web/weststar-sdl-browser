@@ -138,14 +138,13 @@ message('weststar build profile: ' +
         (ns_is_release ? ns_release_profile
                        : 'development (debug symbols + frame pointer + hardened)'))
 
-# web-text-lib enforces the text-stack floors from inside its own build, where
-# a too-old library surfaces as a bare version mismatch and only the first of
-# several is reported. Checking every floor here first names them all at once.
-# The floors are named once here and reused by every dependency() call on
-# these libraries, here and in src/web-text-lib/.
+# A too-old library would surface at its own dependency() call as a bare
+# version mismatch, and only the first of several would be reported.
+# Checking every floor here first names them all at once. The floors are
+# named once here and reused by every dependency() call on these
+# libraries, here and in src/text/.
 ns_floors = {
   'glib-2.0': '>=2.80',
-  'gobject-2.0': '>=2.80',
   'harfbuzz': '>=8.3',
   'fribidi': '>=1.0.6',
   'fontconfig': '>=2.15',
@@ -169,8 +168,8 @@ foreach name, floor : ns_floors
   if name == 'fontconfig' and not get_option('fontconfig').enabled()
     continue
   endif
-  # GLib and GObject may come from the pinned subproject instead.
-  if get_option('glib') != 'system' and (name == 'glib-2.0' or name == 'gobject-2.0')
+  # GLib may come from the pinned subproject instead.
+  if get_option('glib') != 'system' and name == 'glib-2.0'
     continue
   endif
   if not dependency(name, version: floor, required: false).found()
@@ -209,26 +208,18 @@ else
   sdl_dep = dependency('sdl3', version: ns_floors['sdl3'])
 endif
 
-# GLib and GObject: the system's, or with -Dglib=bundled the part of them
-# the browser uses, built statically from the pinned release
-# (subprojects/glib.wrap and packagefiles/glib/).
-# With -Dglib=native neither: nscore (src/core/) takes GLib's place under
-# its names, declared further down, once every project argument is set.
+# GLib: the system's, or with -Dglib=bundled the part of it the browser
+# uses, built statically from the pinned release (subprojects/glib.wrap
+# and packagefiles/glib/). With -Dglib=native none: nscore (src/core/)
+# takes GLib's place under its names, declared further down, once every
+# project argument is set. GObject is not used.
 ns_glib = get_option('glib')
 if ns_glib == 'native'
-  if get_option('text') != 'native'
-    error('-Dglib=native needs -Dtext=native: web-text-lib, the Pango fork ' +
-          'of -Dtext=pango, is built on GLib and GObject')
-  endif
-  glib    = dependency('', required: false)
-  gobject = dependency('', required: false)
+  glib = dependency('', required: false)
 elif ns_glib == 'bundled'
-  glib_proj = subproject('glib')
-  glib    = glib_proj.get_variable('glib_dep')
-  gobject = glib_proj.get_variable('gobject_dep')
+  glib = subproject('glib').get_variable('glib_dep')
 else
-  glib    = dependency('glib-2.0', version: ns_floors['glib-2.0'])
-  gobject = dependency('gobject-2.0', version: ns_floors['gobject-2.0'])
+  glib = dependency('glib-2.0', version: ns_floors['glib-2.0'])
 endif
 
 # The chrome is drawn with Nuklear, vendored in subprojects/nuklear.
@@ -580,7 +571,7 @@ summary({
   'Built-in CA certificates': have_ca_bundle ? get_option('ca_bundle') : 'none',
   'GLib': ns_glib == 'native' ? 'none (nscore, in tree)' : ns_glib + ' ' + glib.version(),
   'Fonts found by': have_system_fontconfig ? 'fontconfig ' + libfontconfig.version() : 'nsfc (in tree)',
-  'Text layout': get_option('text') == 'native' ? 'nstext (in tree, no Pango or GObject)' : 'web-text-lib (in-tree Pango fork)',
+  'Text layout': 'nstext (in tree)',
   'Bundled fallback fonts': bundled_fonts_source,
   'Windows XP': ns_winxp,
 }, section: 'Features')
@@ -602,11 +593,10 @@ int ns_embed_probe_len(void) { return (int)sizeof ns_embed_probe; }
   werror: true,
   name: 'C23 #embed')
 
-# Text is shaped through web-text-lib (src/web-text-lib/), the in-tree Pango
-# fork that caches finished glyph strings across layouts; every symbol in it
-# is renamed, because GTK loads the system Pango into the same process. It
-# declares targets, so it comes after the last project argument. It draws
-# with gfx (src/gfx/), the browser's rasterizer, which comes first.
+# The libraries in the tree declare targets, so they come after the last
+# project argument. Text is laid out by nstext (src/text/), on HarfBuzz,
+# FriBidi and FreeType; it draws with gfx (src/gfx/), the browser's
+# rasterizer, which comes first.
 subdir('src/gfx')
 subdir('src/plat')
 subdir('src/fc')
@@ -615,29 +605,16 @@ subdir('src/core')
 if ns_glib == 'native'
   glib = nscore_dep
 endif
-# -Dtext=native: nstext (src/text/), the same API without Pango or GObject.
-ns_text = get_option('text')
-if ns_text == 'native'
-  subdir('src/text')
-  pango       = nstext_dep
-  pangogfx    = dependency('', required: false)
-  libpangoft2 = dependency('', required: false)
-  ns_engine_gobject = dependency('', required: false)
-else
-  subdir('src/web-text-lib')
-  pango       = web_text_dep
-  pangogfx    = web_text_gfx_dep
-  libpangoft2 = web_text_fc_dep
-  ns_engine_gobject = gobject
-endif
+subdir('src/text')
 
 subdir('src')
 
 # Prints the layout and a hash of the pixels of ellipsized and justified
-# text (the middle ellipsis too, which CSS does not reach), with whichever
-# text library is built; the outputs of a pango and a native build should
-# be the same (docs/text-layout.md).
-executable('text-layout-dump',
+# text (the middle ellipsis too, which CSS does not reach): run before and
+# after a change to nstext and compare (docs/text-layout.md). As a test it
+# only has to lay every case out without failing; what it prints depends
+# on the fonts installed.
+text_layout_dump = executable('text-layout-dump',
   files(
     'src/text/tests/text-layout-dump.c',
     'src/plat/ns_env.c',
@@ -646,8 +623,9 @@ executable('text-layout-dump',
     'src/plat/ns_sdl2.c',
     'src/plat/ns_sys.c',
   ),
-  dependencies: [pango, pangogfx, weststar_gfx_dep, sdl_dep, libm] + ns_plat_test_win_libs,
+  dependencies: [nstext_dep, weststar_gfx_dep, sdl_dep, libm] + ns_plat_test_win_libs,
   include_directories: include_directories('src'),
   pie: host_machine.system() != 'windows',
   build_by_default: false,
 )
+test('text-layout-dump', text_layout_dump, suite: 'text')

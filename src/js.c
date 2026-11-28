@@ -23,7 +23,7 @@
 #include <zlib.h>
 
 #include <curl/curl.h>
-#include <glib-object.h>
+#include <glib.h>
 #include "mime_guess.h"
 #include "ns_pango.h"
 

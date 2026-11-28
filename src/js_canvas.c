@@ -9,7 +9,7 @@
 #include <math.h>
 #include <string.h>
 
-#include <glib-object.h>
+#include <glib.h>
 #include "gfx.h"
 #include "ns_pango.h"
 

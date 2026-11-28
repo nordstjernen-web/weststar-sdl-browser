@@ -17,7 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <glib-object.h>
+#include <glib.h>
 #include "mime_guess.h"
 #include "psl.h"
 

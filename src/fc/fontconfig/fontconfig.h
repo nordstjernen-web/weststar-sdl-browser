@@ -5,7 +5,7 @@
  *
  * This header stands in for <fontconfig/fontconfig.h> when the build is
  * configured with -Dfontconfig=disabled (or fontconfig is not installed):
- * web-text-lib's font map and the engine keep calling Fc* functions, and
+ * nstext's font map and the engine keep calling Fc* functions, and
  * get nsfc's. The names, types and constants are fontconfig's; only what
  * Weststar calls is here. See docs/porting-to-sdl.md.
  */

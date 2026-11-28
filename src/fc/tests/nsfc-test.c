@@ -225,7 +225,7 @@ make_fonts(void)
     return set;
 }
 
-/* A request as web-text-lib's font map builds it. */
+/* A request as nstext's font map builds it. */
 static FcPattern *
 make_request(const char *families, int weight, int slant, const char *lang,
              bool color)

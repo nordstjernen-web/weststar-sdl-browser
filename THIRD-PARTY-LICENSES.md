@@ -33,33 +33,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 implied. See the License for the specific language governing permissions
 and limitations under the License.
 
-### web-text-lib — GNU LGPL 2.1 or later
-
-> Text itemization, shaping and line breaking. Nordstjernen's fork of
-> Pango, carrying a process-wide glyph-string cache and a per-context
-> metrics cache, trimmed to what the browser calls, with every symbol
-> renamed to `ns_pango_*` / `NsPango*` so it can coexist with the system
-> Pango that GTK loads into the same process. Vendored in
-> `src/web-text-lib/` (shared with Nordstjernen Sol) and linked
-> statically.
-> <https://github.com/nordstjernen-web/nordstjernen-sol-browser/tree/main/src/web-text-lib>,
-> <https://gitlab.gnome.org/GNOME/pango>
->
-> Copyright the GNU Project, the Pango contributors, and the
-> Nordstjernen contributors. See `src/web-text-lib/COPYING`.
-
-Licensed under the GNU Lesser General Public License version 2.1, or (at
-your option) any later version. The full license text is available at:
-
-  <https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html>
-
-Because web-text-lib is linked statically rather than dynamically, LGPL
-section 6 is satisfied through source availability: the library's
-complete source ships in `src/web-text-lib/` alongside Nordstjernen Web
-Browser's own GPL-3.0-or-later source, so a recipient can modify the
-library and rebuild the binary against it.
-
-### nstext — parts from Pango (GNU LGPL 2.0 or later) and Google (Apache License 2.0) (optional, `-Dtext=native`)
+### nstext — parts from Pango (GNU LGPL 2.0 or later) and Google (Apache License 2.0)
 
 > Weststar's text layout without Pango, in `src/text/`. Ported from
 > Pango and pangogfx, keeping their LGPL-2.0-or-later headers: line
@@ -72,10 +46,20 @@ library and rebuild the binary against it.
 > `nstext-language-sample-table.h`, `nstext-script-lang-table.h`). The
 > emoji presentation scanner (`nstext-emoji-scanner.c`, Copyright 2019
 > Google LLC) is under the Apache License 2.0, as in Pango. The rest is
-> Weststar's own (GPL-3.0-or-later). Linked statically, with its complete
-> source in `src/text/`: the LGPL is met by source availability, as for
-> web-text-lib above.
+> Weststar's own (GPL-3.0-or-later).
 > <https://gitlab.gnome.org/GNOME/pango>
+>
+> Copyright Red Hat Software, Google and the Pango and Chromium
+> authors, as the header of each file names them.
+
+The LGPL parts are licensed under the GNU Library General Public License
+version 2, or (at your option) any later version; the full text is at
+<https://www.gnu.org/licenses/old-licenses/lgpl-2.0.html>. nstext is
+linked statically, so the LGPL's terms for that are met by source
+availability: the complete source of these files ships in `src/text/`
+alongside the browser's own GPL-3.0-or-later source, so a recipient can
+modify them and rebuild the binary. The Apache License 2.0, for the
+emoji scanner, is at <http://www.apache.org/licenses/LICENSE-2.0>.
 
 ### nscore — after GLib's design (with `-Dglib=native`)
 
@@ -561,11 +545,11 @@ them, their notices apply:
 - **FreeType** — FreeType License (BSD-style with credit clause) or GNU
   GPL 2.0, at your option, © The FreeType Project.
 - **HarfBuzz** — MIT ("Old MIT") License, © the HarfBuzz contributors.
-  Text shaping, called by web-text-lib.
+  Text shaping, called by nstext.
 - **GNU FriBidi** — GNU LGPL 2.1 or later, © the FriBidi contributors.
-  Bidirectional text, called by web-text-lib.
+  Bidirectional text, called by nstext.
 - **libthai** — GNU LGPL 2.1 or later, © the libthai contributors.
-  Optional Thai word breaking in web-text-lib, linked when present.
+  Optional Thai word breaking in nstext, linked when present.
 - **Enchant** — GNU LGPL 2.1 or later, © the AbiSource / Enchant
   contributors. Optional on-screen spell-checking.
 - **opusfile / libopus / vorbisfile / libvorbis / libogg** — BSD 3-Clause,
@@ -620,6 +604,5 @@ files name them under `diff_files`. The original QuickJS ships no meson
 build, so `subprojects/packagefiles/quickjs/meson.build` is also laid over
 its checkout (`patch_directory` in `subprojects/quickjs.wrap`). A system lexbor or quickjs-ng, which
 the build prefers when it finds one, does not carry them. pl_mpeg carries its local change in
-the vendored copy directly, as does web-text-lib, whose changes from
-upstream Pango are described in `src/web-text-lib/README.md`. Northstar Web Browser's own source is
+the vendored copy directly. Northstar Web Browser's own source is
 GPL-3.0-or-later.

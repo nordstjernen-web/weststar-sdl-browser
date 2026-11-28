@@ -1,8 +1,8 @@
 /* Weststar SDL Browser — nstext: drawing layouts with gfx. Lines are
  * drawn run by run as Pango's renderer draws them (pango-renderer.c:
  * backgrounds, glyphs, then underlines, overlines and strikethroughs
- * merged across runs), and glyphs as the fork's gfx backend draws them
- * (src/web-text-lib/pangogfx-render.c: cached FreeType bitmaps at the
+ * merged across runs), and glyphs as the Pango fork's gfx backend drew
+ * them (web-text-lib's pangogfx-render.c: cached FreeType bitmaps at the
  * device's resolution, quarter-pixel phases, outlines otherwise, colour
  * glyphs as they are, hex boxes for missing characters).
  *

@@ -1,4 +1,4 @@
-# nstext — the text layout library without Pango (meson -Dtext=native):
+# nstext — the browser's text layout library, without Pango:
 # the ns_pango_* API the engine calls, on HarfBuzz, FriBidi and FreeType,
 # with fonts from fontconfig or nsfc, drawn with gfx. No GLib, no GObject.
 # Public surface: `nstext_dep`. See docs/text-layout.md.
@@ -38,12 +38,10 @@ nstext_lib = static_library('nstext',
   ),
   dependencies: nstext_deps,
   include_directories: [include_directories('.'), include_directories('..')],
-  c_args: ['-DNS_TEXT_NATIVE'],
 )
 
 nstext_dep = declare_dependency(
   link_with: nstext_lib,
   include_directories: include_directories('..'),
-  compile_args: ['-DNS_TEXT_NATIVE'],
   dependencies: nstext_deps,
 )

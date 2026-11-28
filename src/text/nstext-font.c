@@ -7,9 +7,9 @@
  * FcFontSetSort for the fallbacks, over the SFNT fonts of fontconfig's
  * system and application sets (or nsfc's, without fontconfig). A font is
  * a HarfBuzz font at the pattern's pixel size; its glyphs are measured
- * (hinted) and rasterized with FreeType, as the fork's gfx backend
- * (src/web-text-lib/pangogfx-font.c) does, whose rasterizing code this
- * follows.
+ * (hinted) and rasterized with FreeType, as the gfx backend of the Pango
+ * fork nstext replaced (web-text-lib's pangogfx-font.c) did, whose
+ * rasterizing code this follows.
  *
  * Copyright (C) 2000-2005 Red Hat Software (pangofc, pangocairo)
  * Copyright 2026 Andreas Røsdal

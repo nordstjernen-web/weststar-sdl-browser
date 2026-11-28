@@ -143,6 +143,11 @@ jobs:
           NSFC_TEST_FONT="C:/Windows/Fonts/arial.ttf" \
             meson test -C builddir --suite nsfc --suite plat --print-errorlogs
 
+      - name: Text layout test
+        # text-layout-dump lays out ellipsized and justified text, the
+        # middle ellipsis too (docs/text-layout.md).
+        run: meson test -C builddir --suite text --print-errorlogs
+
       - name: Public Suffix List, against libpsl
         # The list is compiled in (src/psl.c): the browser imports no
         # libpsl, which is here as curl's, and which this test asks the
@@ -231,15 +236,15 @@ jobs:
           awk '/text lines/ { split($5, r, /\.\./); n = $3 + 0; t = r[1] + 0; b = r[2] + 0; ok = (n == 600 && t >= -1 && t <= 4 && b >= 13676 && b <= 13681) } END { exit !ok }' pitch.txt
 
       # nscore (-Dglib=native, src/core/) in place of GLib, beside the
-      # same browser on the system GLib, both with nstext: no GLib DLL may
+      # same browser on the system GLib: no GLib DLL may
       # be imported, and the two must lay out and paint the fixtures byte
       # for byte alike (docs/porting-to-sdl.md, stage 6.5).
       - name: Build on GLib and on nscore (-Dglib=native)
         run: |
           export CC="ccache clang"
           export CC_LD=lld
-          meson setup build-sys --werror -Db_lto=false -Dpdfjs=disabled -Dtext=native -Dglib=system
-          meson setup build-nat --werror -Db_lto=false -Dpdfjs=disabled -Dtext=native -Dglib=native
+          meson setup build-sys --werror -Db_lto=false -Dpdfjs=disabled -Dglib=system
+          meson setup build-nat --werror -Db_lto=false -Dpdfjs=disabled -Dglib=native
           meson compile -C build-nat
           meson compile -C build-sys
 

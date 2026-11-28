@@ -1,11 +1,12 @@
-/* Weststar SDL Browser — prints how the text library lays out and draws a
- * set of ellipsized and justified layouts, including the middle
- * ellipsis, which no CSS reaches. Built with either library
- * (-Dtext=pango or -Dtext=native); the two outputs should be the same
- * (docs/text-layout.md):
+/* Weststar SDL Browser — prints how nstext lays out and draws a set of
+ * ellipsized and justified layouts, including the middle ellipsis, which
+ * no CSS reaches. Run before and after a change to nstext, the outputs
+ * show what it moved (docs/text-layout.md):
  *
- *   build-pango/text-layout-dump > a.txt
- *   build-native/text-layout-dump > b.txt && diff a.txt b.txt
+ *   ninja -C builddir text-layout-dump
+ *   builddir/text-layout-dump > before.txt
+ *   (change, rebuild)
+ *   builddir/text-layout-dump > after.txt && diff before.txt after.txt
  *
  * Every layout prints its size, each line's start, length and extents,
  * the position of each character and a hash of its pixels; with a
@@ -232,11 +233,7 @@ main (int argc, char **argv)
   for (i = 0; i < sizeof cases / sizeof cases[0]; i++)
     dump_case (context, &cases[i], argc > 1 ? argv[1] : NULL);
 
-#ifdef NS_TEXT_NATIVE
   ns_pango_context_unref (context);
-#else
-  g_object_unref (context);
-#endif
   gfx_destroy (g);
   gfx_surface_destroy (surface);
   return 0;

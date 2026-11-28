@@ -10,7 +10,7 @@
 #include "brand.h"
 #include "bytes.h"
 
-#include <glib-object.h>
+#include <glib.h>
 #include "ns_pango.h"
 #include <stdio.h>
 #include <string.h>

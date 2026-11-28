@@ -251,10 +251,7 @@ endif
 northstar_deps = [
   sdl_dep,
   glib,
-  ns_engine_gobject,
-  pango,
-  pangogfx,
-  libpangoft2,
+  nstext_dep,
   libcurl,
   libcrypto,
   libm,

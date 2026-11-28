@@ -7,7 +7,6 @@
 #ifndef NS_NET_H
 #define NS_NET_H
 
-#include <glib-object.h>
 #include <glib.h>
 
 #include "fetch_policy.h"

@@ -3347,7 +3347,7 @@ about_diagnostics_html(void)
                                         SDL_VERSIONNUM_MICRO(sdlv));
     diag_kv(s, NS_SDL_NAME, sdl_version);
     g_free(sdl_version);
-    diag_kv(s, "Pango", ns_pango_version_string());
+    diag_kv(s, "Text layout", ns_pango_version_string());
     diag_kv(s, "SQLite", sqlite3_libversion());
     diag_kv(s, "TLS / crypto", ns_crypto_library_version());
     diag_kv(s, "Networking", curl_version());
