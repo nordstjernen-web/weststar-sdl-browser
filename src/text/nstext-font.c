@@ -1610,8 +1610,13 @@ font_map_load_fontset_scaled (NsPangoFontMap *fontmap, const NsPangoFontDescript
 
   {
     FcFontSet *all = font_map_all_fonts (fontmap);
+    /* The current configuration, named: fontconfig's FcFontSetSort (2.17)
+     * reads config->prefer_app_fonts without looking up a NULL config, as
+     * FcFontSort does; the set functions are given it alike. */
+    FcConfig *config = FcConfigReference (NULL);
 
-    fs->match = FcFontSetMatch (NULL, &all, 1, fs->pattern, &result);
+    fs->match = FcFontSetMatch (config, &all, 1, fs->pattern, &result);
+    FcConfigDestroy (config);
   }
   fs->char_cache = nt_hash_new (NULL);
 
@@ -1647,9 +1652,13 @@ nt_fontset_get_font_at (NtFontset *fs, int i)
           if (!fs->sort_done)
             {
               FcFontSet *all = font_map_all_fonts (fontmap);
+              FcConfig *config = FcConfigReference (NULL); /* see above */
               FcResult result;
 
-              fs->sorted = FcFontSetSort (NULL, &all, 1, fs->pattern, FcTrue, NULL, &result);
+              fs->sorted = config ? FcFontSetSort (config, &all, 1, fs->pattern,
+                                                   FcTrue, NULL, &result)
+                                  : NULL;
+              FcConfigDestroy (config);
               fs->sort_done = TRUE;
             }
           /* The sorted list's first is the match. */
